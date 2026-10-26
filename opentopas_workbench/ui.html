@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="%LANG%">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OpenTOPAS Workbench</title>
+<style>
+:root{
+  color-scheme: light;
+  --bg:#f4f6f8; --card:#ffffff; --sunken:#eef1f4; --ink:#111827; --mute:#4b5563; --line:#c9d0d8;
+  --acc:#1d4ed8; --acc-ink:#ffffff; --link:#1d4ed8; --ok:#15803d; --warn:#b45309; --err:#b91c1c; --sel:#dbe7ff;
+  --focus:#f59e0b;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  color-scheme: dark;
+  --bg:#0f1318; --card:#171c23; --sunken:#0b0f13; --ink:#f1f4f8; --mute:#b4bcc8; --line:#3a4452;
+  --acc:#7fb0ff; --acc-ink:#0b1220; --link:#9cc2ff; --ok:#5fd38a; --warn:#fbbf24; --err:#ff8a8a; --sel:#22324d;
+}}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --bg:#0f1318; --card:#171c23; --sunken:#0b0f13; --ink:#f1f4f8; --mute:#b4bcc8; --line:#3a4452;
+  --acc:#7fb0ff; --acc-ink:#0b1220; --link:#9cc2ff; --ok:#5fd38a; --warn:#fbbf24; --err:#ff8a8a; --sel:#22324d;
+}
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 system-ui,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+a{color:var(--link);text-decoration:underline;text-underline-offset:2px}
+:focus-visible{outline:3px solid var(--focus);outline-offset:1px}
+header{position:sticky;top:0;z-index:5;background:var(--card);border-bottom:1px solid var(--line);padding:10px 16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+header h1{font-size:17px;margin:0 12px 0 0}
+nav{display:flex;gap:4px;flex-wrap:wrap}
+nav button[aria-selected="true"]{background:var(--acc);color:var(--acc-ink);border-color:var(--acc)}
+.spacer{flex:1}
+main{padding:16px;max-width:1500px;margin:0 auto}
+.tab{display:none}.tab.on{display:grid;gap:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
+h2{font-size:15px;margin:0 0 10px}
+.split{display:grid;grid-template-columns:minmax(340px,1fr) 1.4fr;gap:16px}
+@media (max-width:980px){.split{grid-template-columns:1fr}}
+button,select,input,textarea{font:inherit;color:var(--ink)}
+button{padding:6px 12px;border:1px solid var(--line);border-radius:7px;background:var(--sunken);cursor:pointer}
+button:hover{border-color:var(--acc)}
+button.pri{background:var(--acc);color:var(--acc-ink);border-color:var(--acc);font-weight:600}
+button:disabled{opacity:.45;cursor:default}
+select,input{padding:5px 8px;border:1px solid var(--line);border-radius:7px;background:var(--sunken)}
+textarea{width:100%;min-height:440px;padding:8px;border:1px solid var(--line);border-radius:7px;background:var(--sunken);font:13px/1.45 ui-monospace,Consolas,"Cascadia Mono",monospace;tab-size:4}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
+.mute{color:var(--mute)}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{border-bottom:1px solid var(--line);padding:5px 8px;text-align:left;white-space:nowrap}
+th{position:sticky;top:0;background:var(--card);font-weight:600}
+tbody tr:hover{background:var(--sel)}
+tr.sel{background:var(--sel)}
+.scroll{max-height:520px;overflow:auto;border:1px solid var(--line);border-radius:7px}
+.st-done{color:var(--ok);font-weight:600}.st-failed,.st-aborted,.st-stopped{color:var(--err);font-weight:600}
+.st-running{color:var(--acc);font-weight:600}.st-queued{color:var(--warn);font-weight:600}.st-removed{color:var(--mute)}
+pre{background:var(--sunken);border:1px solid var(--line);border-radius:7px;padding:8px;max-height:340px;overflow:auto;font:12.5px/1.4 ui-monospace,Consolas,monospace;white-space:pre-wrap;margin:0}
+.lint{font-size:13px;margin-top:8px}.lint .error{color:var(--err)}.lint .warn{color:var(--warn)}
+.chips label,.grid2 .chips label{display:inline-flex;flex-direction:row;gap:5px;align-items:center;margin:3px 14px 3px 0}
+pre:empty{display:none}
+.grid2{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px 16px}
+.grid2 label{display:flex;flex-direction:column;gap:3px;font-size:14px}
+.imgs{display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:12px}
+.imgs img{width:100%;border:1px solid var(--line);border-radius:7px;background:#fff}
+canvas{width:100%;height:440px;border:1px solid var(--line);border-radius:7px;background:var(--card)}
+.badge{padding:2px 8px;border-radius:999px;background:var(--sunken);border:1px solid var(--line);font-size:13px}
+.metrics td{font-variant-numeric:tabular-nums}
+.hl-c{color:var(--mute)}.hl-t{color:var(--acc);font-weight:600}.hl-n{color:var(--ok)}.hl-s{color:var(--warn)}
+</style>
+</head>
+<body>
+<header>
+  <h1>OpenTOPAS Workbench</h1>
+  <nav role="tablist">
+    <button role="tab" data-tab="files" data-i18n="tab_files"></button>
+    <button role="tab" data-tab="run" data-i18n="tab_run"></button>
+    <button role="tab" data-tab="results" data-i18n="tab_results"></button>
+    <button role="tab" data-tab="gen" data-i18n="tab_gen"></button>
+    <button role="tab" data-tab="settings" data-i18n="tab_settings"></button>
+  </nav>
+  <span class="spacer"></span>
+  <span id="runBadge" class="badge" hidden></span>
+  <select id="langSel" aria-label="Language"><option value="de">Deutsch</option><option value="en">English</option></select>
+  <select id="themeSel" aria-label="Theme"><option value="auto" data-i18n="theme_auto"></option><option value="light" data-i18n="theme_light"></option><option value="dark" data-i18n="theme_dark"></option></select>
+</header>
+<main>
+
+<!-- FILES -->
+<section id="files" class="tab">
+  <div class="split">
+    <div class="card">
+      <h2 data-i18n="files_title"></h2>
+      <div class="row" id="crumbs"></div>
+      <div class="scroll"><table><thead><tr><th data-i18n="col_name"></th><th data-i18n="col_size"></th><th data-i18n="col_mtime"></th></tr></thead><tbody id="fmBody"></tbody></table></div>
+      <div class="row" style="margin-top:10px"><input id="fmName" style="flex:1;min-width:220px" data-i18n-ph="fm_name_ph"></div>
+      <div class="row">
+        <button id="fmNewDir" data-i18n="fm_newdir"></button><button id="fmNewFile" data-i18n="fm_newfile"></button>
+        <button id="fmMove" data-i18n="fm_move"></button><button id="fmCopy" data-i18n="fm_copy"></button>
+        <button id="fmTrash" data-i18n="fm_trash"></button><button id="fmQueue" data-i18n="fm_queue"></button>
+      </div>
+      <p class="mute" id="fmMsg" role="status"></p>
+    </div>
+    <div class="card">
+      <h2 id="fmTitle" data-i18n="preview"></h2>
+      <div id="fmView" class="mute" data-i18n="fm_hint"></div>
+      <textarea id="fmEd" spellcheck="false" hidden></textarea>
+      <div class="row" style="margin-top:8px"><button class="pri" id="fmSave" hidden data-i18n="save"></button><button id="fmLint" hidden data-i18n="check"></button><span id="fmSaveMsg" class="mute" role="status"></span></div>
+      <div id="fmLintOut" class="lint"></div>
+    </div>
+  </div>
+</section>
+
+<!-- RUN -->
+<section id="run" class="tab">
+  <div class="split">
+    <div class="card">
+      <h2 data-i18n="run_files"></h2>
+      <div class="row"><input id="rfFilter" style="flex:1" data-i18n-ph="filter_ph"><label><input type="checkbox" id="rfOpen"> <span data-i18n="only_not_done"></span></label></div>
+      <div class="row">
+        <label><span data-i18n="binary"></span> <select id="rfBin"></select></label>
+        <label><span data-i18n="subdir"></span> <input id="rfSub" size="12" data-i18n-ph="subdir_ph"></label>
+        <label><input type="checkbox" id="rfSkip" checked> <span data-i18n="skip_existing"></span></label>
+      </div>
+      <div class="row"><button id="rfAll" data-i18n="select_all"></button><button id="rfNone" data-i18n="select_none"></button><button class="pri" id="rfRun" data-i18n="enqueue"></button><span id="rfMsg" class="mute" role="status"></span></div>
+      <div class="scroll"><table><thead><tr><th></th><th data-i18n="col_file"></th><th data-i18n="col_last"></th></tr></thead><tbody id="rfBody"></tbody></table></div>
+    </div>
+    <div class="card">
+      <h2 data-i18n="queue"></h2>
+      <div class="row"><button id="qStop" data-i18n="stop_current"></button><button id="qRemove" data-i18n="remove_queued"></button><button id="qClear" data-i18n="clear_history"></button></div>
+      <div class="scroll" style="max-height:300px"><table><thead><tr><th>#</th><th data-i18n="col_file"></th><th data-i18n="binary"></th><th data-i18n="col_status"></th><th data-i18n="col_time"></th></tr></thead><tbody id="qBody"></tbody></table></div>
+      <h2 style="margin-top:14px" id="logTitle" data-i18n="log"></h2>
+      <pre id="logOut"></pre>
+      <div id="jobOut" class="row" style="margin-top:8px"></div>
+    </div>
+  </div>
+</section>
+
+<!-- RESULTS -->
+<section id="results" class="tab">
+  <div class="split">
+    <div class="card">
+      <h2 data-i18n="res_files"></h2>
+      <div class="row" id="resCrumbs"></div>
+      <div class="row"><input id="resFilter" style="flex:1" data-i18n-ph="filter_ph"></div>
+      <div class="scroll"><table><thead><tr><th></th><th data-i18n="col_name"></th><th data-i18n="col_mtime"></th></tr></thead><tbody id="resBody"></tbody></table></div>
+      <p class="mute" data-i18n="res_hint"></p>
+    </div>
+    <div class="card">
+      <h2 id="plotTitle" data-i18n="plot"></h2>
+      <div class="row">
+        <label><span data-i18n="statistic"></span> <select id="plStat"></select></label>
+        <label><span data-i18n="normalize"></span> <select id="plNorm"><option value="none" data-i18n="norm_none"></option><option value="max" data-i18n="norm_max"></option><option value="first" data-i18n="norm_first"></option><option value="sum" data-i18n="norm_sum"></option></select></label>
+        <label><input type="checkbox" id="plLog"> <span data-i18n="log_y"></span></label>
+        <label><input type="checkbox" id="plBragg" checked> <span data-i18n="bragg"></span></label>
+        <label hidden id="plCollapseL"><span data-i18n="collapse"></span> <select id="plCollapse"><option value="0">X</option><option value="1">Y</option><option value="2" selected>Z</option></select></label>
+        <button id="plPng" data-i18n="save_png"></button>
+      </div>
+      <canvas id="plot" width="1200" height="560" aria-label="plot"></canvas>
+      <div id="plMetrics"></div>
+      <h2 style="margin-top:14px" data-i18n="images"></h2>
+      <div class="imgs" id="resImgs"></div>
+    </div>
+  </div>
+</section>
+
+<!-- GENERATORS -->
+<section id="gen" class="tab">
+  <div class="card">
+    <h2 data-i18n="gen_title"></h2>
+    <div class="row"><label><span data-i18n="generator"></span> <select id="genSel"></select></label><span id="genDesc" class="mute"></span></div>
+    <div class="grid2" id="genForm"></div>
+    <div class="row" style="margin-top:12px">
+      <label><span data-i18n="target_folder"></span> <input id="genFolder" size="24"></label>
+      <label><input type="checkbox" id="genOver"> <span data-i18n="overwrite"></span></label>
+      <button id="genPrev" data-i18n="preview"></button><button class="pri" id="genMake" data-i18n="create"></button><span id="genMsg" class="mute" role="status"></span>
+    </div>
+    <pre id="genOut"></pre>
+  </div>
+</section>
+
+<!-- SETTINGS -->
+<section id="settings" class="tab">
+  <div class="card">
+    <h2 data-i18n="set_title"></h2>
+    <p><span data-i18n="workspace"></span>: <code id="setRoot"></code></p>
+    <p class="mute" data-i18n="set_ws_hint"></p>
+    <h2 data-i18n="binaries"></h2>
+    <p class="mute" data-i18n="bin_hint"></p>
+    <div id="binList"></div>
+    <div class="row"><button id="binAdd" data-i18n="bin_add"></button><button id="binDetect" data-i18n="bin_detect"></button><button class="pri" id="binSave" data-i18n="save"></button><span id="binMsg" class="mute" role="status"></span></div>
+    <p class="mute">OpenTOPAS Workbench <span id="ver"></span></p>
+  </div>
+</section>
+</main>
+
+<script>
+const TOKEN="%TOKEN%";
+const I18N={
+ de:{tab_files:"Dateien",tab_run:"Läufe",tab_results:"Ergebnisse",tab_gen:"Generatoren",tab_settings:"Einstellungen",
+  theme_auto:"Design: System",theme_light:"Hell",theme_dark:"Dunkel",
+  files_title:"Arbeitsordner",col_name:"Name",col_size:"Größe",col_mtime:"Geändert",col_file:"Datei",col_last:"Letzter Lauf",col_status:"Status",col_time:"Zeit",
+  fm_name_ph:"Name oder Ziel, z. B. neu.txt oder ordner/kopie.txt",fm_newdir:"Neuer Ordner",fm_newfile:"Neue Datei",fm_move:"Umbenennen / Verschieben",fm_copy:"Kopieren",fm_trash:"In Papierkorb",fm_queue:"Rechnen",
+  fm_hint:"Eintrag anklicken zum Auswählen, Ordner doppelklicken zum Öffnen. Gelöschtes landet in _trash.",preview:"Vorschau",save:"Speichern",check:"Prüfen",
+  saved:"gespeichert",select_first:"Erst einen Eintrag auswählen.",enter_name:"Bitte einen Namen eingeben.",entries:"Einträge",no_preview:"Keine Vorschau für diesen Dateityp.",folder_hint:"Ordner. Doppelklick öffnet ihn.",
+  lint_ok:"Keine Auffälligkeiten.",lint_syntax:"Zeile nicht lesbar",lint_notype:"Typ fehlt (d:, s:, i:, b:, u: …)",lint_bool:"Boolean erwartet (\"True\"/\"False\")",lint_string:"String ohne Anführungszeichen",lint_unit:"Einheit fehlt",lint_int:"Ganzzahl erwartet",lint_count:"Anzahl passt nicht zur Vektorlänge",line:"Zeile",
+  run_files:"Parameterdateien",filter_ph:"Filter",only_not_done:"nur ohne erfolgreichen Lauf",binary:"Programm",subdir:"Ausgabe-Unterordner",subdir_ph:"leer = gleicher Ordner",skip_existing:"vorhandene Ergebnisse überspringen",
+  select_all:"alle",select_none:"keine",enqueue:"In Warteschlange",queue:"Warteschlange",stop_current:"Aktuellen Lauf stoppen",remove_queued:"Wartende entfernen",clear_history:"Verlauf leeren",log:"Log",
+  added:"hinzugefügt",skipped:"übersprungen",nothing_selected:"Nichts ausgewählt.",no_binary:"Kein Programm eingerichtet, siehe Einstellungen.",outputs:"Ausgaben",
+  st_queued:"wartet",st_running:"läuft",st_done:"fertig",st_failed:"Fehler",st_stopped:"gestoppt",st_aborted:"abgebrochen",st_removed:"entfernt",running_badge:"läuft",
+  res_files:"Scorer-Ausgaben (CSV)",res_hint:"Mehrere CSVs anhaken, um 1D-Kurven zu überlagern. 2D/3D-Daten werden als Karte gezeigt.",plot:"Plot",statistic:"Statistik",normalize:"Normierung",
+  norm_none:"keine",norm_max:"auf Maximum",norm_first:"auf Eingang",norm_sum:"auf Fläche",normalized:"normiert",log_y:"log. y-Achse",bragg:"Bragg-Kennzahlen",collapse:"Summieren über",save_png:"Als PNG speichern",images:"Bilder im Ordner",
+  peak:"Peak",gen_title:"Parameterdateien erzeugen",generator:"Generator",target_folder:"Zielordner",overwrite:"vorhandene überschreiben",create:"Anlegen",created:"angelegt",
+  set_title:"Einstellungen",workspace:"Arbeitsordner",set_ws_hint:"Der Arbeitsordner wird beim Start festgelegt: --workspace ORDNER.",binaries:"TOPAS-Programme",
+  bin_hint:"Name, Befehl und Umgebungsvariablen (eine pro Zeile, NAME=WERT). TOPAS 3.9 braucht TOPAS_G4_DATA_DIR.",bin_add:"Programm hinzufügen",bin_detect:"Automatisch erkennen",bin_name:"Name",bin_cmd:"Befehl",bin_env:"Umgebung",remove:"Entfernen",
+  error:"Fehler"},
+ en:{tab_files:"Files",tab_run:"Runs",tab_results:"Results",tab_gen:"Generators",tab_settings:"Settings",
+  theme_auto:"Theme: system",theme_light:"Light",theme_dark:"Dark",
+  files_title:"Workspace",col_name:"Name",col_size:"Size",col_mtime:"Modified",col_file:"File",col_last:"Last run",col_status:"Status",col_time:"Time",
+  fm_name_ph:"Name or target, e.g. new.txt or folder/copy.txt",fm_newdir:"New folder",fm_newfile:"New file",fm_move:"Rename / move",fm_copy:"Copy",fm_trash:"Move to trash",fm_queue:"Run",
+  fm_hint:"Click an entry to select it, double-click a folder to open it. Deleted items go to _trash.",preview:"Preview",save:"Save",check:"Check",
+  saved:"saved",select_first:"Select an entry first.",enter_name:"Please enter a name.",entries:"entries",no_preview:"No preview for this file type.",folder_hint:"Folder. Double-click to open.",
+  lint_ok:"No issues found.",lint_syntax:"Line not readable",lint_notype:"Type missing (d:, s:, i:, b:, u: …)",lint_bool:"Boolean expected (\"True\"/\"False\")",lint_string:"String without quotes",lint_unit:"Unit missing",lint_int:"Integer expected",lint_count:"Count does not match vector length",line:"Line",
+  run_files:"Parameter files",filter_ph:"Filter",only_not_done:"only without a successful run",binary:"Program",subdir:"Output subfolder",subdir_ph:"empty = same folder",skip_existing:"skip existing results",
+  select_all:"all",select_none:"none",enqueue:"Add to queue",queue:"Queue",stop_current:"Stop current run",remove_queued:"Remove waiting",clear_history:"Clear history",log:"Log",
+  added:"added",skipped:"skipped",nothing_selected:"Nothing selected.",no_binary:"No program configured, see Settings.",outputs:"Outputs",
+  st_queued:"waiting",st_running:"running",st_done:"done",st_failed:"failed",st_stopped:"stopped",st_aborted:"aborted",st_removed:"removed",running_badge:"running",
+  res_files:"Scorer output (CSV)",res_hint:"Tick several CSVs to overlay 1D curves. 2D/3D data are shown as a map.",plot:"Plot",statistic:"Statistic",normalize:"Normalise",
+  norm_none:"none",norm_max:"to maximum",norm_first:"to entrance",norm_sum:"to area",normalized:"normalised",log_y:"log y axis",bragg:"Bragg metrics",collapse:"Sum over",save_png:"Save as PNG",images:"Images in folder",
+  peak:"Peak",gen_title:"Generate parameter files",generator:"Generator",target_folder:"Target folder",overwrite:"overwrite existing",create:"Create",created:"created",
+  set_title:"Settings",workspace:"Workspace",set_ws_hint:"The workspace is set at start-up: --workspace FOLDER.",binaries:"TOPAS programs",
+  bin_hint:"Name, command and environment variables (one per line, NAME=VALUE). TOPAS 3.9 needs TOPAS_G4_DATA_DIR.",bin_add:"Add program",bin_detect:"Detect automatically",bin_name:"Name",bin_cmd:"Command",bin_env:"Environment",remove:"Remove",
+  error:"Error"}};
+let LANG=document.documentElement.lang||"de";
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const t=k=>(I18N[LANG]&&I18N[LANG][k])||I18N.en[k]||k;
+const L=o=>o&&typeof o==="object"?(o[LANG]||o.en||Object.values(o)[0]):o;
+function store(k,v){try{localStorage.setItem("wb_"+k,v)}catch(e){}}
+function recall(k){try{return localStorage.getItem("wb_"+k)}catch(e){return null}}
+function applyI18n(){document.documentElement.lang=LANG;document.querySelectorAll("[data-i18n]").forEach(e=>e.textContent=t(e.dataset.i18n));document.querySelectorAll("[data-i18n-ph]").forEach(e=>e.placeholder=t(e.dataset.i18nPh));}
+async function api(path,body){const r=await fetch(path,{method:body?"POST":"GET",headers:{"X-Token":TOKEN,"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});
+ const j=await r.json().catch(()=>({error:r.statusText}));if(!r.ok)throw new Error(j.error||r.status);return j;}
+const fmtSize=b=>b>1e6?(b/1e6).toFixed(1)+" MB":b>1e3?Math.round(b/1e3)+" kB":b+" B";
+const fmtTime=s=>new Date(s*1000).toLocaleString(LANG==="de"?"de-DE":"en-GB",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
+const fileUrl=p=>`/file?p=${encodeURIComponent(p)}&token=${TOKEN}&t=${Date.now()}`;
+
+/* ---------- tabs, language, theme */
+function showTab(id){document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id===id));document.querySelectorAll("nav [role=tab]").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===id));store("tab",id);
+ if(id==="files")fmLoad(FM.path);if(id==="run")loadParams();if(id==="results")resLoad(RS.path);if(id==="gen")loadGens();if(id==="settings")loadSettings();}
+document.querySelectorAll("nav [role=tab]").forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
+$("langSel").value=recall("lang")||((navigator.language||"").toLowerCase().startsWith("de")?"de":"en");LANG=$("langSel").value;
+$("langSel").onchange=e=>{LANG=e.target.value;store("lang",LANG);applyI18n();api("/api/config",{lang:LANG}).catch(()=>{});showTab(recall("tab")||"files");};
+function applyTheme(v){if(v==="auto")document.documentElement.removeAttribute("data-theme");else document.documentElement.dataset.theme=v;}
+$("themeSel").value=recall("theme")||"auto";applyTheme($("themeSel").value);$("themeSel").onchange=e=>{store("theme",e.target.value);applyTheme(e.target.value);if(RS.last)drawPlot();};
+
+/* ---------- files */
+const FM={path:"",sel:null,file:null,dir:false};
+const TEXT=[".txt",".py",".sh",".bat",".json",".csv",".md",".log",".in",".mac",".xml",".header",".binheader"];
+const join=(a,b)=>a?a+"/"+b:b;
+function crumbs(el,path,fn){const parts=path?path.split("/"):[];let acc="";
+ el.innerHTML=`<a href="#" data-p="">${esc(t("workspace"))}</a>`+parts.map(x=>{acc=join(acc,x);return ` / <a href="#" data-p="${esc(acc)}">${esc(x)}</a>`}).join("");
+ el.querySelectorAll("a").forEach(a=>a.onclick=e=>{e.preventDefault();fn(a.dataset.p)});}
+async function fmLoad(p){try{const j=await api("/api/ls?p="+encodeURIComponent(p));FM.path=j.path;FM.sel=null;crumbs($("crumbs"),j.path,fmLoad);
+ const up=j.path?`<tr data-up="1"><td colspan="3"><a href="#">..</a></td></tr>`:"";
+ $("fmBody").innerHTML=up+j.items.map(i=>`<tr tabindex="0" data-n="${esc(i.name)}" data-d="${i.dir?1:0}"><td>${i.dir?"📁 ":""}${esc(i.name)}</td><td>${i.dir?"":fmtSize(i.size)}</td><td class="mute">${fmtTime(i.mtime)}</td></tr>`).join("");
+ $("fmBody").querySelectorAll("tr").forEach(tr=>{if(tr.dataset.up){tr.onclick=()=>fmLoad(j.path.split("/").slice(0,-1).join("/"));return;}
+  tr.onclick=()=>fmSelect(tr);tr.ondblclick=()=>{if(tr.dataset.d==="1")fmLoad(join(FM.path,tr.dataset.n))};tr.onkeydown=e=>{if(e.key==="Enter"){tr.dataset.d==="1"?fmLoad(join(FM.path,tr.dataset.n)):fmSelect(tr)}}});
+ $("fmMsg").textContent=`${j.items.length} ${t("entries")}`;}catch(e){$("fmMsg").textContent=t("error")+": "+e.message}}
+async function fmSelect(tr){$("fmBody").querySelectorAll("tr").forEach(r=>r.classList.remove("sel"));tr.classList.add("sel");
+ const n=tr.dataset.n;FM.sel=join(FM.path,n);FM.dir=tr.dataset.d==="1";$("fmName").value=n;$("fmTitle").textContent=FM.sel;$("fmSaveMsg").textContent="";$("fmLintOut").innerHTML="";
+ const ext=n.includes(".")?n.slice(n.lastIndexOf(".")).toLowerCase():"";["fmEd","fmSave","fmLint"].forEach(i=>$(i).hidden=true);$("fmView").innerHTML="";FM.file=null;
+ if(FM.dir){$("fmView").textContent=t("folder_hint");return}
+ if([".png",".jpg",".svg"].includes(ext)){$("fmView").innerHTML=`<img alt="" style="max-width:100%;border:1px solid var(--line);border-radius:7px;background:#fff" src="${fileUrl(FM.sel)}">`;return}
+ if(TEXT.includes(ext)){try{const j=await api("/api/read?p="+encodeURIComponent(FM.sel));$("fmEd").value=j.text;["fmEd","fmSave"].forEach(i=>$(i).hidden=false);$("fmLint").hidden=ext!==".txt";FM.file=FM.sel;if(ext===".txt")showLint(j.lint)}catch(e){$("fmView").textContent=e.message}return}
+ $("fmView").textContent=t("no_preview");}
+function showLint(list){if(!list){$("fmLintOut").innerHTML="";return}
+ $("fmLintOut").innerHTML=list.length?list.map(([n,sev,key,d])=>`<div class="${sev}">${t("line")} ${n}: ${esc(t(key))} <span class="mute">${esc(d)}</span></div>`).join(""):`<div class="mute">${t("lint_ok")}</div>`;}
+async function fmDo(path,body){try{await api(path,body);$("fmMsg").textContent="✓";await fmLoad(FM.path)}catch(e){$("fmMsg").textContent=t("error")+": "+e.message}}
+const fmTarget=()=>{const v=$("fmName").value.trim();return v.includes("/")?v:join(FM.path,v)};
+const need=()=>{if(!FM.sel){$("fmMsg").textContent=t("select_first");return false}return true};
+const needName=()=>{if(!$("fmName").value.trim()){$("fmMsg").textContent=t("enter_name");return false}return true};
+$("fmNewDir").onclick=()=>needName()&&fmDo("/api/mkdir",{p:fmTarget()});
+$("fmNewFile").onclick=()=>needName()&&fmDo("/api/newfile",{p:fmTarget()});
+$("fmMove").onclick=()=>need()&&needName()&&fmDo("/api/move",{src:FM.sel,dst:$("fmName").value.trim()});
+$("fmCopy").onclick=()=>need()&&needName()&&fmDo("/api/copy",{src:FM.sel,dst:$("fmName").value.trim()});
+$("fmTrash").onclick=()=>need()&&fmDo("/api/trash",{p:FM.sel});
+$("fmQueue").onclick=()=>{if(!need())return;if(!FM.sel.endsWith(".txt")){$("fmMsg").textContent=t("select_first");return}showTab("run");RF.preselect=[FM.sel];renderParams();};
+$("fmSave").onclick=async()=>{try{const j=await api("/api/write",{p:FM.file,text:$("fmEd").value});$("fmSaveMsg").textContent=t("saved")+" "+new Date().toLocaleTimeString();showLint(j.lint)}catch(e){$("fmSaveMsg").textContent=t("error")+": "+e.message}};
+$("fmLint").onclick=async()=>{const j=await api("/api/lint",{text:$("fmEd").value});showLint(j.lint)};
+$("fmEd").addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key==="s"){e.preventDefault();$("fmSave").click()}});
+
+/* ---------- runs */
+const RF={files:[],last:{},preselect:[]};let INFO=null;
+async function loadInfo(){INFO=await api("/api/info");const sel=$("rfBin"),cur=sel.value;sel.innerHTML="";for(const b of INFO.cfg.binaries)sel.add(new Option(b.name,b.name));if(cur)sel.value=cur;else if(recall("bin"))sel.value=recall("bin");}
+$("rfBin").onchange=e=>store("bin",e.target.value);
+async function loadParams(){await loadInfo();const j=await api("/api/params");RF.files=j.files;RF.last=j.last;renderParams();refreshJobs();}
+function renderParams(){const f=$("rfFilter").value.toLowerCase(),open=$("rfOpen").checked,bin=$("rfBin").value;
+ const checked=new Set([...document.querySelectorAll(".rfc:checked")].map(e=>e.value).concat(RF.preselect));RF.preselect=[];
+ $("rfBody").innerHTML=RF.files.filter(x=>x.toLowerCase().includes(f)).filter(x=>!open||(RF.last[x+"|"+bin]||{}).status!=="done").map(x=>{const l=RF.last[x+"|"+bin];
+  return `<tr><td><input type="checkbox" class="rfc" value="${esc(x)}" ${checked.has(x)?"checked":""} aria-label="${esc(x)}"></td><td>${esc(x)}</td><td>${l?`<span class="st-${l.status}">${t("st_"+l.status)}</span> <span class="mute">${esc(l.end||"")}</span>`:""}</td></tr>`}).join("");}
+$("rfFilter").oninput=renderParams;$("rfOpen").onchange=renderParams;
+$("rfAll").onclick=()=>document.querySelectorAll(".rfc").forEach(c=>c.checked=true);$("rfNone").onclick=()=>document.querySelectorAll(".rfc").forEach(c=>c.checked=false);
+$("rfRun").onclick=async()=>{const files=[...document.querySelectorAll(".rfc:checked")].map(e=>e.value);if(!files.length){$("rfMsg").textContent=t("nothing_selected");return}
+ if(!$("rfBin").value){$("rfMsg").textContent=t("no_binary");return}
+ try{const j=await api("/api/enqueue",{files,binary:$("rfBin").value,subdir:$("rfSub").value.trim(),skip:$("rfSkip").checked});$("rfMsg").textContent=`${j.added.length} ${t("added")}, ${j.skipped.length} ${t("skipped")}`;refreshJobs()}catch(e){$("rfMsg").textContent=t("error")+": "+e.message}};
+let JOBSEL=null;
+async function refreshJobs(){let j;try{j=await api("/api/jobs")}catch(e){return}
+ const run=j.jobs.find(x=>x.status==="running"),wait=j.jobs.filter(x=>x.status==="queued").length;
+ $("runBadge").hidden=!run&&!wait;$("runBadge").textContent=run?`${t("running_badge")}: ${run.file.split("/").pop()} (+${wait})`:`${t("st_queued")}: ${wait}`;
+ $("qBody").innerHTML=j.jobs.slice().reverse().map(x=>`<tr data-id="${x.id}" class="${JOBSEL===x.id?"sel":""}" style="cursor:pointer"><td>${x.id}</td><td>${esc(x.file)}${x.subdir?` <span class="mute">→ ${esc(x.subdir)}</span>`:""}</td><td>${esc(x.binary)}</td><td class="st-${x.status}">${t("st_"+x.status)}</td><td class="mute">${x.seconds!=null?(x.seconds<90?x.seconds+" s":x.seconds<5400?Math.round(x.seconds/60)+" min":(x.seconds/3600).toFixed(1)+" h"):esc((x.start||x.queued||"").slice(11,16))}</td></tr>`).join("");
+ $("qBody").querySelectorAll("tr").forEach(tr=>tr.onclick=()=>{JOBSEL=+tr.dataset.id;refreshJobs()});
+ const show=j.jobs.find(x=>x.id===JOBSEL)||run||j.jobs[j.jobs.length-1];
+ if(show){$("logTitle").textContent=`${t("log")}: #${show.id} ${show.file}`;
+  if(show.log){try{const l=await api("/api/log?p="+encodeURIComponent(show.log));const pre=$("logOut"),end=pre.scrollTop+pre.clientHeight>=pre.scrollHeight-30;pre.textContent=l.text;if(end)pre.scrollTop=pre.scrollHeight}catch(e){}}else $("logOut").textContent=show.error||"";
+  $("jobOut").innerHTML=(show.outputs||[]).length?`<span class="mute">${t("outputs")}:</span> `+show.outputs.map(o=>`<a href="#" data-o="${esc(o)}">${esc(o.split("/").pop())}</a>`).join(" "):"";
+  $("jobOut").querySelectorAll("a").forEach(a=>a.onclick=e=>{e.preventDefault();const o=a.dataset.o;RS.path=o.split("/").slice(0,-1).join("/");RS.pick=[o];showTab("results")});}
+ if(RF.files.length&&document.getElementById("run").classList.contains("on")&&refreshJobs.wasRun&&!run){const p=await api("/api/params");RF.last=p.last;renderParams()}
+ refreshJobs.wasRun=!!run;}
+$("qStop").onclick=()=>api("/api/stop",{}).then(refreshJobs);
+$("qRemove").onclick=async()=>{const j=await api("/api/jobs");await api("/api/dequeue",{ids:j.jobs.filter(x=>x.status==="queued").map(x=>x.id)});refreshJobs()};
+$("qClear").onclick=()=>api("/api/clearhistory",{}).then(refreshJobs);
+setInterval(refreshJobs,3000);
+
+/* ---------- results */
+const RS={path:"",pick:[],data:{},last:null};
+async function resLoad(p){const j=await api("/api/ls?p="+encodeURIComponent(p));RS.path=j.path;crumbs($("resCrumbs"),j.path,resLoad);
+ const f=$("resFilter").value.toLowerCase();const dirs=j.items.filter(i=>i.dir),csvs=j.items.filter(i=>!i.dir&&i.name.toLowerCase().endsWith(".csv")&&i.name.toLowerCase().includes(f));
+ const up=j.path?`<tr data-up="1"><td></td><td colspan="2"><a href="#">..</a></td></tr>`:"";
+ $("resBody").innerHTML=up+dirs.map(i=>`<tr data-dir="${esc(i.name)}" style="cursor:pointer"><td></td><td>📁 ${esc(i.name)}</td><td></td></tr>`).join("")+
+  csvs.map(i=>{const full=join(j.path,i.name);return `<tr><td><input type="checkbox" class="rsc" value="${esc(full)}" ${RS.pick.includes(full)?"checked":""} aria-label="${esc(i.name)}"></td><td>${esc(i.name)}</td><td class="mute">${fmtTime(i.mtime)}</td></tr>`}).join("");
+ $("resBody").querySelectorAll("tr[data-up]").forEach(tr=>tr.onclick=()=>resLoad(j.path.split("/").slice(0,-1).join("/")));
+ $("resBody").querySelectorAll("tr[data-dir]").forEach(tr=>tr.ondblclick=tr.onclick=()=>resLoad(join(j.path,tr.dataset.dir)));
+ $("resBody").querySelectorAll(".rsc").forEach(c=>c.onchange=()=>{RS.pick=[...document.querySelectorAll(".rsc:checked")].map(e=>e.value);loadPlot()});
+ const imgs=j.items.filter(i=>/\.(png|jpg|svg)$/i.test(i.name)&&i.name.toLowerCase().includes(f));
+ $("resImgs").innerHTML=imgs.map(i=>`<figure style="margin:0"><img loading="lazy" alt="${esc(i.name)}" src="${fileUrl(join(j.path,i.name))}"><figcaption class="mute">${esc(i.name)}</figcaption></figure>`).join("");
+ loadPlot();}
+$("resFilter").oninput=()=>resLoad(RS.path);
+async function loadPlot(){if(!RS.pick.length){RS.last=null;clearPlot();return}
+ const stat=$("plStat").value||0,col=$("plCollapse").value;RS.data={};
+ for(const p of RS.pick){try{RS.data[p]=await api(`/api/csv?p=${encodeURIComponent(p)}&stat=${stat}&collapse=${col}`)}catch(e){RS.data[p]={error:e.message}}}
+ const first=Object.values(RS.data).find(d=>!d.error);
+ if(first){const s=$("plStat"),cur=s.value;s.innerHTML="";first.stats.forEach((n,i)=>s.add(new Option(n,i)));s.value=cur||0;$("plCollapseL").hidden=!(first.mode==="2d"&&first.dims.every(d=>d.n>1))}
+ RS.last=Date.now();drawPlot();}
+["plStat","plNorm","plLog","plBragg","plCollapse"].forEach(i=>$(i).onchange=()=>i==="plStat"||i==="plCollapse"?loadPlot():drawPlot());
+const U=d=>d.unit==="cm"?{f:10,u:"mm"}:d.unit==="m"?{f:1000,u:"mm"}:{f:1,u:d.unit};
+function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim()}
+function clearPlot(){const c=$("plot"),g=c.getContext("2d");g.clearRect(0,0,c.width,c.height);$("plMetrics").innerHTML="";}
+const PAL=["#2563eb","#dc2626","#16a34a","#d97706","#7c3aed","#0891b2","#db2777","#4d7c0f","#9333ea","#ea580c"];
+function niceTicks(a,b,n=6){const span=b-a||1,step0=span/n,mag=Math.pow(10,Math.floor(Math.log10(step0))),step=[1,2,2.5,5,10].map(m=>m*mag).find(s=>s>=step0);const out=[];for(let v=Math.ceil(a/step)*step;v<=b+1e-9;v+=step)out.push(+v.toPrecision(10));return out}
+function cross(x,y,i,lv,dir){for(let k=i;dir>0?k<y.length-1:k>0;k+=dir){const k2=k+dir;if(y[k]>=lv&&lv>y[k2])return x[k]+(x[k2]-x[k])*(y[k]-lv)/(y[k]-y[k2])}return NaN}
+function bragg(x,y){let i=0;for(let k=1;k<y.length;k++)if(y[k]>y[i])i=k;const m=y[i],n=y.map(v=>v/m);const r80=cross(x,n,i,.8,1),r20=cross(x,n,i,.2,1),p80=cross(x,n,i,.8,-1);return{peak:x[i],r80,dfo:r20-r80,bpw:r80-p80,pe:m/(y.slice(0,Math.max(3,y.length/100|0)).reduce((a,b)=>a+b,0)/Math.max(3,y.length/100|0))}}
+function drawPlot(){const c=$("plot"),g=c.getContext("2d"),W=c.width,H=c.height;g.clearRect(0,0,W,H);g.fillStyle=css("--card");g.fillRect(0,0,W,H);
+ const ds=Object.entries(RS.data).filter(([,d])=>!d.error);$("plMetrics").innerHTML="";
+ const errs=Object.entries(RS.data).filter(([,d])=>d.error);if(errs.length)$("plMetrics").innerHTML=errs.map(([p,d])=>`<div style="color:var(--err)">${esc(p)}: ${esc(d.error)}</div>`).join("");
+ if(!ds.length)return;const ink=css("--ink"),mute=css("--mute"),line=css("--line");g.font="20px system-ui";
+ if(ds[0][1].mode==="2d"){drawMap(g,W,H,ds[0][0],ds[0][1],ink,mute);return}
+ const norm=$("plNorm").value,logy=$("plLog").checked;
+ const series=ds.filter(([,d])=>d.mode==="1d").map(([p,d],k)=>{let y=d.y.slice();const f=norm==="max"?Math.max(...y):norm==="first"?(y.slice(0,5).reduce((a,b)=>a+b,0)/5):norm==="sum"?y.reduce((a,b)=>a+b,0):1;if(f)y=y.map(v=>v/f);const uf=U(d.dims[d.axis]).f;return{p,d,x:d.x.map(v=>v*uf),y,col:PAL[k%PAL.length]}});
+ const X0=90,X1=W-20,Y0=H-60,Y1=20;let xmin=Infinity,xmax=-Infinity,ymin=Infinity,ymax=-Infinity;
+ for(const s of series){xmin=Math.min(xmin,s.x[0]);xmax=Math.max(xmax,s.x[s.x.length-1]);for(const v of s.y){if(logy&&v<=0)continue;ymin=Math.min(ymin,v);ymax=Math.max(ymax,v)}}
+ if(!logy)ymin=Math.min(0,ymin);const ty=v=>logy?Math.log10(v):v;const a=ty(ymin),b=ty(ymax)+(ty(ymax)-ty(ymin))*0.05;
+ const sx=v=>X0+(v-xmin)/(xmax-xmin||1)*(X1-X0),sy=v=>Y0-(ty(v)-a)/(b-a||1)*(Y0-Y1);
+ g.strokeStyle=line;g.fillStyle=mute;g.lineWidth=1;g.textAlign="center";
+ for(const v of niceTicks(xmin,xmax)){const px=sx(v);g.beginPath();g.moveTo(px,Y1);g.lineTo(px,Y0);g.stroke();g.fillText(v,px,Y0+24)}
+ g.textAlign="right";const yt=logy?Array.from({length:Math.floor(b)-Math.ceil(a)+1},(_,i)=>Math.pow(10,Math.ceil(a)+i)):niceTicks(ymin,Math.pow(10,b)>0&&logy?Math.pow(10,b):b);
+ for(const v of yt){const py=sy(v);if(py<Y1-1||py>Y0+1)continue;g.beginPath();g.moveTo(X0,py);g.lineTo(X1,py);g.stroke();g.fillText(Math.abs(v)>=1e4||(Math.abs(v)<1e-2&&v!==0)?v.toExponential(1):+v.toPrecision(3),X0-8,py+6)}
+ g.strokeStyle=ink;g.beginPath();g.moveTo(X0,Y1);g.lineTo(X0,Y0);g.lineTo(X1,Y0);g.stroke();
+ const d0=series[0].d,ax=d0.dims[d0.axis];g.fillStyle=ink;g.textAlign="center";g.fillText(`${ax.name} [${U(ax).u}]`,(X0+X1)/2,H-12);
+ g.save();g.translate(22,(Y0+Y1)/2);g.rotate(-Math.PI/2);g.fillText(norm==="none"?d0.quantity:`${d0.quantity}, ${t("normalized")}`,0,0);g.restore();
+ g.lineWidth=2.5;for(const s of series){g.strokeStyle=s.col;g.beginPath();let pen=false;s.x.forEach((xv,i)=>{if(logy&&s.y[i]<=0){pen=false;return}const px=sx(xv),py=sy(s.y[i]);pen?g.lineTo(px,py):g.moveTo(px,py);pen=true});g.stroke()}
+ g.textAlign="left";g.font="17px system-ui";series.forEach((s,k)=>{g.fillStyle=s.col;g.fillRect(X0+14,Y1+10+k*24,18,4);g.fillStyle=ink;g.fillText(s.p.split("/").pop(),X0+38,Y1+16+k*24)});
+ if($("plBragg").checked){const u=U(ax).u;$("plMetrics").innerHTML+=`<table class="metrics" style="margin-top:8px"><thead><tr><th>${t("col_file")}</th><th>${t("peak")} [${u}]</th><th>R80 [${u}]</th><th>BPW80 [${u}]</th><th>D80–D20 [${u}]</th><th>${t("peak")}/${LANG==="de"?"Eingang":"entrance"}</th></tr></thead><tbody>`+
+  series.map(s=>{const m=bragg(s.x,s.d.y);const fx=v=>isFinite(v)?v.toFixed(2):"–";return `<tr><td><span style="color:${s.col}">■</span> ${esc(s.p.split("/").pop())}</td><td>${fx(m.peak)}</td><td>${fx(m.r80)}</td><td>${fx(m.bpw)}</td><td>${fx(m.dfo)}</td><td>${m.pe.toFixed(2)}</td></tr>`}).join("")+"</tbody></table>"}}
+function viridis(v){const c=[[68,1,84],[59,82,139],[33,145,140],[94,201,98],[253,231,37]];v=Math.max(0,Math.min(1,v))*(c.length-1);const i=Math.min(c.length-2,Math.floor(v)),f=v-i;return c[i].map((a,k)=>Math.round(a+(c[i+1][k]-a)*f))}
+function drawMap(g,W,H,p,d,ink,mute){const G=d.grid,nu=G.length,nv=G[0].length;let mx=0;for(const r of G)for(const v of r)mx=Math.max(mx,v);
+ const X0=100,X1=W-150,Y0=H-70,Y1=30,img=g.createImageData(nv,nu);
+ for(let u=0;u<nu;u++)for(let v=0;v<nv;v++){const [r,gg,b]=viridis(mx?G[u][v]/mx:0),o=4*((nu-1-u)*nv+v);img.data[o]=r;img.data[o+1]=gg;img.data[o+2]=b;img.data[o+3]=255}
+ const off=document.createElement("canvas");off.width=nv;off.height=nu;off.getContext("2d").putImageData(img,0,0);g.imageSmoothingEnabled=false;g.drawImage(off,X0,Y1,X1-X0,Y0-Y1);
+ const A=d.dims[d.axes[0]],B=d.dims[d.axes[1]],ua=U(A),ub=U(B);const la=A.n*A.width*ua.f,lb=B.n*B.width*ub.f;
+ g.fillStyle=mute;g.strokeStyle=mute;g.textAlign="center";
+ for(const v of niceTicks(0,lb)){const px=X0+v/lb*(X1-X0);g.beginPath();g.moveTo(px,Y0);g.lineTo(px,Y0+6);g.stroke();g.fillText(v,px,Y0+26)}
+ g.textAlign="right";for(const v of niceTicks(-la/2,la/2)){const py=Y0-(v+la/2)/la*(Y0-Y1);g.beginPath();g.moveTo(X0-6,py);g.lineTo(X0,py);g.stroke();g.fillText(v,X0-10,py+6)}
+ g.fillStyle=ink;g.textAlign="center";g.fillText(`${B.name} [${ub.u}]`,(X0+X1)/2,H-14);
+ g.save();g.translate(24,(Y0+Y1)/2);g.rotate(-Math.PI/2);g.fillText(`${A.name} [${ua.u}]`,0,0);g.restore();
+ const grd=g.createLinearGradient(0,Y0,0,Y1);for(let k=0;k<=10;k++){const [r,gg,b]=viridis(k/10);grd.addColorStop(k/10,`rgb(${r},${gg},${b})`)}
+ g.fillStyle=grd;g.fillRect(X1+24,Y1,22,Y0-Y1);g.fillStyle=ink;g.textAlign="left";g.fillText(mx.toPrecision(3),X1+52,Y1+14);g.fillText("0",X1+52,Y0);
+ g.save();g.translate(W-16,(Y0+Y1)/2);g.rotate(-Math.PI/2);g.textAlign="center";g.fillText(d.quantity,0,0);g.restore();
+ g.fillStyle=mute;g.textAlign="left";g.fillText(p.split("/").pop()+(d.dims.every(x=>x.n>1)?`  (Σ ${d.dims[d.collapsed].name})`:""),X0,Y1-8);}
+$("plPng").onclick=()=>{const a=document.createElement("a");a.href=$("plot").toDataURL("image/png");a.download=(RS.pick[0]||"plot").split("/").pop().replace(/\.csv$/,"")+".png";a.click()};
+
+/* ---------- generators */
+let GENS=[];
+async function loadGens(){GENS=await api("/api/generators");const s=$("genSel"),cur=s.value;s.innerHTML="";GENS.forEach(g=>s.add(new Option(L(g.name),g.id)));if(cur)s.value=cur;renderGen()}
+function renderGen(){const g=GENS.find(x=>x.id===$("genSel").value);if(!g){$("genForm").innerHTML="";return}$("genDesc").textContent=L(g.description)||"";
+ if(!$("genFolder").value)$("genFolder").value=recall("genFolder")||"";
+ $("genForm").innerHTML=g.fields.map(f=>{const lab=esc(L(f.label)),id="gf_"+f.key;
+  if(f.type==="select")return `<label>${lab}<select id="${id}">${f.options.map(([v,n])=>`<option value="${esc(v)}" ${v==f.default?"selected":""}>${esc(L(n))}</option>`).join("")}</select></label>`;
+  if(f.type==="multi")return `<fieldset class="chips" style="grid-column:1/-1;border:1px solid var(--line);border-radius:7px"><legend>${lab}</legend>${f.options.map(([v,n])=>`<label><input type="checkbox" name="${id}" value="${esc(v)}" ${(f.default||[]).includes(v)?"checked":""}> ${esc(L(n))}</label>`).join("")}</fieldset>`;
+  if(f.type==="bool")return `<label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="${id}" ${f.default?"checked":""}> ${lab}</label>`;
+  return `<label>${lab}<input id="${id}" value="${esc(f.default??"")}" ${f.type==="number"?'inputmode="decimal"':""}></label>`}).join("")}
+$("genSel").onchange=renderGen;
+function genValues(){const g=GENS.find(x=>x.id===$("genSel").value),v={};for(const f of g.fields){const id="gf_"+f.key;
+ if(f.type==="multi")v[f.key]=[...document.querySelectorAll(`input[name="${id}"]:checked`)].map(e=>e.value);else if(f.type==="bool")v[f.key]=$(id).checked;else if(f.type==="number")v[f.key]=parseFloat($(id).value.replace(",","."));else v[f.key]=$(id).value}return v}
+async function gen(preview){store("genFolder",$("genFolder").value);try{const j=await api("/api/generate",{id:$("genSel").value,values:genValues(),folder:$("genFolder").value.trim(),overwrite:$("genOver").checked,preview});
+ if(preview){$("genOut").textContent=j.names.join("  ")+"\n\n"+j.example;$("genMsg").textContent=`${j.names.length} ${LANG==="de"?"Dateien":"files"}`}
+ else{$("genMsg").textContent=`${j.written.length} ${t("created")}, ${j.skipped.length} ${t("skipped")}`;$("genOut").textContent=j.written.join("\n")}}catch(e){$("genMsg").textContent=t("error")+": "+e.message}}
+$("genPrev").onclick=()=>gen(true);$("genMake").onclick=()=>gen(false);
+
+/* ---------- settings */
+async function loadSettings(){await loadInfo();$("setRoot").textContent=INFO.root;$("ver").textContent=INFO.version;renderBins(INFO.cfg.binaries)}
+function renderBins(bins){$("binList").innerHTML=bins.map((b,i)=>`<div class="card" style="margin-bottom:10px" data-i="${i}"><div class="grid2">
+ <label>${t("bin_name")}<input class="bn" value="${esc(b.name)}"></label><label>${t("bin_cmd")}<input class="bc" value="${esc(b.cmd)}"></label>
+ <label style="grid-column:1/-1">${t("bin_env")}<textarea class="be" style="min-height:60px">${esc(Object.entries(b.env||{}).map(([k,v])=>k+"="+v).join("\n"))}</textarea></label></div>
+ <button class="brm" style="margin-top:6px">${t("remove")}</button></div>`).join("");
+ $("binList").querySelectorAll(".brm").forEach(btn=>btn.onclick=()=>{const all=readBins();all.splice(+btn.closest("[data-i]").dataset.i,1);renderBins(all)})}
+function readBins(){return [...$("binList").querySelectorAll("[data-i]")].map(d=>({name:d.querySelector(".bn").value.trim(),cmd:d.querySelector(".bc").value.trim(),
+ env:Object.fromEntries(d.querySelector(".be").value.split("\n").map(l=>l.trim()).filter(l=>l.includes("=")).map(l=>[l.slice(0,l.indexOf("=")).trim(),l.slice(l.indexOf("=")+1).trim()]))}))}
+$("binAdd").onclick=()=>renderBins(readBins().concat([{name:"",cmd:"",env:{}}]));
+$("binDetect").onclick=()=>{const have=readBins();for(const d of INFO.detected)if(!have.some(b=>b.cmd===d.cmd))have.push(d);renderBins(have)};
+$("binSave").onclick=async()=>{try{await api("/api/config",{binaries:readBins()});$("binMsg").textContent=t("saved");await loadInfo()}catch(e){$("binMsg").textContent=t("error")+": "+e.message}};
+
+/* ---------- start */
+applyI18n();showTab(recall("tab")||"files");refreshJobs();
+</script>
+</body>
+</html>
