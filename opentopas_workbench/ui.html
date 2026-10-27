@@ -30,7 +30,7 @@ header h1{font-size:17px;margin:0 12px 0 0}
 nav{display:flex;gap:4px;flex-wrap:wrap}
 nav button[aria-selected="true"]{background:var(--acc);color:var(--acc-ink);border-color:var(--acc)}
 .spacer{flex:1}
-main{padding:16px;max-width:1500px;margin:0 auto}
+main{padding:16px;max-width:1900px;margin:0 auto}
 .tab{display:none}.tab.on{display:grid;gap:16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
 h2{font-size:15px;margin:0 0 10px}
@@ -61,10 +61,35 @@ pre:empty{display:none}
 .grid2 label{display:flex;flex-direction:column;gap:3px;font-size:14px}
 .imgs{display:grid;grid-template-columns:repeat(auto-fill,minmax(380px,1fr));gap:12px}
 .imgs img{width:100%;border:1px solid var(--line);border-radius:7px;background:#fff}
-canvas{width:100%;height:440px;border:1px solid var(--line);border-radius:7px;background:var(--card)}
+.plotwrap{position:relative}.vline{position:absolute;width:1px;background:var(--mute);pointer-events:none}.zsel{position:absolute;background:color-mix(in srgb,var(--acc) 18%,transparent);border:1px solid var(--acc);pointer-events:none}
+.ptip{position:absolute;z-index:2;pointer-events:none;background:var(--card);border:1px solid var(--line);border-radius:7px;padding:6px 9px;font-size:13px;box-shadow:0 6px 18px rgba(0,0,0,.25);white-space:nowrap}
+canvas{cursor:crosshair;width:100%;height:440px;border:1px solid var(--line);border-radius:7px;background:var(--card)}
+.bar{display:inline-block;width:90px;height:8px;border-radius:4px;background:var(--line);vertical-align:middle;margin-right:6px;overflow:hidden}.bar>i{display:block;height:100%;background:var(--acc)}
+.live{margin-top:12px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--sunken);display:grid;gap:6px}
+.live .ph{display:flex;gap:6px;flex-wrap:wrap}.live .ph span{padding:2px 10px;border-radius:999px;border:1px solid var(--line);font-size:13px;color:var(--mute)}
+.live .ph span.on{background:var(--acc);color:var(--acc-ink);border-color:var(--acc);font-weight:600}.live .ph span.done{color:var(--ok);border-color:var(--ok)}
+.live .big{height:10px;border-radius:5px;background:var(--line);overflow:hidden}.live .big>i{display:block;height:100%;background:var(--acc);transition:width .9s linear}
+.live .kv{display:flex;gap:18px;flex-wrap:wrap;font-size:14px;font-variant-numeric:tabular-nums}.live .kv b{font-weight:600}
+.live .last{font:12.5px ui-monospace,Consolas,monospace;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.res{color:var(--ok);font-weight:600}.log-err{color:var(--err);font-weight:600}.log-wrn{color:var(--warn)}.hints{color:var(--err);font-size:13px;margin-top:6px;white-space:pre-wrap;font-family:ui-monospace,Consolas,monospace}
+.thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}.thumbs figure{margin:0;cursor:zoom-in;border:1px solid var(--line);border-radius:7px;overflow:hidden;background:var(--sunken)}
+.thumbs img{width:100%;height:150px;object-fit:contain;background:#fff;display:block}.thumbs figcaption{font-size:12.5px;padding:4px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lb{position:fixed;inset:0;z-index:20;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;gap:12px;padding:20px}.lb[hidden]{display:none}
+.lb figure{margin:0;max-width:88vw;max-height:92vh;display:flex;flex-direction:column;align-items:center}.lb img{max-width:88vw;max-height:84vh;background:#fff;border-radius:6px}
+.lbdl{position:absolute;top:18px;right:84px;color:#f1f4f8;background:#1f2630;border:1px solid #3a4452;border-radius:7px;padding:6px 12px;text-decoration:none}.lb figcaption{color:#f1f4f8;margin-top:8px;font-size:14px}.lb button{font-size:28px;background:#1f2630;color:#f1f4f8;border-color:#3a4452;min-width:48px}.lb .lbx{position:absolute;top:16px;right:16px;font-size:20px}
+#exTable td,#exTable th{font-variant-numeric:tabular-nums}
 .badge{padding:2px 8px;border-radius:999px;background:var(--sunken);border:1px solid var(--line);font-size:13px}
 .metrics td{font-variant-numeric:tabular-nums}
-.hl-c{color:var(--mute)}.hl-t{color:var(--acc);font-weight:600}.hl-n{color:var(--ok)}.hl-s{color:var(--warn)}
+.hl-c{color:var(--mute);font-style:italic}.hl-t{color:var(--acc);font-weight:600}.hl-n{color:var(--ok)}.hl-s{color:var(--warn)}.hl-u{color:var(--mute)}
+.hl-err{background:color-mix(in srgb,var(--err) 22%,transparent);border-radius:3px}.hl-wrn{background:color-mix(in srgb,var(--warn) 18%,transparent);border-radius:3px}
+.ed{position:relative;height:470px;border:1px solid var(--line);border-radius:7px;background:var(--sunken);overflow:hidden}
+.ed pre,.ed textarea{display:block;position:absolute;inset:0;margin:0;padding:8px;border:0;border-radius:0;font:13px/1.45 ui-monospace,Consolas,"Cascadia Mono",monospace;tab-size:4;white-space:pre;max-height:none;min-height:0;width:100%;height:100%}
+.ed pre{background:transparent;color:var(--ink);pointer-events:none;overflow:hidden}
+.ed textarea{background:transparent;color:transparent;caret-color:var(--ink);resize:none;overflow:auto}
+.ed textarea::selection{background:color-mix(in srgb,var(--acc) 35%,transparent);color:transparent}
+.ac{position:absolute;z-index:3;background:var(--card);border:1px solid var(--line);border-radius:7px;box-shadow:0 6px 18px rgba(0,0,0,.3);max-height:230px;overflow:auto;min-width:340px;font:13px/1.5 ui-monospace,Consolas,monospace}
+.ac div{padding:2px 10px;cursor:pointer;white-space:nowrap}.ac div.on{background:var(--sel)}.ac .src{color:var(--mute);float:right;margin-left:16px}
+.inc{font-size:13px;margin-top:6px}.inc .miss{color:var(--err)}
 </style>
 </head>
 <body>
@@ -73,12 +98,13 @@ canvas{width:100%;height:440px;border:1px solid var(--line);border-radius:7px;ba
   <nav role="tablist">
     <button role="tab" data-tab="files" data-i18n="tab_files"></button>
     <button role="tab" data-tab="run" data-i18n="tab_run"></button>
+    <button role="tab" data-tab="explorer" data-i18n="tab_explorer"></button>
     <button role="tab" data-tab="results" data-i18n="tab_results"></button>
     <button role="tab" data-tab="gen" data-i18n="tab_gen"></button>
     <button role="tab" data-tab="settings" data-i18n="tab_settings"></button>
   </nav>
   <span class="spacer"></span>
-  <span id="runBadge" class="badge" hidden></span>
+  <span id="awakeBadge" class="badge" hidden></span><span id="runBadge" class="badge" hidden></span>
   <select id="langSel" aria-label="Language"><option value="de">Deutsch</option><option value="en">English</option></select>
   <select id="themeSel" aria-label="Theme"><option value="auto" data-i18n="theme_auto"></option><option value="light" data-i18n="theme_light"></option><option value="dark" data-i18n="theme_dark"></option></select>
 </header>
@@ -102,9 +128,19 @@ canvas{width:100%;height:440px;border:1px solid var(--line);border-radius:7px;ba
     <div class="card">
       <h2 id="fmTitle" data-i18n="preview"></h2>
       <div id="fmView" class="mute" data-i18n="fm_hint"></div>
-      <textarea id="fmEd" spellcheck="false" hidden></textarea>
-      <div class="row" style="margin-top:8px"><button class="pri" id="fmSave" hidden data-i18n="save"></button><button id="fmLint" hidden data-i18n="check"></button><span id="fmSaveMsg" class="mute" role="status"></span></div>
+      <div id="edWrap" class="ed" hidden><pre id="edHl" aria-hidden="true"></pre><textarea id="fmEd" spellcheck="false" wrap="off" autocomplete="off" aria-label="editor"></textarea><div id="acBox" class="ac" hidden role="listbox"></div></div>
+      <div id="fmInc" class="inc"></div>
+      <div class="row" style="margin-top:8px"><button class="pri" id="fmSave" hidden data-i18n="save"></button><button id="fmLint" hidden data-i18n="check"></button><button id="fmVar" hidden data-i18n="var_btn"></button><span id="fmSaveMsg" class="mute" role="status"></span></div>
+      <div id="varBox" class="card" hidden style="margin-top:8px;background:var(--sunken)">
+        <h2 data-i18n="var_title"></h2>
+        <div class="row"><label><span data-i18n="var_param"></span> <select id="varParam" style="max-width:520px"></select></label></div>
+        <div class="row"><input id="varValues" style="flex:1;min-width:260px" data-i18n-ph="var_values_ph"><input id="varPattern" size="18" value="{name}_{value}" aria-label="pattern"><label><input type="checkbox" id="varOver"> <span data-i18n="overwrite"></span></label></div>
+        <div class="row"><button id="varPrev" data-i18n="preview"></button><button id="varMake" data-i18n="create"></button><button id="varRun" class="pri" data-i18n="var_run"></button></div>
+        <p class="mute" style="font-size:13px" data-i18n="var_hint"></p>
+        <pre id="varOut"></pre>
+      </div>
       <div id="fmLintOut" class="lint"></div>
+      <p class="mute" style="font-size:13px" data-i18n="ed_hint"></p>
     </div>
   </div>
 </section>
@@ -114,25 +150,62 @@ canvas{width:100%;height:440px;border:1px solid var(--line);border-radius:7px;ba
   <div class="split">
     <div class="card">
       <h2 data-i18n="run_files"></h2>
-      <div class="row"><input id="rfFilter" style="flex:1" data-i18n-ph="filter_ph"><label><input type="checkbox" id="rfOpen"> <span data-i18n="only_not_done"></span></label></div>
+      <p id="rfStale" class="err" hidden></p><div class="row"><label><span data-i18n="scope"></span> <select id="rfScope" class="scopeSel" data-k="scope_run"></select></label><input id="rfFilter" style="flex:1" data-i18n-ph="filter_ph"><label><input type="checkbox" id="rfOpen"> <span data-i18n="only_not_done"></span></label></div>
       <div class="row">
         <label><span data-i18n="binary"></span> <select id="rfBin"></select></label>
         <label><span data-i18n="subdir"></span> <input id="rfSub" size="12" data-i18n-ph="subdir_ph"></label>
         <label><input type="checkbox" id="rfSkip" checked> <span data-i18n="skip_existing"></span></label>
       </div>
       <div class="row"><button id="rfAll" data-i18n="select_all"></button><button id="rfNone" data-i18n="select_none"></button><button class="pri" id="rfRun" data-i18n="enqueue"></button><span id="rfMsg" class="mute" role="status"></span></div>
-      <div class="scroll"><table><thead><tr><th></th><th data-i18n="col_file"></th><th data-i18n="col_last"></th></tr></thead><tbody id="rfBody"></tbody></table></div>
+      <div class="scroll"><table><thead><tr><th></th><th data-i18n="col_file"></th><th data-i18n="col_results"></th><th data-i18n="col_last"></th></tr></thead><tbody id="rfBody"></tbody></table></div>
     </div>
     <div class="card">
-      <h2 data-i18n="queue"></h2>
+      <div class="row" style="margin-bottom:6px"><h2 style="margin:0" data-i18n="queue"></h2><span id="qEta" class="mute"></span></div>
       <div class="row"><button id="qStop" data-i18n="stop_current"></button><button id="qRemove" data-i18n="remove_queued"></button><button id="qClear" data-i18n="clear_history"></button></div>
-      <div class="scroll" style="max-height:300px"><table><thead><tr><th>#</th><th data-i18n="col_file"></th><th data-i18n="binary"></th><th data-i18n="col_status"></th><th data-i18n="col_time"></th></tr></thead><tbody id="qBody"></tbody></table></div>
+      <div class="scroll" style="max-height:min(420px,40vh)"><table><thead><tr><th>#</th><th data-i18n="col_file"></th><th data-i18n="binary"></th><th data-i18n="col_status"></th><th data-i18n="col_time"></th></tr></thead><tbody id="qBody"></tbody></table></div>
+      <div id="liveBox" class="live" hidden></div>
       <h2 style="margin-top:14px" id="logTitle" data-i18n="log"></h2>
       <pre id="logOut"></pre>
+      <div id="jobHints" class="hints"></div>
       <div id="jobOut" class="row" style="margin-top:8px"></div>
     </div>
   </div>
 </section>
+
+<!-- EXPLORER -->
+<section id="explorer" class="tab">
+  <div class="card">
+    <h2 data-i18n="ex_title"></h2>
+    <div class="row">
+      <label><span data-i18n="scope"></span> <select id="exScope" class="scopeSel" data-k="scope_ex"></select></label>
+      <input id="exQ" style="flex:1;min-width:240px" data-i18n-ph="ex_search_ph">
+      <label><span data-i18n="ex_kind"></span> <select id="exKind"><option value="" data-i18n="ex_all"></option><option value="data" data-i18n="ex_k_data"></option><option value="measured" data-i18n="ex_k_meas"></option><option value="image" data-i18n="ex_k_img"></option></select></label>
+      <label><span data-i18n="ex_particle"></span> <select id="exPart"></select></label>
+      <label><span data-i18n="ex_energy"></span> <select id="exEn"></select></label>
+      <label><span data-i18n="ex_folder"></span> <select id="exFolder"></select></label>
+      <button id="exReload" data-i18n="ex_reload"></button>
+    </div>
+    <div class="row chips" id="exTags"></div>
+    <div class="row">
+      <label><span data-i18n="ex_reftag"></span> <input id="exRef" size="8" value="rifi0"></label>
+      <span class="mute" style="font-size:13px" data-i18n="ex_ref_hint"></span>
+    </div>
+    <details id="exFormulas" style="margin-bottom:8px"><summary data-i18n="ex_formulas"></summary>
+      <p class="mute" style="font-size:13px" data-i18n="ex_formula_hint"></p>
+      <div id="exFList"></div>
+      <div class="row"><input id="exFName" size="14" data-i18n-ph="ex_fname_ph"><input id="exFExpr" style="flex:1;min-width:260px" data-i18n-ph="ex_fexpr_ph"><button id="exFAdd" data-i18n="ex_fadd"></button><span id="exFMsg" class="mute"></span></div>
+    </details>
+    <div class="row"><span id="exCount" class="mute"></span><span class="spacer"></span>
+      <button id="exPlot" class="pri" data-i18n="ex_plot"></button><button id="exNone" data-i18n="select_none"></button><button id="exCsv" data-i18n="ex_csv"></button><button id="exZip" data-i18n="ex_zip"></button></div>
+    <div class="scroll" style="max-height:560px"><table id="exTable"><thead id="exHead"></thead><tbody id="exBody"></tbody></table></div>
+    <div id="exLegend" class="mute" style="font-size:13px;margin-top:8px"></div>
+  </div>
+  <div class="card">
+    <div class="row"><h2 style="margin:0"><span data-i18n="ex_images"></span> <span id="exImgCount" class="mute"></span></h2><span class="spacer"></span><button id="exImgZip" data-i18n="ex_img_zip"></button></div>
+    <div class="thumbs" id="exImgs"></div>
+  </div>
+</section>
+<div id="lightbox" class="lb" hidden role="dialog" aria-modal="true"><button id="lbPrev" aria-label="previous">‹</button><figure><img id="lbImg" alt=""><figcaption id="lbCap"></figcaption></figure><button id="lbNext" aria-label="next">›</button><button id="lbClose" class="lbx" aria-label="close">✕</button><a id="lbDl" class="lbdl" data-i18n="download"></a></div>
 
 <!-- RESULTS -->
 <section id="results" class="tab">
@@ -140,7 +213,7 @@ canvas{width:100%;height:440px;border:1px solid var(--line);border-radius:7px;ba
     <div class="card">
       <h2 data-i18n="res_files"></h2>
       <div class="row" id="resCrumbs"></div>
-      <div class="row"><input id="resFilter" style="flex:1" data-i18n-ph="filter_ph"></div>
+      <div class="row"><input id="resFilter" style="flex:1" data-i18n-ph="filter_ph"><button id="resAll" data-i18n="select_all"></button><button id="resNone" data-i18n="select_none"></button></div>
       <div class="scroll"><table><thead><tr><th></th><th data-i18n="col_name"></th><th data-i18n="col_mtime"></th></tr></thead><tbody id="resBody"></tbody></table></div>
       <p class="mute" data-i18n="res_hint"></p>
     </div>
@@ -152,9 +225,23 @@ canvas{width:100%;height:440px;border:1px solid var(--line);border-radius:7px;ba
         <label><input type="checkbox" id="plLog"> <span data-i18n="log_y"></span></label>
         <label><input type="checkbox" id="plBragg" checked> <span data-i18n="bragg"></span></label>
         <label hidden id="plCollapseL"><span data-i18n="collapse"></span> <select id="plCollapse"><option value="0">X</option><option value="1">Y</option><option value="2" selected>Z</option></select></label>
-        <button id="plPng" data-i18n="save_png"></button>
+        <label hidden id="plScanL">Scan <select id="plScan"></select></label>
       </div>
-      <canvas id="plot" width="1200" height="560" aria-label="plot"></canvas>
+      <div class="row">
+        <label><span data-i18n="xaxis"></span> <select id="plX"><option value="abs" data-i18n="x_abs"></option><option value="shift" data-i18n="x_shift"></option><option value="rel" data-i18n="x_rel"></option></select></label>
+        <label><span data-i18n="view"></span> <select id="plMode"><option value="curves" data-i18n="mode_curves"></option><option value="diff" data-i18n="mode_diff"></option><option value="ratio" data-i18n="mode_ratio"></option></select></label>
+        <label><span data-i18n="reference"></span> <select id="plRef"></select></label>
+        <button id="plPeak" data-i18n="zoom_peak"></button><button id="plReset" data-i18n="zoom_reset"></button>
+        <button id="plClear" data-i18n="clear_sel"></button><span id="plPicked" class="mute"></span>
+      </div>
+      <div class="row">
+        <label><span data-i18n="view_saved"></span> <select id="plView"></select></label><input id="plViewName" size="16" data-i18n-ph="view_name_ph"><button id="plViewSave" data-i18n="view_save"></button><button id="plViewDel" data-i18n="remove"></button>
+        <span class="spacer"></span>
+        <span class="mute" data-i18n="export"></span><button id="plPng">PNG</button><select id="plScale" aria-label="scale"><option value="1">1×</option><option value="2" selected>2×</option><option value="3">3×</option></select><button id="plSvg">SVG</button><button id="plCsv" data-i18n="exp_data"></button><button id="plCopy" data-i18n="exp_copy"></button>
+        <label title=""><input type="checkbox" id="plLight" checked> <span data-i18n="exp_light"></span></label><span id="plExpMsg" class="mute"></span>
+      </div>
+      <div class="plotwrap"><canvas id="plot" width="1200" height="560" aria-label="plot"></canvas><div id="plVline" class="vline" hidden></div><div id="plSel" class="zsel" hidden></div><div id="plTip" class="ptip" hidden></div></div>
+      <p class="mute" style="font-size:13px;margin:4px 0 0" data-i18n="plot_hint"></p>
       <div id="plMetrics"></div>
       <h2 style="margin-top:14px" data-i18n="images"></h2>
       <div class="imgs" id="resImgs"></div>
@@ -183,6 +270,18 @@ canvas{width:100%;height:440px;border:1px solid var(--line);border-radius:7px;ba
     <h2 data-i18n="set_title"></h2>
     <p><span data-i18n="workspace"></span>: <code id="setRoot"></code></p>
     <p class="mute" data-i18n="set_ws_hint"></p>
+    <p><label><input type="checkbox" id="setAwake"> <span data-i18n="keep_awake"></span></label> <span id="awakeMsg" class="mute"></span></p>
+    <p class="mute" style="font-size:13px" data-i18n="keep_awake_hint"></p>
+    <h2 data-i18n="scan_title"></h2>
+    <p class="mute" style="font-size:13px" data-i18n="scan_hint"></p>
+    <div class="grid2">
+      <label><span data-i18n="scan_include"></span><div id="incBox" class="chips" style="max-height:180px;overflow:auto;border:1px solid var(--line);border-radius:7px;padding:4px 8px"></div></label>
+      <label><span data-i18n="scan_exclude"></span><textarea id="excBox" style="min-height:120px"></textarea></label>
+    </div>
+    <div class="row" style="margin-top:6px"><button class="pri" id="scanSave" data-i18n="save"></button><span id="scanMsg" class="mute"></span></div>
+    <h2 data-i18n="notes"></h2>
+    <p class="row"><label><input type="checkbox" id="set_notify"> <span data-i18n="note_browser"></span></label><label><input type="checkbox" id="set_sound"> <span data-i18n="note_sound"></span></label><label><input type="checkbox" id="set_note_each"> <span data-i18n="note_each"></span></label><button id="noteTest" data-i18n="note_testbtn"></button><span id="noteMsg" class="mute"></span></p>
+    <p><label><input type="checkbox" id="setToast"> <span data-i18n="note_toast"></span></label></p>
     <h2 data-i18n="binaries"></h2>
     <p class="mute" data-i18n="bin_hint"></p>
     <div id="binList"></div>
@@ -195,38 +294,38 @@ canvas{width:100%;height:440px;border:1px solid var(--line);border-radius:7px;ba
 <script>
 const TOKEN="%TOKEN%";
 const I18N={
- de:{tab_files:"Dateien",tab_run:"Läufe",tab_results:"Ergebnisse",tab_gen:"Generatoren",tab_settings:"Einstellungen",
+ de:{stale:"Keine Verbindung zur Workbench, Stand {t}. Seite neu laden (F5).",scope:"Ordner",scope_all:"ganzer Arbeitsordner",view_saved:"Ansicht",view_name_ph:"Name der Ansicht",view_save:"Ansicht speichern",view_need:"Erst Dateien auswählen und einen Namen eingeben.",export:"Export:",exp_data:"Daten (CSV)",exp_copy:"Kopieren",exp_light:"heller Druckstil",copied:"In die Zwischenablage kopiert.",ex_zip:"Auswahl als ZIP",ex_img_zip:"Bilder als ZIP",download:"Herunterladen",notes:"Benachrichtigungen",note_browser:"Browser-Meldung",note_sound:"Ton",note_each:"bei jedem fertigen Lauf (sonst nur Fehler und Ende der Warteschlange)",note_testbtn:"Testen",note_test:"So sieht eine Benachrichtigung aus.",note_failed:"Lauf fehlgeschlagen",note_queue_done:"Warteschlange fertig.",note_denied:"Der Browser hat Meldungen blockiert.",note_toast:"Windows-Meldung, wenn keine Seite offen ist (WSL)",var_btn:"Variationen",var_title:"Variationen dieser Datei",var_param:"Parameter",var_values_ph:"Werte, durch Komma getrennt, z. B. 70, 100, 150",var_run:"Anlegen und rechnen",var_hint:"Ohne Einheit wird die Einheit der Vorlage übernommen, Strings bekommen Anführungszeichen. Die Scorer-Ausgaben erhalten denselben Zusatz, damit nichts überschrieben wird. Platzhalter im Dateinamen: {name}, {value}.",tab_explorer:"Übersicht",ex_title:"Alle Ergebnisse im Arbeitsordner",ex_search_ph:"Suche, mehrere Wörter = alle müssen passen",ex_kind:"Art",ex_all:"alle",ex_k_data:"Simulation",ex_k_meas:"Messung",ex_k_img:"Bild",ex_particle:"Teilchen",ex_energy:"Energie",ex_folder:"Ordner",ex_reload:"Neu einlesen",ex_tags:"Merkmale",ex_reftag:"Referenz-Merkmal",ex_ref_hint:"Abweichungen beziehen sich auf die Datei mit diesem Merkmal im gleichen Ordner bei gleichem Teilchen und gleicher Energie.",ex_formulas:"Eigene Formelspalten",ex_formula_hint:"Variablen: r80, bpw80, peak, energy, rel_bpw, tail, dfo, ref_r80, ref_bpw80, ref_peak, dr80, dbpw80, bpw_filter, r80_bk, dev_bk. Funktionen: sqrt, abs, log, log10, exp, pow, min, max, round, ^ für Potenz. Gespeichert in diesem Browser.",ex_fname_ph:"Name",ex_fexpr_ph:"Formel, z. B. 100*(bpw80-ref_bpw80)/ref_bpw80",ex_fadd:"Spalte hinzufügen",ex_unknown:"unbekannt",ex_plot:"Auswahl plotten",ex_csv:"Tabelle als CSV",ex_rows:"Datenzeilen",ex_files:"Dateien gefiltert",ex_legend:"Formeln:",ex_images:"Bilder",f_bk_note:"Näherung für Wasser",ex_ref_rule:"Gelb: mehr als 3 % Abweichung von Bragg-Kleeman.",f_dr80:"R80 − R80 der Referenz",f_quad:"√(BPW80² − BPW80²ref)",f_bk:"Bragg-Kleeman-Reichweite in Wasser",f_devbk:"(R80 − R80 BK) / R80 BK in %",tab_files:"Dateien",tab_run:"Läufe",tab_results:"Ergebnisse",tab_gen:"Generatoren",tab_settings:"Einstellungen",
   theme_auto:"Design: System",theme_light:"Hell",theme_dark:"Dunkel",
   files_title:"Arbeitsordner",col_name:"Name",col_size:"Größe",col_mtime:"Geändert",col_file:"Datei",col_last:"Letzter Lauf",col_status:"Status",col_time:"Zeit",
   fm_name_ph:"Name oder Ziel, z. B. neu.txt oder ordner/kopie.txt",fm_newdir:"Neuer Ordner",fm_newfile:"Neue Datei",fm_move:"Umbenennen / Verschieben",fm_copy:"Kopieren",fm_trash:"In Papierkorb",fm_queue:"Rechnen",
   fm_hint:"Eintrag anklicken zum Auswählen, Ordner doppelklicken zum Öffnen. Gelöschtes landet in _trash.",preview:"Vorschau",save:"Speichern",check:"Prüfen",
   saved:"gespeichert",select_first:"Erst einen Eintrag auswählen.",enter_name:"Bitte einen Namen eingeben.",entries:"Einträge",no_preview:"Keine Vorschau für diesen Dateityp.",folder_hint:"Ordner. Doppelklick öffnet ihn.",
-  lint_ok:"Keine Auffälligkeiten.",lint_syntax:"Zeile nicht lesbar",lint_notype:"Typ fehlt (d:, s:, i:, b:, u: …)",lint_bool:"Boolean erwartet (\"True\"/\"False\")",lint_string:"String ohne Anführungszeichen",lint_unit:"Einheit fehlt",lint_int:"Ganzzahl erwartet",lint_count:"Anzahl passt nicht zur Vektorlänge",line:"Zeile",
-  run_files:"Parameterdateien",filter_ph:"Filter",only_not_done:"nur ohne erfolgreichen Lauf",binary:"Programm",subdir:"Ausgabe-Unterordner",subdir_ph:"leer = gleicher Ordner",skip_existing:"vorhandene Ergebnisse überspringen",
+  lint_ok:"Keine Auffälligkeiten.",lint_syntax:"Zeile nicht lesbar",lint_notype:"Typ fehlt (d:, s:, i:, b:, u: …)",lint_bool:"Boolean erwartet (\"True\"/\"False\")",lint_string:"String ohne Anführungszeichen",lint_unit:"Einheit fehlt",lint_int:"Ganzzahl erwartet",lint_count:"Anzahl passt nicht zur Vektorlänge",lint_include:"Eingebundene Datei fehlt",line:"Zeile",included:"Eingebunden",missing:"fehlt",ed_hint:"Strg+S speichert. Beim Tippen eines Parameternamens erscheinen Vorschläge (Pfeiltasten, Enter oder Tab übernimmt, Esc schließt). Strg+Leertaste zeigt sie sofort.",
+  run_files:"Parameterdateien",filter_ph:"Filter",only_not_done:"nur ohne Ergebnisse",col_results:"Ergebnisse",here:"hier",eta:"noch",histories_done:"Historien",log_hints:"Auffällige Zeilen im Log:",binary:"Programm",subdir:"Ausgabe-Unterordner",subdir_ph:"leer = gleicher Ordner",skip_existing:"vorhandene Ergebnisse überspringen",
   select_all:"alle",select_none:"keine",enqueue:"In Warteschlange",queue:"Warteschlange",stop_current:"Aktuellen Lauf stoppen",remove_queued:"Wartende entfernen",clear_history:"Verlauf leeren",log:"Log",
   added:"hinzugefügt",skipped:"übersprungen",nothing_selected:"Nichts ausgewählt.",no_binary:"Kein Programm eingerichtet, siehe Einstellungen.",outputs:"Ausgaben",
   st_queued:"wartet",st_running:"läuft",st_done:"fertig",st_failed:"Fehler",st_stopped:"gestoppt",st_aborted:"abgebrochen",st_removed:"entfernt",running_badge:"läuft",
-  res_files:"Scorer-Ausgaben (CSV)",res_hint:"Mehrere CSVs anhaken, um 1D-Kurven zu überlagern. 2D/3D-Daten werden als Karte gezeigt.",plot:"Plot",statistic:"Statistik",normalize:"Normierung",
+  res_files:"Scorer-Ausgaben und Messdaten",res_hint:"Zeile anklicken wählt aus, Umschalt+Klick wählt einen Bereich, Ziehen über mehrere Zeilen wählt alle davon. Dateien anhaken, um Kurven zu überlagern, auch aus verschiedenen Ordnern. Messdaten: PTW .mcc, IBA .asc oder Spalten (x in mm, Wert). 2D/3D-Daten erscheinen als Karte.",view:"Darstellung",mode_curves:"Kurven",mode_diff:"Differenz zur Referenz",mode_ratio:"Verhältnis zur Referenz",reference:"Referenz",zoom_peak:"Peak-Zoom",zoom_reset:"Zoom zurücksetzen",clear_sel:"Auswahl leeren",selected:"ausgewählt",plot_hint:"Bereich mit der Maus aufziehen zum Zoomen, Doppelklick setzt zurück.",peak_entr:"Peak/Eingang",xaxis:"Tiefenachse",loading:"lädt …",live_elapsed:"läuft seit",live_rate:"Rate",live_cores:"Kerne",ph_init:"Initialisierung (Geometrie, Physiktabellen)",ph_run:"Simulation",ph_output:"Ausgabe schreiben",q_rest:"Rest",q_finish:"fertig ca.",q_unknown:"ohne Schätzung",q_eta_wait:"Restzeit erscheint, sobald ein Lauf fertig ist",total:"gesamt",no_r80:"Ohne R80 (kein Bragg-Peak im Phantom), bei relativer Tiefe nicht dargestellt",x_abs:"absolut",x_shift:"Tiefe − R80",x_rel:"Tiefe / R80",tail:"Schwanz",tail_tip:"Dosis hinter dem distalen Abfall (bei R80 + max(10 mm, 4 × (D80–D20))) relativ zum Maximum: Fragmentierungsschwanz",relw_tip:"Breite relativ zur Reichweite: vergleichbar zwischen Ionen bei unterschiedlicher Reichweite",bpw_filter:"BPW80 Filter",dr80_tip:"R80 minus R80 der Referenz",quad_tip:"√(BPW80² − BPW80²Referenz): Beitrag des Filters zur Peakbreite, wenn die Referenz die Kurve ohne Filter ist",plot:"Plot",statistic:"Statistik",normalize:"Normierung",
   norm_none:"keine",norm_max:"auf Maximum",norm_first:"auf Eingang",norm_sum:"auf Fläche",normalized:"normiert",log_y:"log. y-Achse",bragg:"Bragg-Kennzahlen",collapse:"Summieren über",save_png:"Als PNG speichern",images:"Bilder im Ordner",
   peak:"Peak",gen_title:"Parameterdateien erzeugen",generator:"Generator",target_folder:"Zielordner",overwrite:"vorhandene überschreiben",create:"Anlegen",created:"angelegt",
-  set_title:"Einstellungen",workspace:"Arbeitsordner",set_ws_hint:"Der Arbeitsordner wird beim Start festgelegt: --workspace ORDNER.",binaries:"TOPAS-Programme",
+  set_title:"Einstellungen",scan_title:"Durchsuchte Ordner",scan_hint:"Gilt für Läufe, Übersicht und Autovervollständigung. Der Reiter Dateien zeigt weiterhin alles. Ohne Haken wird der ganze Arbeitsordner durchsucht.",scan_include:"Nur diese Ordner durchsuchen",scan_exclude:"Ausschließen (ein Muster pro Zeile, z. B. tools oder */alt)",keep_awake:"PC während Berechnungen wach halten",keep_awake_hint:"Verhindert den Standby, solange Läufe in der Warteschlange sind. Der Bildschirm darf trotzdem ausgehen. Zuklappen des Laptops kann je nach Energieeinstellung weiterhin Standby auslösen.",awake_badge:"wach",awake_on:"aktiv",workspace:"Arbeitsordner",set_ws_hint:"Der Arbeitsordner wird beim Start festgelegt: --workspace ORDNER.",binaries:"TOPAS-Programme",
   bin_hint:"Name, Befehl und Umgebungsvariablen (eine pro Zeile, NAME=WERT). TOPAS 3.9 braucht TOPAS_G4_DATA_DIR.",bin_add:"Programm hinzufügen",bin_detect:"Automatisch erkennen",bin_name:"Name",bin_cmd:"Befehl",bin_env:"Umgebung",remove:"Entfernen",
   error:"Fehler"},
- en:{tab_files:"Files",tab_run:"Runs",tab_results:"Results",tab_gen:"Generators",tab_settings:"Settings",
+ en:{stale:"No connection to the workbench, state of {t}. Reload the page (F5).",scope:"Folder",scope_all:"whole workspace",view_saved:"View",view_name_ph:"View name",view_save:"Save view",view_need:"Select files and enter a name first.",export:"Export:",exp_data:"Data (CSV)",exp_copy:"Copy",exp_light:"light print style",copied:"Copied to the clipboard.",ex_zip:"Selection as ZIP",ex_img_zip:"Images as ZIP",download:"Download",notes:"Notifications",note_browser:"Browser notification",note_sound:"Sound",note_each:"for every finished run (otherwise only failures and end of queue)",note_testbtn:"Test",note_test:"This is what a notification looks like.",note_failed:"Run failed",note_queue_done:"Queue finished.",note_denied:"The browser blocked notifications.",note_toast:"Windows notification when no page is open (WSL)",var_btn:"Variations",var_title:"Variations of this file",var_param:"Parameter",var_values_ph:"Values, comma separated, e.g. 70, 100, 150",var_run:"Create and run",var_hint:"Without a unit the unit of the template is kept, strings get quotes. Scorer outputs get the same suffix so nothing is overwritten. File name placeholders: {name}, {value}.",tab_explorer:"Overview",ex_title:"All results in the workspace",ex_search_ph:"Search, several words must all match",ex_kind:"Kind",ex_all:"all",ex_k_data:"Simulation",ex_k_meas:"Measurement",ex_k_img:"Image",ex_particle:"Particle",ex_energy:"Energy",ex_folder:"Folder",ex_reload:"Reload",ex_tags:"Tags",ex_reftag:"Reference tag",ex_ref_hint:"Deviations refer to the file with this tag in the same folder with the same particle and energy.",ex_formulas:"Custom formula columns",ex_formula_hint:"Variables: r80, bpw80, peak, energy, rel_bpw, tail, dfo, ref_r80, ref_bpw80, ref_peak, dr80, dbpw80, bpw_filter, r80_bk, dev_bk. Functions: sqrt, abs, log, log10, exp, pow, min, max, round, ^ for power. Stored in this browser.",ex_fname_ph:"Name",ex_fexpr_ph:"Formula, e.g. 100*(bpw80-ref_bpw80)/ref_bpw80",ex_fadd:"Add column",ex_unknown:"unknown",ex_plot:"Plot selection",ex_csv:"Table as CSV",ex_rows:"data rows",ex_files:"files after filter",ex_legend:"Formulas:",ex_images:"Images",f_bk_note:"approximation for water",ex_ref_rule:"Yellow: more than 3 % off Bragg-Kleeman.",f_dr80:"R80 minus R80 of the reference",f_quad:"√(BPW80² − BPW80²ref)",f_bk:"Bragg-Kleeman range in water",f_devbk:"(R80 − R80 BK) / R80 BK in %",tab_files:"Files",tab_run:"Runs",tab_results:"Results",tab_gen:"Generators",tab_settings:"Settings",
   theme_auto:"Theme: system",theme_light:"Light",theme_dark:"Dark",
   files_title:"Workspace",col_name:"Name",col_size:"Size",col_mtime:"Modified",col_file:"File",col_last:"Last run",col_status:"Status",col_time:"Time",
   fm_name_ph:"Name or target, e.g. new.txt or folder/copy.txt",fm_newdir:"New folder",fm_newfile:"New file",fm_move:"Rename / move",fm_copy:"Copy",fm_trash:"Move to trash",fm_queue:"Run",
   fm_hint:"Click an entry to select it, double-click a folder to open it. Deleted items go to _trash.",preview:"Preview",save:"Save",check:"Check",
   saved:"saved",select_first:"Select an entry first.",enter_name:"Please enter a name.",entries:"entries",no_preview:"No preview for this file type.",folder_hint:"Folder. Double-click to open.",
-  lint_ok:"No issues found.",lint_syntax:"Line not readable",lint_notype:"Type missing (d:, s:, i:, b:, u: …)",lint_bool:"Boolean expected (\"True\"/\"False\")",lint_string:"String without quotes",lint_unit:"Unit missing",lint_int:"Integer expected",lint_count:"Count does not match vector length",line:"Line",
-  run_files:"Parameter files",filter_ph:"Filter",only_not_done:"only without a successful run",binary:"Program",subdir:"Output subfolder",subdir_ph:"empty = same folder",skip_existing:"skip existing results",
+  lint_ok:"No issues found.",lint_syntax:"Line not readable",lint_notype:"Type missing (d:, s:, i:, b:, u: …)",lint_bool:"Boolean expected (\"True\"/\"False\")",lint_string:"String without quotes",lint_unit:"Unit missing",lint_int:"Integer expected",lint_count:"Count does not match vector length",lint_include:"Included file not found",line:"Line",included:"Included",missing:"missing",ed_hint:"Ctrl+S saves. Suggestions appear while you type a parameter name (arrow keys, Enter or Tab to accept, Esc to close). Ctrl+Space shows them right away.",
+  run_files:"Parameter files",filter_ph:"Filter",only_not_done:"only without results",col_results:"Results",here:"here",eta:"left",histories_done:"histories",log_hints:"Suspicious log lines:",binary:"Program",subdir:"Output subfolder",subdir_ph:"empty = same folder",skip_existing:"skip existing results",
   select_all:"all",select_none:"none",enqueue:"Add to queue",queue:"Queue",stop_current:"Stop current run",remove_queued:"Remove waiting",clear_history:"Clear history",log:"Log",
   added:"added",skipped:"skipped",nothing_selected:"Nothing selected.",no_binary:"No program configured, see Settings.",outputs:"Outputs",
   st_queued:"waiting",st_running:"running",st_done:"done",st_failed:"failed",st_stopped:"stopped",st_aborted:"aborted",st_removed:"removed",running_badge:"running",
-  res_files:"Scorer output (CSV)",res_hint:"Tick several CSVs to overlay 1D curves. 2D/3D data are shown as a map.",plot:"Plot",statistic:"Statistic",normalize:"Normalise",
+  res_files:"Scorer output and measurements",res_hint:"Click a row to select it, shift+click selects a range, drag across rows to select them all. Tick files to overlay curves, also across folders. Measurements: PTW .mcc, IBA .asc, or columns (x in mm, value). 2D/3D data show as a map.",view:"View",mode_curves:"Curves",mode_diff:"Difference to reference",mode_ratio:"Ratio to reference",reference:"Reference",zoom_peak:"Zoom to peak",zoom_reset:"Reset zoom",clear_sel:"Clear selection",selected:"selected",plot_hint:"Drag across the plot to zoom, double-click to reset.",peak_entr:"Peak/entrance",xaxis:"Depth axis",loading:"loading …",live_elapsed:"running for",live_rate:"Rate",live_cores:"cores",ph_init:"Initialisation (geometry, physics tables)",ph_run:"Simulation",ph_output:"Writing output",q_rest:"Remaining",q_finish:"done at",q_unknown:"without estimate",q_eta_wait:"remaining time appears once a run has finished",total:"total",no_r80:"No R80 (no Bragg peak in the phantom), not shown with relative depth",x_abs:"absolute",x_shift:"depth − R80",x_rel:"depth / R80",tail:"Tail",tail_tip:"Dose beyond the distal fall-off (at R80 + max(10 mm, 4 × (D80–D20))) relative to the maximum: fragmentation tail",relw_tip:"Width relative to the range: comparable between ions with different ranges",bpw_filter:"BPW80 filter",dr80_tip:"R80 minus R80 of the reference",quad_tip:"√(BPW80² − BPW80²reference): filter contribution to the peak width when the reference is the curve without filter",plot:"Plot",statistic:"Statistic",normalize:"Normalise",
   norm_none:"none",norm_max:"to maximum",norm_first:"to entrance",norm_sum:"to area",normalized:"normalised",log_y:"log y axis",bragg:"Bragg metrics",collapse:"Sum over",save_png:"Save as PNG",images:"Images in folder",
   peak:"Peak",gen_title:"Generate parameter files",generator:"Generator",target_folder:"Target folder",overwrite:"overwrite existing",create:"Create",created:"created",
-  set_title:"Settings",workspace:"Workspace",set_ws_hint:"The workspace is set at start-up: --workspace FOLDER.",binaries:"TOPAS programs",
+  set_title:"Settings",scan_title:"Searched folders",scan_hint:"Applies to Runs, Overview, and autocompletion. The Files tab still shows everything. With nothing ticked, the whole workspace is searched.",scan_include:"Only search these folders",scan_exclude:"Exclude (one pattern per line, e.g. tools or */old)",keep_awake:"Keep the computer awake during runs",keep_awake_hint:"Prevents sleep while runs are queued. The display may still turn off. Closing the laptop lid can still trigger sleep, depending on your power settings.",awake_badge:"awake",awake_on:"active",workspace:"Workspace",set_ws_hint:"The workspace is set at start-up: --workspace FOLDER.",binaries:"TOPAS programs",
   bin_hint:"Name, command and environment variables (one per line, NAME=VALUE). TOPAS 3.9 needs TOPAS_G4_DATA_DIR.",bin_add:"Add program",bin_detect:"Detect automatically",bin_name:"Name",bin_cmd:"Command",bin_env:"Environment",remove:"Remove",
   error:"Error"}};
 let LANG=document.documentElement.lang||"de";
@@ -243,9 +342,23 @@ const fmtSize=b=>b>1e6?(b/1e6).toFixed(1)+" MB":b>1e3?Math.round(b/1e3)+" kB":b+
 const fmtTime=s=>new Date(s*1000).toLocaleString(LANG==="de"?"de-DE":"en-GB",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
 const fileUrl=p=>`/file?p=${encodeURIComponent(p)}&token=${TOKEN}&t=${Date.now()}`;
 
+/* ---------- multi-select in checkbox tables: click a row, shift+click for a range, drag over rows */
+function multiSelect(tbody,onChange){
+ if(tbody._ms)return;tbody._ms=true;let drag=null,last=null,moved=false;
+ const rows=()=>[...tbody.querySelectorAll("tr")].filter(r=>r.querySelector("input[type=checkbox]"));
+ const set=(r,v)=>{const c=r.querySelector("input[type=checkbox]");if(c.checked!==v){c.checked=v;r.classList.toggle("sel",v)}};
+ tbody.addEventListener("mousedown",e=>{if(e.button!==0)return;const r=e.target.closest("tr");if(!r||!r.querySelector("input[type=checkbox]")||e.target.closest("a"))return;
+  const all=rows(),i=all.indexOf(r),box=r.querySelector("input[type=checkbox]");e.preventDefault();
+  if(e.shiftKey&&last!=null&&last<all.length){const v=all[last].querySelector("input").checked;const [a,b]=i<last?[i,last]:[last,i];for(let k=a;k<=b;k++)set(all[k],v);onChange();return}
+  const v=!box.checked;set(r,v);drag={v,start:i};moved=false;last=i;document.body.style.userSelect="none"});
+ tbody.addEventListener("mouseover",e=>{if(!drag)return;const r=e.target.closest("tr");if(!r)return;const all=rows(),i=all.indexOf(r);if(i<0)return;moved=true;
+  const [a,b]=i<drag.start?[i,drag.start]:[drag.start,i];for(let k=a;k<=b;k++)set(all[k],drag.v)});
+ window.addEventListener("mouseup",()=>{if(!drag)return;drag=null;document.body.style.userSelect="";onChange()});
+ tbody.addEventListener("click",e=>{if(e.target.matches("input[type=checkbox]"))e.preventDefault()});   // state is handled on mousedown
+ tbody.addEventListener("keydown",e=>{if(e.key===" "&&e.target.matches("input[type=checkbox]")){e.preventDefault();e.target.checked=!e.target.checked;e.target.closest("tr").classList.toggle("sel",e.target.checked);onChange()}});}
 /* ---------- tabs, language, theme */
 function showTab(id){document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id===id));document.querySelectorAll("nav [role=tab]").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===id));store("tab",id);
- if(id==="files")fmLoad(FM.path);if(id==="run")loadParams();if(id==="results")resLoad(RS.path);if(id==="gen")loadGens();if(id==="settings")loadSettings();}
+ if(id==="files")fmLoad(FM.path);if(id==="run")loadParams();if(id==="results"){resLoad(RS.path);loadViews()}if(id==="explorer")exLoad(false);if(id==="gen")loadGens();if(id==="settings")loadSettings();}
 document.querySelectorAll("nav [role=tab]").forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
 $("langSel").value=recall("lang")||((navigator.language||"").toLowerCase().startsWith("de")?"de":"en");LANG=$("langSel").value;
 $("langSel").onchange=e=>{LANG=e.target.value;store("lang",LANG);applyI18n();api("/api/config",{lang:LANG}).catch(()=>{});showTab(recall("tab")||"files");};
@@ -254,7 +367,7 @@ $("themeSel").value=recall("theme")||"auto";applyTheme($("themeSel").value);$("t
 
 /* ---------- files */
 const FM={path:"",sel:null,file:null,dir:false};
-const TEXT=[".txt",".py",".sh",".bat",".json",".csv",".md",".log",".in",".mac",".xml",".header",".binheader"];
+const TEXT=[".txt",".py",".sh",".bat",".json",".csv",".md",".log",".in",".mac",".xml",".header",".binheader",".mcc",".asc",".dat",".tsv"];
 const join=(a,b)=>a?a+"/"+b:b;
 function crumbs(el,path,fn){const parts=path?path.split("/"):[];let acc="";
  el.innerHTML=`<a href="#" data-p="">${esc(t("workspace"))}</a>`+parts.map(x=>{acc=join(acc,x);return ` / <a href="#" data-p="${esc(acc)}">${esc(x)}</a>`}).join("");
@@ -267,10 +380,11 @@ async function fmLoad(p){try{const j=await api("/api/ls?p="+encodeURIComponent(p
  $("fmMsg").textContent=`${j.items.length} ${t("entries")}`;}catch(e){$("fmMsg").textContent=t("error")+": "+e.message}}
 async function fmSelect(tr){$("fmBody").querySelectorAll("tr").forEach(r=>r.classList.remove("sel"));tr.classList.add("sel");
  const n=tr.dataset.n;FM.sel=join(FM.path,n);FM.dir=tr.dataset.d==="1";$("fmName").value=n;$("fmTitle").textContent=FM.sel;$("fmSaveMsg").textContent="";$("fmLintOut").innerHTML="";
- const ext=n.includes(".")?n.slice(n.lastIndexOf(".")).toLowerCase():"";["fmEd","fmSave","fmLint"].forEach(i=>$(i).hidden=true);$("fmView").innerHTML="";FM.file=null;
+ const ext=n.includes(".")?n.slice(n.lastIndexOf(".")).toLowerCase():"";["edWrap","fmSave","fmLint","fmVar","varBox"].forEach(i=>$(i).hidden=true);$("fmView").innerHTML="";$("fmInc").innerHTML="";FM.file=null;acClose();
  if(FM.dir){$("fmView").textContent=t("folder_hint");return}
  if([".png",".jpg",".svg"].includes(ext)){$("fmView").innerHTML=`<img alt="" style="max-width:100%;border:1px solid var(--line);border-radius:7px;background:#fff" src="${fileUrl(FM.sel)}">`;return}
- if(TEXT.includes(ext)){try{const j=await api("/api/read?p="+encodeURIComponent(FM.sel));$("fmEd").value=j.text;["fmEd","fmSave"].forEach(i=>$(i).hidden=false);$("fmLint").hidden=ext!==".txt";FM.file=FM.sel;if(ext===".txt")showLint(j.lint)}catch(e){$("fmView").textContent=e.message}return}
+ if(TEXT.includes(ext)){try{const j=await api("/api/read?p="+encodeURIComponent(FM.sel));const ta=$("fmEd");ta.value=j.text;ta.scrollTop=0;ta.scrollLeft=0;["edWrap","fmSave"].forEach(i=>$(i).hidden=false);$("fmLint").hidden=ext!==".txt";$("fmVar").hidden=ext!==".txt";$("varBox").hidden=true;FM.file=FM.sel;ED.param=ext===".txt";ED.lint=j.lint||[];
+  if(ED.param){showLint(j.lint);showIncludes(j.includes);loadNames()}highlight()}catch(e){$("fmView").textContent=e.message}return}
  $("fmView").textContent=t("no_preview");}
 function showLint(list){if(!list){$("fmLintOut").innerHTML="";return}
  $("fmLintOut").innerHTML=list.length?list.map(([n,sev,key,d])=>`<div class="${sev}">${t("line")} ${n}: ${esc(t(key))} <span class="mute">${esc(d)}</span></div>`).join(""):`<div class="mute">${t("lint_ok")}</div>`;}
@@ -284,93 +398,361 @@ $("fmMove").onclick=()=>need()&&needName()&&fmDo("/api/move",{src:FM.sel,dst:$("
 $("fmCopy").onclick=()=>need()&&needName()&&fmDo("/api/copy",{src:FM.sel,dst:$("fmName").value.trim()});
 $("fmTrash").onclick=()=>need()&&fmDo("/api/trash",{p:FM.sel});
 $("fmQueue").onclick=()=>{if(!need())return;if(!FM.sel.endsWith(".txt")){$("fmMsg").textContent=t("select_first");return}showTab("run");RF.preselect=[FM.sel];renderParams();};
-$("fmSave").onclick=async()=>{try{const j=await api("/api/write",{p:FM.file,text:$("fmEd").value});$("fmSaveMsg").textContent=t("saved")+" "+new Date().toLocaleTimeString();showLint(j.lint)}catch(e){$("fmSaveMsg").textContent=t("error")+": "+e.message}};
-$("fmLint").onclick=async()=>{const j=await api("/api/lint",{text:$("fmEd").value});showLint(j.lint)};
-$("fmEd").addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key==="s"){e.preventDefault();$("fmSave").click()}});
+$("fmSave").onclick=async()=>{try{const j=await api("/api/write",{p:FM.file,text:$("fmEd").value});$("fmSaveMsg").textContent=t("saved")+" "+new Date().toLocaleTimeString();if(ED.param){ED.lint=j.lint;showLint(j.lint);showIncludes(j.includes);highlight();NAMES.loaded=false}}catch(e){$("fmSaveMsg").textContent=t("error")+": "+e.message}};
+$("fmLint").onclick=()=>liveLint(true);
+/* ---------- editor: highlighting, live lint, includes, autocomplete */
+const ED={param:false,lint:[],timer:null};
+function hlLine(l){const h=l.indexOf("#");let code=h>=0?l.slice(0,h):l,com=h>=0?l.slice(h):"";let out;
+ const m=code.match(/^(\s*)([a-z]{1,2}:)([^=\s]+)(\s*=\s*)(.*)$/);
+ if(m){const val=esc(m[5]).replace(/(&quot;[^&]*?&quot;)|(-?\d+\.?\d*(?:[eE][+-]?\d+)?)|([A-Za-z%][\w%/]*)/g,(x,str,num,word)=>str?`<span class="hl-s">${str}</span>`:num?`<span class="hl-n">${num}</span>`:`<span class="hl-u">${word}</span>`);
+  out=`${m[1]}<span class="hl-t">${esc(m[2])}</span>${esc(m[3])}${esc(m[4])}${val}`}
+ else if(/^\s*includeFile\b/.test(code))out=esc(code).replace("includeFile",'<span class="hl-t">includeFile</span>');else out=esc(code);
+ return out+(com?`<span class="hl-c">${esc(com)}</span>`:"")}
+function highlight(){const ta=$("fmEd"),lines=ta.value.split("\n");const sev={};if(ED.param)for(const [n,sv] of ED.lint)sev[n]=sev[n]==="error"?"error":sv;
+ $("edHl").innerHTML=lines.map((l,i)=>{const h=ED.param?hlLine(l):esc(l),s=sev[i+1];return s?`<span class="${s==="error"?"hl-err":"hl-wrn"}">${h||" "}</span>`:h}).join("\n")+"\n\n ";syncScroll()}
+function syncScroll(){const ta=$("fmEd"),pre=$("edHl");pre.scrollTop=ta.scrollTop;pre.scrollLeft=ta.scrollLeft;}
+async function liveLint(now){if(!ED.param)return;clearTimeout(ED.timer);const go=async()=>{try{const j=await api("/api/lint",{text:$("fmEd").value,p:FM.file});ED.lint=j.lint;showLint(j.lint);showIncludes(j.includes);highlight()}catch(e){}};if(now)go();else ED.timer=setTimeout(go,700)}
+function showIncludes(list){$("fmInc").innerHTML=(list&&list.length)?`<span class="mute">${t("included")}:</span> `+list.map(([n,name,rel])=>rel?`<a href="#" data-rel="${esc(rel)}">${esc(name)}</a>`:`<span class="miss">${esc(name)} (${t("missing")})</span>`).join(", "):"";
+ $("fmInc").querySelectorAll("a").forEach(a=>a.onclick=e=>{e.preventDefault();openFile(a.dataset.rel)})}
+async function openFile(rel){const dir=rel.split("/").slice(0,-1).join("/"),name=rel.split("/").pop();await fmLoad(dir);const tr=[...$("fmBody").querySelectorAll("tr")].find(r=>r.dataset.n===name);if(tr){tr.scrollIntoView({block:"nearest"});fmSelect(tr)}}
+const NAMES={loaded:false,list:[]};
+const BUILTIN=["i:Ts/NumberOfThreads","i:Ts/ShowHistoryCountAtInterval","i:Ts/Seed","b:Ts/PauseBeforeQuit","b:Ts/UseQt","b:Ts/DumpParameters","b:Ts/ShowCPUTime",
+ "b:Ge/CheckForOverlaps","b:Ge/QuitIfOverlapDetected","s:Ge/World/Material","d:Ge/World/HLX","d:Ge/World/HLY","d:Ge/World/HLZ","b:Ge/World/Invisible",
+ "s:Ge/BeamPosition/Parent","s:Ge/BeamPosition/Type","d:Ge/BeamPosition/TransX","d:Ge/BeamPosition/TransY","d:Ge/BeamPosition/TransZ","d:Ge/BeamPosition/RotX","d:Ge/BeamPosition/RotY","d:Ge/BeamPosition/RotZ",
+ "sv:Ph/Default/Modules","d:Ph/Default/EMRangeMin","d:Ph/Default/EMRangeMax","i:Ph/Default/EMBins","d:Ph/Default/CutForAllParticles","d:Ph/Default/CutForProton","d:Ph/Default/CutForElectron","d:Ph/Default/CutForGamma","s:Ph/ListName","s:Ph/Default/Type",
+ "b:Gr/Enable","s:Gr/ViewA/Type","i:Gr/ViewA/WindowSizeX","i:Gr/ViewA/WindowSizeY","b:Gr/ViewA/IncludeAxes","d:Gr/ViewA/AxesSize","u:Gr/ViewA/Zoom","d:Gr/ViewA/Theta","d:Gr/ViewA/Phi",
+ "s:Ma/MyMaterial/Components","uv:Ma/MyMaterial/Fractions","d:Ma/MyMaterial/Density","s:Ma/MyMaterial/DefaultColor","d:Ma/MyMaterial/MeanExcitationEnergy","includeFile"];
+const TPL={Ge:["s:Type","s:Parent","s:Material","d:HLX","d:HLY","d:HLZ","d:TransX","d:TransY","d:TransZ","d:RotX","d:RotY","d:RotZ","i:XBins","i:YBins","i:ZBins","i:RBins","i:PhiBins","d:RMin","d:RMax","d:SPhi","d:DPhi","d:SPhi","b:IsParallel","b:Invisible","s:Color","s:DrawingStyle","s:InputFile","s:FileFormat","d:Units","dv:XPoints","dv:ZPoints","d:Width","d:Length","dv:Displacement"],
+ Sc:["s:Quantity","s:Component","s:Material","s:OutputType","s:OutputFile","s:IfOutputFileAlreadyExists","sv:Report","b:OutputToConsole","i:XBins","i:YBins","i:ZBins","s:OnlyIncludeParticlesNamed"],
+ So:["s:Type","s:Component","s:BeamParticle","d:BeamEnergy","u:BeamEnergySpread","s:BeamPositionDistribution","s:BeamPositionCutoffShape","d:BeamPositionCutoffX","d:BeamPositionCutoffY","d:BeamPositionSpreadX","d:BeamPositionSpreadY","s:BeamAngularDistribution","d:BeamAngularCutoffX","d:BeamAngularCutoffY","d:BeamAngularSpreadX","d:BeamAngularSpreadY","i:NumberOfHistoriesInRun"]};
+async function loadNames(){if(NAMES.loaded)return;try{NAMES.list=(await api("/api/names")).names;NAMES.loaded=true}catch(e){}}
+function candidates(text){const set=new Map();const add=(n,src)=>{if(!set.has(n))set.set(n,src)};
+ const comps=new Set();for(const m of text.matchAll(/^\s*[a-z]{1,2}:(Ge|Sc|So)\/([^\/\s=]+)\//gm))comps.add(m[1]+"/"+m[2]);
+ for(const c of comps){const [cat,name]=c.split("/");for(const x of TPL[cat]){const [ty,suf]=x.split(":");add(`${ty}:${cat}/${name}/${suf}`,name)}}
+ for(const n of NAMES.list)add(n,"ws");for(const n of BUILTIN)add(n,"topas");return set}
+const AC={open:false,items:[],idx:0,start:0};
+function acClose(){AC.open=false;$("acBox").hidden=true}
+function acUpdate(force){const ta=$("fmEd");if(!ED.param){acClose();return}const pos=ta.selectionStart,v=ta.value,ls=v.lastIndexOf("\n",pos-1)+1,pre=v.slice(ls,pos);
+ if(pre.includes("=")||pre.includes("#")){acClose();return}const tok=pre.trim();if(tok.length<2&&!force){acClose();return}
+ const q=tok.toLowerCase(),cand=candidates(v);let list=[...cand.entries()].filter(([n])=>n.toLowerCase().includes(q));
+ list.sort((a,b)=>(b[0].toLowerCase().startsWith(q)-a[0].toLowerCase().startsWith(q))||(a[1]==="ws")-(b[1]==="ws")||a[0].localeCompare(b[0]));list=list.slice(0,40);
+ if(!list.length||(list.length===1&&list[0][0]===tok)){acClose();return}
+ AC.items=list;AC.idx=0;AC.start=ls+pre.length-pre.trimStart().length;AC.open=true;
+ const box=$("acBox");box.innerHTML=list.map(([n,src],i)=>`<div role="option" data-i="${i}" class="${i?"":"on"}">${esc(n)}<span class="src">${src==="ws"?"workspace":src==="topas"?"TOPAS":esc(src)}</span></div>`).join("");
+ box.querySelectorAll("div[data-i]").forEach(d=>d.onmousedown=e=>{e.preventDefault();AC.idx=+d.dataset.i;acAccept()});
+ const line=v.slice(0,pos).split("\n").length-1,cw=charWidth(),lh=13*1.45,y=8+line*lh-ta.scrollTop;box.hidden=false;const bh=Math.min(box.scrollHeight,230);box.style.top=(y+lh+bh+4>ta.clientHeight?Math.max(0,y-bh-2):y+lh+2)+"px";box.style.left=Math.max(4,Math.min(8+pre.length*cw-ta.scrollLeft,ta.clientWidth-350))+"px";box.hidden=false}
+function acMove(d){AC.idx=(AC.idx+d+AC.items.length)%AC.items.length;$("acBox").querySelectorAll("div[data-i]").forEach((e,i)=>{e.classList.toggle("on",i===AC.idx);if(i===AC.idx)e.scrollIntoView({block:"nearest"})})}
+function acAccept(){const ta=$("fmEd"),pos=ta.selectionStart,name=AC.items[AC.idx][0],ins=name==="includeFile"?"includeFile = ":name+" = ";
+ ta.setRangeText(ins,AC.start,pos,"end");acClose();highlight();liveLint();ta.focus()}
+let _cw=0;function charWidth(){if(!_cw){const c=document.createElement("canvas").getContext("2d");c.font=getComputedStyle($("fmEd")).font;_cw=c.measureText("MMMMMMMMMM").width/10}return _cw}
+$("fmEd").addEventListener("input",()=>{highlight();acUpdate(false);liveLint()});
+$("fmEd").addEventListener("scroll",()=>{syncScroll();if(AC.open)acClose()});
+$("fmEd").addEventListener("blur",()=>setTimeout(acClose,150));
+$("fmEd").addEventListener("click",acClose);
+$("fmEd").addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key==="s"){e.preventDefault();$("fmSave").click();return}
+ if(e.ctrlKey&&e.key===" "){e.preventDefault();acUpdate(true);return}
+ if(AC.open){if(e.key==="ArrowDown"){e.preventDefault();acMove(1)}else if(e.key==="ArrowUp"){e.preventDefault();acMove(-1)}else if(e.key==="Enter"||e.key==="Tab"){e.preventDefault();acAccept()}else if(e.key==="Escape"){e.preventDefault();acClose()}}});
 
 /* ---------- runs */
-const RF={files:[],last:{},preselect:[]};let INFO=null;
-async function loadInfo(){INFO=await api("/api/info");const sel=$("rfBin"),cur=sel.value;sel.innerHTML="";for(const b of INFO.cfg.binaries)sel.add(new Option(b.name,b.name));if(cur)sel.value=cur;else if(recall("bin"))sel.value=recall("bin");}
+const RF={files:[],last:{},results:{},preselect:[]};let INFO=null;
+function fillScopes(){const fs=INFO.folders||[];for(const sel of document.querySelectorAll(".scopeSel")){const cur=recall(sel.dataset.k)||"";sel.innerHTML="";sel.add(new Option(t("scope_all"),""));for(const f of fs)sel.add(new Option(f,f));sel.value=fs.includes(cur)?cur:""}}
+const scopeQ=id=>{const v=$(id).value;return v?"?scope="+encodeURIComponent(v):""};
+async function loadInfo(){INFO=await api("/api/info");fillScopes();const sel=$("rfBin"),cur=sel.value;sel.innerHTML="";for(const b of INFO.cfg.binaries)sel.add(new Option(b.name,b.name));if(cur)sel.value=cur;else if(recall("bin"))sel.value=recall("bin");}
 $("rfBin").onchange=e=>store("bin",e.target.value);
-async function loadParams(){await loadInfo();const j=await api("/api/params");RF.files=j.files;RF.last=j.last;renderParams();refreshJobs();}
+async function loadParams(){await loadInfo();if(!RF.files.length)$("rfMsg").textContent=t("loading");let j;try{j=await api("/api/params"+scopeQ("rfScope"))}catch(e){$("rfMsg").textContent=t("error")+": "+e.message;return}$("rfMsg").textContent="";RF.files=j.files;RF.last=j.last;RF.results=j.results||{};renderParams();refreshJobs();}
+const fmtDur=s=>s<90?Math.round(s)+" s":s<5400?Math.round(s/60)+" min":(s/3600).toFixed(1)+" h";
 function renderParams(){const f=$("rfFilter").value.toLowerCase(),open=$("rfOpen").checked,bin=$("rfBin").value;
  const checked=new Set([...document.querySelectorAll(".rfc:checked")].map(e=>e.value).concat(RF.preselect));RF.preselect=[];
- $("rfBody").innerHTML=RF.files.filter(x=>x.toLowerCase().includes(f)).filter(x=>!open||(RF.last[x+"|"+bin]||{}).status!=="done").map(x=>{const l=RF.last[x+"|"+bin];
-  return `<tr><td><input type="checkbox" class="rfc" value="${esc(x)}" ${checked.has(x)?"checked":""} aria-label="${esc(x)}"></td><td>${esc(x)}</td><td>${l?`<span class="st-${l.status}">${t("st_"+l.status)}</span> <span class="mute">${esc(l.end||"")}</span>`:""}</td></tr>`}).join("");}
+ const sub=$("rfSub").value.trim();
+ $("rfBody").innerHTML=RF.files.filter(x=>x.toLowerCase().includes(f)).filter(x=>!open||!((RF.results[x]||[]).includes(sub))).map(x=>{const l=RF.last[x+"|"+bin],r=RF.results[x]||[];
+  return `<tr class="${checked.has(x)?"sel":""}" style="cursor:pointer"><td><input type="checkbox" class="rfc" value="${esc(x)}" ${checked.has(x)?"checked":""} aria-label="${esc(x)}"></td><td>${esc(x)}</td><td>${r.length?`<span class="res">✓</span> ${r.map(d=>esc(d||t("here"))).join(", ")}`:""}</td><td>${l?`<span class="st-${l.status}">${t("st_"+l.status)}</span> <span class="mute">${esc((l.end||"").slice(5,16))}</span>`:""}</td></tr>`}).join("");}
+multiSelect($("rfBody"),()=>{});
+$("rfSub").oninput=renderParams;
+$("rfScope").onchange=()=>{store("scope_run",$("rfScope").value);RF.files=[];loadParams()};$("exScope").onchange=async()=>{store("scope_ex",$("exScope").value);exLoad(true)};
 $("rfFilter").oninput=renderParams;$("rfOpen").onchange=renderParams;
-$("rfAll").onclick=()=>document.querySelectorAll(".rfc").forEach(c=>c.checked=true);$("rfNone").onclick=()=>document.querySelectorAll(".rfc").forEach(c=>c.checked=false);
+$("rfAll").onclick=()=>document.querySelectorAll(".rfc").forEach(c=>{c.checked=true;c.closest("tr").classList.add("sel")});$("rfNone").onclick=()=>document.querySelectorAll(".rfc").forEach(c=>{c.checked=false;c.closest("tr").classList.remove("sel")});
 $("rfRun").onclick=async()=>{const files=[...document.querySelectorAll(".rfc:checked")].map(e=>e.value);if(!files.length){$("rfMsg").textContent=t("nothing_selected");return}
  if(!$("rfBin").value){$("rfMsg").textContent=t("no_binary");return}
  try{const j=await api("/api/enqueue",{files,binary:$("rfBin").value,subdir:$("rfSub").value.trim(),skip:$("rfSkip").checked});$("rfMsg").textContent=`${j.added.length} ${t("added")}, ${j.skipped.length} ${t("skipped")}`;refreshJobs()}catch(e){$("rfMsg").textContent=t("error")+": "+e.message}};
 let JOBSEL=null;
-async function refreshJobs(){let j;try{j=await api("/api/jobs")}catch(e){return}
+async function refreshJobs(){const j=await api("/api/jobs");checkTransitions(j.jobs);
+ const aw=j.awake||{};$("awakeBadge").hidden=!aw.active;$("awakeBadge").textContent="☕ "+t("awake_badge");$("awakeBadge").title=aw.method||"";
+ $("awakeMsg").textContent=aw.active?`${t("awake_on")} (${aw.method})`:aw.error?`${t("error")}: ${aw.error}`:"";
  const run=j.jobs.find(x=>x.status==="running"),wait=j.jobs.filter(x=>x.status==="queued").length;
- $("runBadge").hidden=!run&&!wait;$("runBadge").textContent=run?`${t("running_badge")}: ${run.file.split("/").pop()} (+${wait})`:`${t("st_queued")}: ${wait}`;
- $("qBody").innerHTML=j.jobs.slice().reverse().map(x=>`<tr data-id="${x.id}" class="${JOBSEL===x.id?"sel":""}" style="cursor:pointer"><td>${x.id}</td><td>${esc(x.file)}${x.subdir?` <span class="mute">→ ${esc(x.subdir)}</span>`:""}</td><td>${esc(x.binary)}</td><td class="st-${x.status}">${t("st_"+x.status)}</td><td class="mute">${x.seconds!=null?(x.seconds<90?x.seconds+" s":x.seconds<5400?Math.round(x.seconds/60)+" min":(x.seconds/3600).toFixed(1)+" h"):esc((x.start||x.queued||"").slice(11,16))}</td></tr>`).join("");
+ const qe=j.queue_eta;const etaTxt=qe&&(run||wait)?`${t("q_rest")} ≈ ${fmtDur(qe.seconds)}, ${t("q_finish")} ${qe.finish}${qe.unknown?` (${qe.unknown} ${t("q_unknown")})`:""}`:(run||wait)?t("q_eta_wait"):"";
+ $("qEta").textContent=etaTxt?"· "+etaTxt:"";
+ $("runBadge").hidden=!run&&!wait;$("runBadge").textContent=(run?`${t("running_badge")}: ${run.file.split("/").pop()}${run.progress!=null?" "+Math.round(run.progress*100)+" %":""} (+${wait})`:`${t("st_queued")}: ${wait}`)+(qe&&(run||wait)?`, ${t("q_finish")} ${qe.finish}`:"");$("runBadge").title=etaTxt;
+ $("qBody").innerHTML=j.jobs.slice().reverse().map(x=>`<tr data-id="${x.id}" class="${JOBSEL===x.id?"sel":""}" style="cursor:pointer"><td>${x.id}</td><td>${esc(x.file)}${x.subdir?` <span class="mute">→ ${esc(x.subdir)}</span>`:""}</td><td>${esc(x.binary)}</td><td class="st-${x.status}">${t("st_"+x.status)}</td><td class="mute">${x.status==="running"?(x.progress!=null?`<span class="bar"><i style="width:${(x.progress*100).toFixed(1)}%"></i></span>${Math.round(x.progress*100)} %, ${t("eta")} ${fmtDur(x.eta)}`:x.done!=null?`${x.done} ${t("histories_done")}`:esc((x.start||"").slice(11,16))):x.seconds!=null?fmtDur(x.seconds):esc((x.start||x.queued||"").slice(11,16))}</td></tr>`).join("");
  $("qBody").querySelectorAll("tr").forEach(tr=>tr.onclick=()=>{JOBSEL=+tr.dataset.id;refreshJobs()});
+ renderLive(run);
  const show=j.jobs.find(x=>x.id===JOBSEL)||run||j.jobs[j.jobs.length-1];
  if(show){$("logTitle").textContent=`${t("log")}: #${show.id} ${show.file}`;
-  if(show.log){try{const l=await api("/api/log?p="+encodeURIComponent(show.log));const pre=$("logOut"),end=pre.scrollTop+pre.clientHeight>=pre.scrollHeight-30;pre.textContent=l.text;if(end)pre.scrollTop=pre.scrollHeight}catch(e){}}else $("logOut").textContent=show.error||"";
+  if(show.log){try{const l=await api("/api/log?p="+encodeURIComponent(show.log));const pre=$("logOut"),end=pre.scrollTop+pre.clientHeight>=pre.scrollHeight-30;pre.innerHTML=colorLog(l.text);if(end)pre.scrollTop=pre.scrollHeight}catch(e){}}else $("logOut").textContent=show.error||"";
+  const hs=(show.hints||[]).concat(show.error?[show.error]:[]);$("jobHints").textContent=hs.length&&show.status!=="done"?t("log_hints")+"\n"+hs.join("\n"):"";
   $("jobOut").innerHTML=(show.outputs||[]).length?`<span class="mute">${t("outputs")}:</span> `+show.outputs.map(o=>`<a href="#" data-o="${esc(o)}">${esc(o.split("/").pop())}</a>`).join(" "):"";
   $("jobOut").querySelectorAll("a").forEach(a=>a.onclick=e=>{e.preventDefault();const o=a.dataset.o;RS.path=o.split("/").slice(0,-1).join("/");RS.pick=[o];showTab("results")});}
- if(RF.files.length&&document.getElementById("run").classList.contains("on")&&refreshJobs.wasRun&&!run){const p=await api("/api/params");RF.last=p.last;renderParams()}
- refreshJobs.wasRun=!!run;}
+ const fin=j.jobs.filter(x=>x.status!=="queued"&&x.status!=="running").length;  // refresh results and last-run columns after every finished job
+ if(RF.files.length&&refreshJobs.fin!=null&&fin!==refreshJobs.fin&&document.getElementById("run").classList.contains("on")){const p=await api("/api/params"+scopeQ("rfScope"));RF.last=p.last;RF.results=p.results||{};renderParams()}
+ refreshJobs.fin=fin;}
+const fmtN=n=>Math.round(n).toLocaleString(LANG==="de"?"de-DE":"en-GB");
+const fmtClock=s=>{s=Math.max(0,Math.round(s));const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;return (h?h+":"+String(m).padStart(2,"0"):m)+":"+String(x).padStart(2,"0")};
+function renderLive(run){const box=$("liveBox");if(!run||!run.live){box.hidden=true;return}box.hidden=false;const L=run.live,ph=["init","run","output"],cur=ph.indexOf(L.phase);
+ const pr=run.progress!=null?run.progress:(L.phase==="output"?1:0);
+ box.innerHTML=`<div class="row" style="margin:0;justify-content:space-between"><b>#${run.id} ${esc(run.file.split("/").pop())}</b><span class="mute">${t("live_elapsed")} ${fmtClock(L.elapsed)}${run.eta!=null?` · ${t("eta")} ${fmtClock(run.eta)}`:""}</span></div>
+  <div class="ph">${ph.map((p,i)=>`<span class="${i===cur?"on":i<cur?"done":""}">${i<cur?"✓ ":""}${t("ph_"+p)}</span>`).join("")}</div>
+  <div class="big"><i style="width:${(pr*100).toFixed(1)}%"></i></div>
+  <div class="kv"><span>${t("histories_done")}: <b>${L.est_done!=null?fmtN(L.est_done):run.done!=null?fmtN(run.done):"–"}</b>${run.total?" / "+fmtN(run.total):""}${run.progress!=null?` (${(run.progress*100).toFixed(1)} %)`:""}</span>
+   ${L.rate?`<span>${t("live_rate")}: <b>${fmtN(L.rate)}/s</b></span>`:""}${L.cores!=null?`<span>CPU: <b>${L.cores.toLocaleString(LANG==="de"?"de-DE":"en-GB")} ${t("live_cores")}</b></span>`:""}${L.rss_mb!=null?`<span>RAM: <b>${fmtN(L.rss_mb)} MB</b></span>`:""}</div>
+  <div class="last" title="${esc(L.last)}">${esc(L.last)}</div>`}
+const ERRL=/(\berror\b|exception|quitting|exiting|segmentation|abort|unknown parameter)/i,WRNL=/\bwarning\b|WWWW/i;
+function colorLog(txt){return txt.split("\n").map(l=>ERRL.test(l)&&!/not necessarily an error/i.test(l)?`<span class="log-err">${esc(l)}</span>`:WRNL.test(l)?`<span class="log-wrn">${esc(l)}</span>`:esc(l)).join("\n")}
 $("qStop").onclick=()=>api("/api/stop",{}).then(refreshJobs);
 $("qRemove").onclick=async()=>{const j=await api("/api/jobs");await api("/api/dequeue",{ids:j.jobs.filter(x=>x.status==="queued").map(x=>x.id)});refreshJobs()};
 $("qClear").onclick=()=>api("/api/clearhistory",{}).then(refreshJobs);
-setInterval(refreshJobs,3000);
+let _tick=0,_okAt=Date.now();setInterval(()=>{_tick++;const onRun=document.getElementById("run").classList.contains("on");if(onRun?_tick%2===0:_tick%5===0)refreshJobs().then(()=>{_okAt=Date.now()},e=>console.error("refreshJobs",e));const st=$("rfStale");if(st){const age=(Date.now()-_okAt)/1000;st.hidden=age<20;st.textContent=t("stale").replace("{t}",new Date(_okAt).toLocaleTimeString())}},1000);  // 2 s on the Runs tab, 5 s elsewhere
+
+/* ---------- explorer */
+const EX={items:[],sort:{k:"path",d:1},tags:new Set(),sel:new Set(),imgs:[],lb:0,loaded:false};
+const FKEY="wb_formulas";
+function getFormulas(){try{return JSON.parse(localStorage.getItem(FKEY)||"null")||[{name:"ΔR80 %",expr:"100*(r80-ref_r80)/ref_r80"}]}catch(e){return []}}
+function setFormulas(f){try{localStorage.setItem(FKEY,JSON.stringify(f))}catch(e){}}
+const FVARS=["r80","bpw80","peak","energy","rel_bpw","tail","dfo","ref_r80","ref_bpw80","ref_peak","dr80","dbpw80","bpw_filter","r80_bk","dev_bk"];
+function compileFormula(expr){const ok=/^[\s\d.eE+\-*/()%,^a-z_]*$/i.test(expr);if(!ok)throw new Error("invalid character");
+ const ids=expr.match(/[a-z_][a-z0-9_]*/gi)||[];const fns=["sqrt","abs","log","log10","exp","pow","min","max","round","PI"];
+ for(const id of ids)if(!FVARS.includes(id)&&!fns.includes(id)&&!/^e$/i.test(id))throw new Error(t("ex_unknown")+": "+id);
+ const body=expr.replace(/\^/g,"**").replace(/\b(sqrt|abs|log10|log|exp|pow|min|max|round)\b/g,"Math.$1").replace(/\bPI\b/g,"Math.PI");
+ return new Function(...FVARS,`"use strict";return (${body});`)}
+/* Bragg-Kleeman range in water: R[mm] = 0.022 E^1.77 * A/Z^2 (E in MeV/u), ~1-2 % for protons 70-250 MeV */
+const PZA={p:[1,1],"d":[2,1],"He-4":[4,2],"He-3":[3,2],"Li-7":[7,3],"C-12":[12,6],"O-16":[16,8],"N-14":[14,7],"Ne-20":[20,10]};
+function rangeBK(part,e){const za=PZA[part];if(!za||!e)return NaN;return 0.022*Math.pow(e,1.77)*za[0]/(za[1]*za[1])}
+async function exLoad(force){if(EX.loaded&&!force){exRender();return}if(!INFO)await loadInfo();$("exCount").textContent="…";try{EX.items=(await api("/api/index"+scopeQ("exScope"))).items;EX.loaded=true}catch(e){$("exCount").textContent=t("error")+": "+e.message;return}exFillFilters();exRender()}
+function exFillFilters(){const fill=(id,vals,fmt)=>{const s=$(id),cur=s.value;s.innerHTML=`<option value="">${t("ex_all")}</option>`+vals.map(v=>`<option value="${esc(v)}">${esc(fmt?fmt(v):v)}</option>`).join("");s.value=vals.map(String).includes(cur)?cur:""};
+ const uniq=a=>[...new Set(a.filter(v=>v!=null&&v!==""))];
+ fill("exPart",uniq(EX.items.map(i=>i.particle)).sort());fill("exEn",uniq(EX.items.map(i=>i.energy)).sort((a,b)=>a-b));fill("exFolder",uniq(EX.items.map(i=>i.folder)).sort(),v=>v||"/");
+ const cnt={};for(const i of EX.items)for(const tg of i.tags)cnt[tg]=(cnt[tg]||0)+1;
+ const top=Object.entries(cnt).filter(([,c])=>c>1&&c<EX.items.length).sort((a,b)=>b[1]-a[1]).slice(0,40).map(([k])=>k).sort(natCmp);
+ $("exTags").innerHTML=top.length?`<span class="mute">${t("ex_tags")}:</span> `+top.map(tg=>`<label><input type="checkbox" value="${esc(tg)}" ${EX.tags.has(tg)?"checked":""}> ${esc(tg)}</label>`).join(""):"";
+ $("exTags").querySelectorAll("input").forEach(c=>c.onchange=()=>{c.checked?EX.tags.add(c.value):EX.tags.delete(c.value);exRender()})}
+const natCmp=(a,b)=>String(a).localeCompare(String(b),undefined,{numeric:true});
+function exFiltered(){const q=$("exQ").value.toLowerCase().split(/\s+/).filter(Boolean),k=$("exKind").value,pa=$("exPart").value,en=$("exEn").value,fo=$("exFolder").value;
+ return EX.items.filter(i=>(!k||i.kind===k)&&(!pa||i.particle===pa)&&(!en||String(i.energy)===en)&&(!fo||i.folder===fo)&&[...EX.tags].every(tg=>i.tags.includes(tg))&&q.every(w=>i.path.toLowerCase().includes(w)))}
+function exDerive(rows){const refTag=$("exRef").value.trim();const refs={};
+ for(const i of EX.items)if(i.kind!=="image"&&refTag&&i.tags.includes(refTag))refs[[i.folder,i.particle,i.energy].join("|")]=i;
+ return rows.map(i=>{const r=refs[[i.folder,i.particle,i.energy].join("|")];const v={...i};v.rel_bpw=i.r80&&i.bpw80!=null?100*i.bpw80/i.r80:NaN;v.tail=i.tail!=null?100*i.tail:NaN;v.r80_bk=rangeBK(i.particle,i.energy);v.dev_bk=isFinite(v.r80_bk)&&i.r80!=null?100*(i.r80-v.r80_bk)/v.r80_bk:NaN;
+  if(r&&r!==i&&i.r80!=null&&r.r80!=null){v.ref_r80=r.r80;v.ref_bpw80=r.bpw80;v.ref_peak=r.peak;v.dr80=i.r80-r.r80;v.dbpw80=i.bpw80-r.bpw80;v.bpw_filter=i.bpw80>r.bpw80?Math.sqrt(i.bpw80**2-r.bpw80**2):NaN;v.refPath=r.path}
+  else if(r===i){v.isRef=true;v.ref_r80=i.r80;v.ref_bpw80=i.bpw80;v.ref_peak=i.peak}return v})}
+function exCols(){const fs=getFormulas().map(f=>{let fn=null,err=null;try{fn=compileFormula(f.expr)}catch(e){err=e.message}return{k:"f:"+f.name,label:f.name,title:f.expr,fn,err}});
+ return [{k:"name",label:t("col_name")},{k:"folder",label:t("ex_folder")},{k:"particle",label:t("ex_particle")},{k:"energy",label:"E [MeV/u]",num:1},
+  {k:"r80",label:"R80 [mm]",num:2},{k:"bpw80",label:"BPW80 [mm]",num:2},{k:"dr80",label:"ΔR80 [mm]",num:2,title:t("f_dr80")},{k:"bpw_filter",label:t("bpw_filter")+" [mm]",num:2,title:t("f_quad")},
+  {k:"rel_bpw",label:"BPW80/R80 [%]",num:2,title:t("relw_tip")},{k:"tail",label:t("tail")+" [%]",num:1,title:t("tail_tip")},{k:"r80_bk",label:"R80 BK [mm]",num:1,title:t("f_bk")},{k:"dev_bk",label:"Δ BK [%]",num:1,title:t("f_devbk")}].concat(fs.map(f=>({...f,num:3})))}
+function exVal(v,c){if(c.fn){const a=FVARS.map(n=>v[n]==null?NaN:v[n]);try{const r=c.fn(...a);return typeof r==="number"?r:NaN}catch(e){return NaN}}return v[c.k]}
+function exRender(){const all=exFiltered(),cols=exCols();let rows=exDerive(all.filter(i=>i.kind!=="image"));
+ const sk=EX.sort.k,col=cols.find(c=>c.k===sk)||cols[0];rows.sort((a,b)=>{const x=exVal(a,col),y=exVal(b,col);const nx=x==null||Number.isNaN(x),ny=y==null||Number.isNaN(y);if(nx!==ny)return nx?1:-1;return (typeof x==="number"&&typeof y==="number"?x-y:natCmp(x??"",y??""))*EX.sort.d});
+ EX.rows=rows;EX.cols=cols;
+ $("exHead").innerHTML=`<tr><th></th>${cols.map(c=>`<th data-k="${esc(c.k)}" title="${esc(c.title||"")}" style="cursor:pointer">${esc(c.label)}${c.title?" ⓘ":""}${EX.sort.k===c.k?(EX.sort.d>0?" ▲":" ▼"):""}${c.err?` <span style="color:var(--err)">!</span>`:""}</th>`).join("")}</tr>`;
+ $("exHead").querySelectorAll("th[data-k]").forEach(th=>th.onclick=()=>{EX.sort={k:th.dataset.k,d:EX.sort.k===th.dataset.k?-EX.sort.d:1};exRender()});
+ const fmt=(x,n)=>x==null||Number.isNaN(x)?"":typeof x==="number"?(Math.abs(x)<0.5*Math.pow(10,-n)?0:x).toFixed(n):esc(x);
+ $("exBody").innerHTML=rows.slice(0,2000).map((v,ri)=>`<tr data-p="${esc(v.path)}" class="${EX.sel.has(v.path)?"sel":""}" style="cursor:pointer"><td><input type="checkbox" ${EX.sel.has(v.path)?"checked":""} aria-label="${esc(v.name)}"></td>${cols.map(c=>{const x=exVal(v,c);
+   if(c.k==="name")return `<td title="${esc(v.path)}">${v.kind==="measured"?"● ":""}${esc(v.name)}${v.isRef?` <span class="mute">(${t("reference")})</span>`:""}</td>`;
+   if(c.k==="folder")return `<td class="mute">${esc(v.folder||"/")}</td>`;
+   const dev=(c.k==="dev_bk"&&Math.abs(x)>3)?' style="color:var(--warn)"':"";return `<td class="${c.num?"metrics":""}"${dev}>${fmt(x,c.num||0)}</td>`}).join("")}</tr>`).join("");
+ multiSelect($("exBody"),()=>{$("exBody").querySelectorAll("tr").forEach(tr=>{const c=tr.querySelector("input");c.checked?EX.sel.add(tr.dataset.p):EX.sel.delete(tr.dataset.p)});exCount()});
+ EX.allCount=all.length;exCount();
+ $("exLegend").innerHTML=`<b>${t("ex_legend")}</b> ΔR80 = R80 − R80<sub>ref</sub>; ${t("bpw_filter")} = √(BPW80² − BPW80²<sub>ref</sub>); R80 BK = 0.022 mm · E<sup>1.77</sup> · A/Z² (Bragg-Kleeman, ${t("f_bk_note")}); Δ BK = (R80 − R80 BK)/R80 BK. ${t("ex_ref_rule")}`;
+ EX.imgs=all.filter(i=>i.kind==="image");$("exImgCount").textContent=`(${EX.imgs.length})`;
+ $("exImgs").innerHTML=EX.imgs.slice(0,300).map((i,k)=>`<figure data-k="${k}"><img loading="lazy" alt="${esc(i.name)}" src="${fileUrl(i.path)}"><figcaption title="${esc(i.path)}">${esc(i.name)}</figcaption></figure>`).join("");
+ $("exImgs").querySelectorAll("figure").forEach(f=>f.onclick=()=>lbOpen(+f.dataset.k));
+ renderFormulaList()}
+function exCount(){$("exCount").textContent=`${EX.rows.length} ${t("ex_rows")} (${EX.allCount} ${t("ex_files")}), ${EX.sel.size} ${t("selected")}`}
+["exQ"].forEach(i=>$(i).oninput=exRender);["exKind","exPart","exEn","exFolder"].forEach(i=>$(i).onchange=exRender);$("exRef").oninput=exRender;
+$("exReload").onclick=()=>exLoad(true);
+$("exNone").onclick=()=>{EX.sel.clear();exRender()};
+$("exPlot").onclick=()=>{if(!EX.sel.size)return;RS.pick=[...EX.sel].filter(p=>EX.items.find(i=>i.path===p&&i.kind!=="image"));RS.zoom=null;showTab("results")};
+$("exCsv").onclick=()=>{const cols=EX.cols,q=v=>/[;"\n]/.test(v)?`"${String(v).replace(/"/g,'""')}"`:v;
+ const lines=[["path"].concat(cols.slice(1).map(c=>c.label)).join(";")].concat(EX.rows.map(v=>[v.path].concat(cols.slice(1).map(c=>{const x=exVal(v,c);return x==null||Number.isNaN(x)?"":typeof x==="number"?String(+x.toPrecision(6)).replace(".",LANG==="de"?",":"."):x})).map(q).join(";")));
+ const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["﻿"+lines.join("\r\n")],{type:"text/csv"}));a.download="results_overview.csv";a.click()};
+function renderFormulaList(){const fs=getFormulas();$("exFList").innerHTML=fs.map((f,i)=>{let err="";try{compileFormula(f.expr)}catch(e){err=e.message}return `<div class="row"><code>${esc(f.name)} = ${esc(f.expr)}</code>${err?`<span style="color:var(--err)">${esc(err)}</span>`:""}<button data-i="${i}" class="fdel">${t("remove")}</button></div>`}).join("");
+ $("exFList").querySelectorAll(".fdel").forEach(b=>b.onclick=()=>{const fs=getFormulas();fs.splice(+b.dataset.i,1);setFormulas(fs);exRender()})}
+$("exFAdd").onclick=()=>{const name=$("exFName").value.trim(),expr=$("exFExpr").value.trim();if(!name||!expr)return;try{compileFormula(expr)}catch(e){$("exFMsg").textContent=e.message;return}
+ const fs=getFormulas().filter(f=>f.name!==name);fs.push({name,expr});setFormulas(fs);$("exFName").value="";$("exFExpr").value="";$("exFMsg").textContent="";exRender()};
+/* lightbox */
+function lbOpen(k){EX.lb=k;const i=EX.imgs[k];if(!i)return;$("lbImg").src=fileUrl(i.path);$("lbCap").textContent=`${i.path}  (${k+1}/${EX.imgs.length})`;$("lbDl").href=fileUrl(i.path)+"&dl=1";$("lbDl").setAttribute("download",i.name);$("lightbox").hidden=false;$("lbClose").focus()}
+function lbClose(){$("lightbox").hidden=true}
+$("lbPrev").onclick=()=>lbOpen((EX.lb-1+EX.imgs.length)%EX.imgs.length);$("lbNext").onclick=()=>lbOpen((EX.lb+1)%EX.imgs.length);$("lbClose").onclick=lbClose;
+$("lightbox").onclick=e=>{if(e.target.id==="lightbox")lbClose()};
+document.addEventListener("keydown",e=>{if($("lightbox").hidden)return;if(e.key==="Escape")lbClose();if(e.key==="ArrowLeft")$("lbPrev").click();if(e.key==="ArrowRight")$("lbNext").click()});
+
+/* ---------- exports */
+const svgR=v=>Math.round(v*100)/100;
+class SvgCtx{constructor(W,H){this.W=W;this.H=H;this.out=[];this.defs=[];this.st={fillStyle:"#000",strokeStyle:"#000",lineWidth:1,font:"10px sans-serif",textAlign:"start",dash:[],tf:"",clip:null};this.stack=[];this.path="";this.n=0;this.imageSmoothingEnabled=true}
+ get fillStyle(){return this.st.fillStyle}set fillStyle(v){this.st.fillStyle=v}get strokeStyle(){return this.st.strokeStyle}set strokeStyle(v){this.st.strokeStyle=v}
+ get lineWidth(){return this.st.lineWidth}set lineWidth(v){this.st.lineWidth=v}get font(){return this.st.font}set font(v){this.st.font=v}get textAlign(){return this.st.textAlign}set textAlign(v){this.st.textAlign=v}
+ setLineDash(a){this.st.dash=a||[]}save(){this.stack.push({...this.st,dash:[...this.st.dash]})}restore(){this.st=this.stack.pop()||this.st}
+ translate(x,y){this.st.tf+=` translate(${svgR(x)} ${svgR(y)})`}rotate(a){this.st.tf+=` rotate(${svgR(a*180/Math.PI)})`}scale(x,y){this.st.tf+=` scale(${x} ${y})`}
+ at(){return (this.st.tf?` transform="${this.st.tf.trim()}"`:"")+(this.st.clip?` clip-path="url(#${this.st.clip})"`:"")}
+ paint(v){return v&&typeof v==="object"&&v.id?`url(#${v.id})`:v}
+ clearRect(){}fillRect(x,y,w,h){this.out.push(`<rect x="${svgR(x)}" y="${svgR(y)}" width="${svgR(w)}" height="${svgR(h)}" fill="${this.paint(this.st.fillStyle)}"${this.at()}/>`)}
+ beginPath(){this.path=""}moveTo(x,y){this.path+=`M${svgR(x)} ${svgR(y)}`}lineTo(x,y){this.path+=`L${svgR(x)} ${svgR(y)}`}
+ rect(x,y,w,h){this.path+=`M${svgR(x)} ${svgR(y)}h${svgR(w)}v${svgR(h)}h${svgR(-w)}Z`}
+ arc(x,y,r){this.path+=`M${svgR(x-r)} ${svgR(y)}a${r} ${r} 0 1 0 ${2*r} 0a${r} ${r} 0 1 0 ${-2*r} 0`}
+ stroke(){if(this.path)this.out.push(`<path d="${this.path}" fill="none" stroke="${this.st.strokeStyle}" stroke-width="${this.st.lineWidth}" stroke-linejoin="round"${this.st.dash.length?` stroke-dasharray="${this.st.dash.join(" ")}"`:""}${this.at()}/>`)}
+ fill(){if(this.path)this.out.push(`<path d="${this.path}" fill="${this.paint(this.st.fillStyle)}"${this.at()}/>`)}
+ clip(){const id="c"+(++this.n);this.defs.push(`<clipPath id="${id}"><path d="${this.path}"/></clipPath>`);this.st.clip=id}
+ fillText(txt,x,y){const m=/(\d+(?:\.\d+)?)px\s+(.*)/.exec(this.st.font)||[0,10,"sans-serif"],anc={center:"middle",right:"end",end:"end"}[this.st.textAlign]||"start";
+  this.out.push(`<text x="${svgR(x)}" y="${svgR(y)}" font-size="${m[1]}" font-family="${esc(m[2])}, Arial, sans-serif" text-anchor="${anc}" fill="${this.paint(this.st.fillStyle)}"${this.at()}>${esc(String(txt))}</text>`)}
+ createLinearGradient(x0,y0,x1,y1){const id="g"+(++this.n),stops=[];this.defs.push({toString:()=>`<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${x0}" y1="${y0}" x2="${x1}" y2="${y1}">${stops.join("")}</linearGradient>`});return{id,addColorStop:(o,c)=>stops.push(`<stop offset="${o}" stop-color="${c}"/>`)}}
+ createImageData(w,h){return new ImageData(w,h)}
+ drawImage(img,x,y,w,h){this.out.push(`<image href="${img.toDataURL("image/png")}" x="${x}" y="${y}" width="${w}" height="${h}" preserveAspectRatio="none" style="image-rendering:pixelated"${this.at()}/>`)}
+ measureText(t){return{width:String(t).length*6}}
+ toString(){return `<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" width="${this.W}" height="${this.H}" viewBox="0 0 ${this.W} ${this.H}"><defs>${this.defs.join("")}</defs>\n${this.out.join("\n")}\n</svg>`}}
+function exportName(ext){const v=$("plView").value;return (v||(RS.pick[0]||"plot").split("/").pop().replace(/\.[^.]+$/,"")+(RS.pick.length>1?`_+${RS.pick.length-1}`:""))+"."+ext}
+function exportCanvas(scale){const off=document.createElement("canvas");off.width=1200*scale;off.height=560*scale;const g=off.getContext("2d");g.scale(scale,scale);drawPlot({g,W:1200,H:560,light:$("plLight").checked});return off}
+function download(blob,name){const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000)}
+function plMsg(m){$("plExpMsg").textContent=m;setTimeout(()=>{if($("plExpMsg").textContent===m)$("plExpMsg").textContent=""},4000)}
+$("plPng").onclick=()=>{if(!RS.last)return;exportCanvas(+$("plScale").value).toBlob(b=>download(b,exportName("png")),"image/png")};
+$("plSvg").onclick=()=>{if(!RS.last)return;const g=new SvgCtx(1200,560);drawPlot({g,W:1200,H:560,light:$("plLight").checked});download(new Blob([g.toString()],{type:"image/svg+xml"}),exportName("svg"))};
+$("plCsv").onclick=()=>{const e=RS.exp;if(!e)return;const dec=LANG==="de",f=v=>isFinite(v)?String(+v.toPrecision(7)).replace(".",dec?",":"."):"";
+ const lines=[`# ${e.ylab}`,["file",e.xlab,"y"].join(";")];for(const s of e.series)s.x.forEach((x,i)=>lines.push([s.p,f(x),f(s.y[i])].join(";")));
+ download(new Blob(["﻿"+lines.join("\r\n")],{type:"text/csv"}),exportName("csv"))};
+$("plCopy").onclick=async()=>{if(!RS.last)return;try{const b=await new Promise(r=>exportCanvas(2).toBlob(r,"image/png"));await navigator.clipboard.write([new ClipboardItem({"image/png":b})]);plMsg(t("copied"))}catch(e){plMsg(t("error")+": "+e.message)}};
+async function zipDownload(paths,name){if(!paths.length)return;const r=await fetch("/api/zip",{method:"POST",headers:{"X-Token":TOKEN,"Content-Type":"application/json"},body:JSON.stringify({paths})});
+ if(!r.ok){const j=await r.json().catch(()=>({}));alertMsg(t("error")+": "+(j.error||r.status));return}download(await r.blob(),name)}
+function alertMsg(m){$("exCount").textContent=m}
+$("exZip").onclick=()=>zipDownload([...EX.sel],"results_selection.zip");
+$("exImgZip").onclick=()=>zipDownload(EX.imgs.map(i=>i.path),"images.zip");
+/* ---------- saved views */
+let VIEWS=[];
+async function loadViews(){try{VIEWS=(await api("/api/views")).views}catch(e){VIEWS=[]}const s=$("plView"),cur=s.value;s.innerHTML=`<option value="">–</option>`+VIEWS.map(v=>`<option>${esc(v.name)}</option>`).join("");s.value=VIEWS.some(v=>v.name===cur)?cur:""}
+const VIEW_CTL=["plNorm","plMode","plX","plStat"],VIEW_CHK=["plLog","plBragg"];
+$("plViewSave").onclick=async()=>{const name=($("plViewName").value||$("plView").value).trim();if(!name||!RS.pick.length){plMsg(t("view_need"));return}
+ const v={name,pick:RS.pick,ref:RS.ref,zoom:RS.zoom,saved:new Date().toISOString().slice(0,16)};VIEW_CTL.forEach(i=>v[i]=$(i).value);VIEW_CHK.forEach(i=>v[i]=$(i).checked);
+ VIEWS=VIEWS.filter(x=>x.name!==name).concat([v]).sort((a,b)=>natCmp(a.name,b.name));await api("/api/views",{views:VIEWS});await loadViews();$("plView").value=name;$("plViewName").value="";plMsg(t("saved"))};
+$("plViewDel").onclick=async()=>{const name=$("plView").value;if(!name)return;VIEWS=VIEWS.filter(x=>x.name!==name);await api("/api/views",{views:VIEWS});await loadViews()};
+$("plView").onchange=async()=>{const v=VIEWS.find(x=>x.name===$("plView").value);if(!v)return;RS.pick=[...v.pick];RS.ref=v.ref;VIEW_CTL.forEach(i=>{if(v[i]!=null)$(i).value=v[i]});VIEW_CHK.forEach(i=>{if(v[i]!=null)$(i).checked=v[i]});
+ await loadPlot();RS.zoom=v.zoom||null;drawPlot();resLoad(RS.path)};
+/* ---------- notifications */
+const NOTE={prev:null};
+function noteOn(k){return recall(k)==="1"}
+function beep(ok){try{const a=new (window.AudioContext||window.webkitAudioContext)(),o=a.createOscillator(),g=a.createGain();o.frequency.value=ok?880:330;o.connect(g);g.connect(a.destination);g.gain.setValueAtTime(0.15,a.currentTime);g.gain.exponentialRampToValueAtTime(0.001,a.currentTime+0.6);o.start();o.stop(a.currentTime+0.6)}catch(e){}}
+function notify(title,body,ok){if(noteOn("notify")&&"Notification"in window&&Notification.permission==="granted"){try{new Notification(title,{body})}catch(e){}}if(noteOn("sound"))beep(ok)}
+function checkTransitions(jobs){const now={};for(const j of jobs)now[j.id]=j.status;
+ if(NOTE.prev){for(const j of jobs){const was=NOTE.prev[j.id];if(was==="running"&&j.status!=="running"){const n=j.file.split("/").pop();if(j.status==="failed")notify("OpenTOPAS Workbench",`${t("note_failed")}: ${n}`,false);else if(noteOn("note_each"))notify("OpenTOPAS Workbench",`${t("st_"+j.status)}: ${n}`,true)}}
+  const busy=s=>Object.values(s).some(x=>x==="queued"||x==="running");if(busy(NOTE.prev)&&!busy(now))notify("OpenTOPAS Workbench",t("note_queue_done"),true)}
+ NOTE.prev=now}
+["notify","sound","note_each"].forEach(k=>{const el=$("set_"+k);el.checked=noteOn(k);el.onchange=async()=>{store(k,el.checked?"1":"0");if(k==="notify"&&el.checked&&"Notification"in window&&Notification.permission!=="granted"){const p=await Notification.requestPermission();if(p!=="granted"){el.checked=false;store(k,"0");$("noteMsg").textContent=t("note_denied")}}}});
+$("noteTest").onclick=()=>notify("OpenTOPAS Workbench",t("note_test"),true);
+$("setToast").onchange=e=>api("/api/config",{toast:e.target.checked});
+/* ---------- parameter variations */
+function paramLines(text){const out=[];for(const l of text.split("\n")){const m=l.split("#")[0].match(/^\s*([a-z]{1,2}):([^=\s]+)\s*=\s*(.+?)\s*$/);if(m)out.push({typ:m[1],name:m[2],val:m[3]})}return out}
+$("fmVar").onclick=()=>{const box=$("varBox");box.hidden=!box.hidden;if(box.hidden)return;const ps=paramLines($("fmEd").value),cur=$("varParam").value;
+ $("varParam").innerHTML=ps.map(p=>`<option value="${esc(p.typ+":"+p.name)}">${esc(p.typ+":"+p.name)} = ${esc(p.val.length>40?p.val.slice(0,40)+"…":p.val)}</option>`).join("");
+ const guess=ps.find(p=>/BeamEnergy$/.test(p.name));$("varParam").value=cur&&ps.some(p=>p.typ+":"+p.name===cur)?cur:guess?guess.typ+":"+guess.name:(ps[0]?ps[0].typ+":"+ps[0].name:"");$("varOut").textContent=""};
+async function variants(preview,run){const vals=$("varValues").value.split(/[,;]/).map(x=>x.trim()).filter(Boolean);if(!vals.length||!FM.file)return;
+ try{const j=await api("/api/variants",{src:FM.file,param:$("varParam").value,values:vals,pattern:$("varPattern").value.trim()||"{name}_{value}",preview,overwrite:$("varOver").checked});
+  if(preview){$("varOut").textContent=j.names.join("\n")+"\n\n"+j.example}else{$("varOut").textContent=`${j.written.length} ${t("created")}, ${j.skipped.length} ${t("skipped")}\n`+j.written.join("\n");await fmLoad(FM.path);NAMES.loaded=false;
+   if(run&&j.written.length){RF.preselect=j.written;showTab("run")}}}catch(e){$("varOut").textContent=t("error")+": "+e.message}}
+$("varPrev").onclick=()=>variants(true,false);$("varMake").onclick=()=>variants(false,false);$("varRun").onclick=()=>variants(false,true);
 
 /* ---------- results */
-const RS={path:"",pick:[],data:{},last:null};
+const RS={path:"",pick:[],data:{},last:null,zoom:null,ref:null,view:null};
+const DATAEXT=/\.(csv|mcc|asc|dat|tsv)$/i;
 async function resLoad(p){const j=await api("/api/ls?p="+encodeURIComponent(p));RS.path=j.path;crumbs($("resCrumbs"),j.path,resLoad);
- const f=$("resFilter").value.toLowerCase();const dirs=j.items.filter(i=>i.dir),csvs=j.items.filter(i=>!i.dir&&i.name.toLowerCase().endsWith(".csv")&&i.name.toLowerCase().includes(f));
+ const f=$("resFilter").value.toLowerCase();const dirs=j.items.filter(i=>i.dir),csvs=j.items.filter(i=>!i.dir&&DATAEXT.test(i.name)&&i.name.toLowerCase().includes(f));
  const up=j.path?`<tr data-up="1"><td></td><td colspan="2"><a href="#">..</a></td></tr>`:"";
  $("resBody").innerHTML=up+dirs.map(i=>`<tr data-dir="${esc(i.name)}" style="cursor:pointer"><td></td><td>📁 ${esc(i.name)}</td><td></td></tr>`).join("")+
-  csvs.map(i=>{const full=join(j.path,i.name);return `<tr><td><input type="checkbox" class="rsc" value="${esc(full)}" ${RS.pick.includes(full)?"checked":""} aria-label="${esc(i.name)}"></td><td>${esc(i.name)}</td><td class="mute">${fmtTime(i.mtime)}</td></tr>`}).join("");
+  csvs.map(i=>{const full=join(j.path,i.name);return `<tr style="cursor:pointer"><td><input type="checkbox" class="rsc" value="${esc(full)}" ${RS.pick.includes(full)?"checked":""} aria-label="${esc(i.name)}"></td><td>${esc(i.name)}</td><td class="mute">${fmtTime(i.mtime)}</td></tr>`}).join("");
  $("resBody").querySelectorAll("tr[data-up]").forEach(tr=>tr.onclick=()=>resLoad(j.path.split("/").slice(0,-1).join("/")));
  $("resBody").querySelectorAll("tr[data-dir]").forEach(tr=>tr.ondblclick=tr.onclick=()=>resLoad(join(j.path,tr.dataset.dir)));
- $("resBody").querySelectorAll(".rsc").forEach(c=>c.onchange=()=>{RS.pick=[...document.querySelectorAll(".rsc:checked")].map(e=>e.value);loadPlot()});
+ $("resBody").querySelectorAll(".rsc:checked").forEach(c=>c.closest("tr").classList.add("sel"));
+ multiSelect($("resBody"),()=>{const boxes=[...document.querySelectorAll(".rsc")];const here=new Set(boxes.map(b=>b.value));
+  RS.pick=RS.pick.filter(p=>!here.has(p)||boxes.find(b=>b.value===p).checked);boxes.forEach(b=>{if(b.checked&&!RS.pick.includes(b.value))RS.pick.push(b.value)});loadPlot()});
  const imgs=j.items.filter(i=>/\.(png|jpg|svg)$/i.test(i.name)&&i.name.toLowerCase().includes(f));
  $("resImgs").innerHTML=imgs.map(i=>`<figure style="margin:0"><img loading="lazy" alt="${esc(i.name)}" src="${fileUrl(join(j.path,i.name))}"><figcaption class="mute">${esc(i.name)}</figcaption></figure>`).join("");
  loadPlot();}
 $("resFilter").oninput=()=>resLoad(RS.path);
-async function loadPlot(){if(!RS.pick.length){RS.last=null;clearPlot();return}
- const stat=$("plStat").value||0,col=$("plCollapse").value;RS.data={};
- for(const p of RS.pick){try{RS.data[p]=await api(`/api/csv?p=${encodeURIComponent(p)}&stat=${stat}&collapse=${col}`)}catch(e){RS.data[p]={error:e.message}}}
- const first=Object.values(RS.data).find(d=>!d.error);
+$("resAll").onclick=()=>{document.querySelectorAll(".rsc").forEach(c=>{if(!c.checked){c.checked=true;c.closest("tr").classList.add("sel");if(!RS.pick.includes(c.value))RS.pick.push(c.value)}});loadPlot()};
+$("resNone").onclick=()=>{const here=new Set([...document.querySelectorAll(".rsc")].map(c=>{c.checked=false;c.closest("tr").classList.remove("sel");return c.value}));RS.pick=RS.pick.filter(p=>!here.has(p));loadPlot()};
+$("plClear").onclick=()=>{RS.pick=[];RS.zoom=null;document.querySelectorAll(".rsc").forEach(c=>c.checked=false);loadPlot()};
+async function loadPlot(){renderPicked();if(!RS.pick.length){RS.last=null;clearPlot();return}
+ const stat=$("plStat").value||0,col=$("plCollapse").value,scan=$("plScan").value||0;const data={};
+ await Promise.all(RS.pick.map(async p=>{try{data[p]=await api(`/api/csv?p=${encodeURIComponent(p)}&stat=${stat}&collapse=${col}&scan=${scan}`)}catch(e){data[p]={error:e.message}}}));
+ RS.data={};for(const p of RS.pick)RS.data[p]=data[p];
+ const first=Object.values(RS.data).find(d=>!d.error&&!d.measured)||Object.values(RS.data).find(d=>!d.error);
  if(first){const s=$("plStat"),cur=s.value;s.innerHTML="";first.stats.forEach((n,i)=>s.add(new Option(n,i)));s.value=cur||0;$("plCollapseL").hidden=!(first.mode==="2d"&&first.dims.every(d=>d.n>1))}
- RS.last=Date.now();drawPlot();}
-["plStat","plNorm","plLog","plBragg","plCollapse"].forEach(i=>$(i).onchange=()=>i==="plStat"||i==="plCollapse"?loadPlot():drawPlot());
+ const nscan=Math.max(0,...Object.values(RS.data).filter(d=>d&&d.measured).map(d=>d.scans));$("plScanL").hidden=nscan<2;
+ if(nscan>1&&$("plScan").options.length!==nscan){const cur=$("plScan").value;$("plScan").innerHTML="";for(let i=0;i<nscan;i++)$("plScan").add(new Option(i+1,i));$("plScan").value=cur||0}
+ if(!RS.pick.includes(RS.ref))RS.ref=RS.pick[0];renderRef();RS.last=Date.now();drawPlot();}
+function renderPicked(){$("plPicked").textContent=RS.pick.length?`${RS.pick.length} ${t("selected")}`:""}
+function renderRef(){const s=$("plRef");s.innerHTML="";RS.pick.forEach(p=>s.add(new Option(p.split("/").pop(),p)));s.value=RS.ref||""}
+$("plRef").onchange=e=>{RS.ref=e.target.value;drawPlot()};
+["plStat","plNorm","plLog","plBragg","plCollapse","plMode","plScan","plX"].forEach(i=>$(i).onchange=()=>{if(i==="plX")RS.zoom=null;["plStat","plCollapse","plScan"].includes(i)?loadPlot():drawPlot()});
+$("plPeak").onclick=()=>{const v=RS.view;if(!v||!v.series.length)return;const ms=v.series.map(s=>bragg(s.x,s.d.y));const lo=Math.min(...ms.map(m=>m.peak)),hi=Math.max(...ms.map(m=>m.r80+3*(m.dfo||1)));
+ if(isFinite(lo)&&isFinite(hi)){const pad=Math.max(5,(hi-lo)*0.3);RS.zoom=[lo-pad*2,hi+pad*0.5];drawPlot()}};
+$("plReset").onclick=()=>{RS.zoom=null;drawPlot()};
+const beamLabel=d=>{const b=d&&d.beam;if(!b||!b.particle)return "";const lep=["e-","e+","gamma"].includes(b.particle);return `${b.particle}, ${b.energy!=null?(+b.energy.toPrecision(5))+(lep?" MeV":" MeV/u"):""}`};
 const U=d=>d.unit==="cm"?{f:10,u:"mm"}:d.unit==="m"?{f:1000,u:"mm"}:{f:1,u:d.unit};
 function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim()}
-function clearPlot(){const c=$("plot"),g=c.getContext("2d");g.clearRect(0,0,c.width,c.height);$("plMetrics").innerHTML="";}
+function clearPlot(){const c=$("plot"),g=c.getContext("2d");g.clearRect(0,0,c.width,c.height);$("plMetrics").innerHTML="";RS.view=null;}
 const PAL=["#2563eb","#dc2626","#16a34a","#d97706","#7c3aed","#0891b2","#db2777","#4d7c0f","#9333ea","#ea580c"];
 function niceTicks(a,b,n=6){const span=b-a||1,step0=span/n,mag=Math.pow(10,Math.floor(Math.log10(step0))),step=[1,2,2.5,5,10].map(m=>m*mag).find(s=>s>=step0);const out=[];for(let v=Math.ceil(a/step)*step;v<=b+1e-9;v+=step)out.push(+v.toPrecision(10));return out}
 function cross(x,y,i,lv,dir){for(let k=i;dir>0?k<y.length-1:k>0;k+=dir){const k2=k+dir;if(y[k]>=lv&&lv>y[k2])return x[k]+(x[k2]-x[k])*(y[k]-lv)/(y[k]-y[k2])}return NaN}
-function bragg(x,y){let i=0;for(let k=1;k<y.length;k++)if(y[k]>y[i])i=k;const m=y[i],n=y.map(v=>v/m);const r80=cross(x,n,i,.8,1),r20=cross(x,n,i,.2,1),p80=cross(x,n,i,.8,-1);return{peak:x[i],r80,dfo:r20-r80,bpw:r80-p80,pe:m/(y.slice(0,Math.max(3,y.length/100|0)).reduce((a,b)=>a+b,0)/Math.max(3,y.length/100|0))}}
-function drawPlot(){const c=$("plot"),g=c.getContext("2d"),W=c.width,H=c.height;g.clearRect(0,0,W,H);g.fillStyle=css("--card");g.fillRect(0,0,W,H);
- const ds=Object.entries(RS.data).filter(([,d])=>!d.error);$("plMetrics").innerHTML="";
- const errs=Object.entries(RS.data).filter(([,d])=>d.error);if(errs.length)$("plMetrics").innerHTML=errs.map(([p,d])=>`<div style="color:var(--err)">${esc(p)}: ${esc(d.error)}</div>`).join("");
- if(!ds.length)return;const ink=css("--ink"),mute=css("--mute"),line=css("--line");g.font="20px system-ui";
- if(ds[0][1].mode==="2d"){drawMap(g,W,H,ds[0][0],ds[0][1],ink,mute);return}
- const norm=$("plNorm").value,logy=$("plLog").checked;
- const series=ds.filter(([,d])=>d.mode==="1d").map(([p,d],k)=>{let y=d.y.slice();const f=norm==="max"?Math.max(...y):norm==="first"?(y.slice(0,5).reduce((a,b)=>a+b,0)/5):norm==="sum"?y.reduce((a,b)=>a+b,0):1;if(f)y=y.map(v=>v/f);const uf=U(d.dims[d.axis]).f;return{p,d,x:d.x.map(v=>v*uf),y,col:PAL[k%PAL.length]}});
- const X0=90,X1=W-20,Y0=H-60,Y1=20;let xmin=Infinity,xmax=-Infinity,ymin=Infinity,ymax=-Infinity;
- for(const s of series){xmin=Math.min(xmin,s.x[0]);xmax=Math.max(xmax,s.x[s.x.length-1]);for(const v of s.y){if(logy&&v<=0)continue;ymin=Math.min(ymin,v);ymax=Math.max(ymax,v)}}
- if(!logy)ymin=Math.min(0,ymin);const ty=v=>logy?Math.log10(v):v;const a=ty(ymin),b=ty(ymax)+(ty(ymax)-ty(ymin))*0.05;
+function bragg(x,y){let i=0;for(let k=1;k<y.length;k++)if(y[k]>y[i])i=k;const m=y[i],n=y.map(v=>v/m);const r80=cross(x,n,i,.8,1),r20=cross(x,n,i,.2,1),p80=cross(x,n,i,.8,-1);const k0=Math.max(1,Math.min(5,i));const dfo0=r20-r80,tail=interp(x,y,r80+Math.max(10,4*(isFinite(dfo0)?dfo0:2.5)))/m;return{peak:x[i],r80,dfo:r20-r80,bpw:r80-p80,pe:m/(y.slice(0,k0).reduce((a,b)=>a+b,0)/k0),tail}}
+function interp(xs,ys,x){if(x<xs[0]||x>xs[xs.length-1])return NaN;let lo=0,hi=xs.length-1;while(hi-lo>1){const m=(lo+hi)>>1;if(xs[m]<=x)lo=m;else hi=m}const f=(x-xs[lo])/((xs[hi]-xs[lo])||1);return ys[lo]+(ys[hi]-ys[lo])*f}
+const LIGHT={"--card":"#ffffff","--ink":"#111827","--mute":"#4b5563","--line":"#d5dae1"};
+/* opt: {g, W, H, light} draws into another context (export); without opt it draws the on-screen plot and the metrics */
+function drawPlot(opt){opt=opt||{};const main=!opt.g,c=$("plot"),g=opt.g||c.getContext("2d"),W=opt.W||c.width,H=opt.H||c.height,C=v=>opt.light?LIGHT[v]:css(v);
+ const M=h=>{if(main)$("plMetrics").innerHTML+=h};
+ if(main){g.clearRect(0,0,W,H);RS.view=null;RS.exp=null;$("plMetrics").innerHTML=""}g.fillStyle=C("--card");g.fillRect(0,0,W,H);
+ const ds=Object.entries(RS.data).filter(([,d])=>d&&!d.error);
+ const errs=Object.entries(RS.data).filter(([,d])=>d&&d.error);if(errs.length)M(errs.map(([p,d])=>`<div style="color:var(--err)">${esc(p)}: ${esc(d.error)}</div>`).join(""));
+ if(!ds.length)return;const ink=C("--ink"),mute=C("--mute"),line=C("--line");g.font="20px system-ui";
+ const one=ds.filter(([,d])=>d.mode==="1d");if(!one.length){drawMap(g,W,H,ds[0][0],ds[0][1],ink,mute);return}
+ const norm=$("plNorm").value,logy=$("plLog").checked,mode=$("plMode").value;
+ let series=one.map(([p,d],k)=>{const uf=U(d.dims[d.axis]).f;let y=d.y.slice();const f=norm==="max"?Math.max(...y):norm==="first"?(y.slice(0,5).reduce((a,b)=>a+b,0)/Math.min(5,y.length)):norm==="sum"?y.reduce((a,b)=>a+b,0):1;if(f)y=y.map(v=>v/f);return{p,d,x:d.x.map(v=>v*uf),y,col:PAL[k%PAL.length],pts:!!d.measured}});
+ const xm=$("plX").value;let noR80=[];if(xm!=="abs"){series=series.map(s=>{const r=bragg(s.x,s.d.y).r80;if(!isFinite(r)){noR80.push(s.p.split("/").pop());return null}return{...s,x:s.x.map(v=>xm==="rel"?v/r:v-r)}}).filter(Boolean);
+  if(noR80.length)M(`<div style="color:var(--warn)">${esc(t("no_r80"))}: ${noR80.map(esc).join(", ")}</div>`);if(!series.length)return}
+ const ref=series.find(s=>s.p===RS.ref)||series[0];
+ if(mode!=="curves"&&series.length>1){const ry=ref.y,mx=Math.max(...ry);series=series.filter(s=>s!==ref).map(s=>({...s,y:s.x.map((x,i)=>{const r=interp(ref.x,ry,x);return mode==="diff"?(isNaN(r)?NaN:s.y[i]-r):(isNaN(r)||r<0.02*mx?NaN:s.y[i]/r)})}))}
+ const X0=90,X1=W-20,Y0=H-60,Y1=20;let xmin=Infinity,xmax=-Infinity;for(const s of series){xmin=Math.min(xmin,s.x[0]);xmax=Math.max(xmax,s.x[s.x.length-1])}
+ if(RS.zoom){xmin=RS.zoom[0];xmax=RS.zoom[1]}
+ let ymin=Infinity,ymax=-Infinity;for(const s of series)s.x.forEach((xv,i)=>{const v=s.y[i];if(xv<xmin||xv>xmax||!isFinite(v)||(logy&&v<=0))return;ymin=Math.min(ymin,v);ymax=Math.max(ymax,v)});
+ if(!isFinite(ymin)){ymin=0;ymax=1}if(!logy&&mode!=="ratio")ymin=Math.min(0,ymin);
+ const ty=v=>logy?Math.log10(v):v;const pad=(ty(ymax)-ty(ymin))*0.05||0.05;const a=ty(ymin)-(mode==="curves"?0:pad),b=ty(ymax)+pad;
  const sx=v=>X0+(v-xmin)/(xmax-xmin||1)*(X1-X0),sy=v=>Y0-(ty(v)-a)/(b-a||1)*(Y0-Y1);
  g.strokeStyle=line;g.fillStyle=mute;g.lineWidth=1;g.textAlign="center";
  for(const v of niceTicks(xmin,xmax)){const px=sx(v);g.beginPath();g.moveTo(px,Y1);g.lineTo(px,Y0);g.stroke();g.fillText(v,px,Y0+24)}
- g.textAlign="right";const yt=logy?Array.from({length:Math.floor(b)-Math.ceil(a)+1},(_,i)=>Math.pow(10,Math.ceil(a)+i)):niceTicks(ymin,Math.pow(10,b)>0&&logy?Math.pow(10,b):b);
+ g.textAlign="right";const yt=logy?Array.from({length:Math.max(0,Math.floor(b)-Math.ceil(a)+1)},(_,i)=>Math.pow(10,Math.ceil(a)+i)):niceTicks(a,b);
  for(const v of yt){const py=sy(v);if(py<Y1-1||py>Y0+1)continue;g.beginPath();g.moveTo(X0,py);g.lineTo(X1,py);g.stroke();g.fillText(Math.abs(v)>=1e4||(Math.abs(v)<1e-2&&v!==0)?v.toExponential(1):+v.toPrecision(3),X0-8,py+6)}
+ if(mode!=="curves"&&series.length){const base=mode==="diff"?0:1;const tb=logy?Math.log10(base):base;if(tb>=a&&tb<=b){g.strokeStyle=mute;g.setLineDash([6,5]);g.beginPath();g.moveTo(X0,sy(base));g.lineTo(X1,sy(base));g.stroke();g.setLineDash([])}}
  g.strokeStyle=ink;g.beginPath();g.moveTo(X0,Y1);g.lineTo(X0,Y0);g.lineTo(X1,Y0);g.stroke();
- const d0=series[0].d,ax=d0.dims[d0.axis];g.fillStyle=ink;g.textAlign="center";g.fillText(`${ax.name} [${U(ax).u}]`,(X0+X1)/2,H-12);
- g.save();g.translate(22,(Y0+Y1)/2);g.rotate(-Math.PI/2);g.fillText(norm==="none"?d0.quantity:`${d0.quantity}, ${t("normalized")}`,0,0);g.restore();
- g.lineWidth=2.5;for(const s of series){g.strokeStyle=s.col;g.beginPath();let pen=false;s.x.forEach((xv,i)=>{if(logy&&s.y[i]<=0){pen=false;return}const px=sx(xv),py=sy(s.y[i]);pen?g.lineTo(px,py):g.moveTo(px,py);pen=true});g.stroke()}
- g.textAlign="left";g.font="17px system-ui";series.forEach((s,k)=>{g.fillStyle=s.col;g.fillRect(X0+14,Y1+10+k*24,18,4);g.fillStyle=ink;g.fillText(s.p.split("/").pop(),X0+38,Y1+16+k*24)});
- if($("plBragg").checked){const u=U(ax).u;$("plMetrics").innerHTML+=`<table class="metrics" style="margin-top:8px"><thead><tr><th>${t("col_file")}</th><th>${t("peak")} [${u}]</th><th>R80 [${u}]</th><th>BPW80 [${u}]</th><th>D80–D20 [${u}]</th><th>${t("peak")}/${LANG==="de"?"Eingang":"entrance"}</th></tr></thead><tbody>`+
-  series.map(s=>{const m=bragg(s.x,s.d.y);const fx=v=>isFinite(v)?v.toFixed(2):"–";return `<tr><td><span style="color:${s.col}">■</span> ${esc(s.p.split("/").pop())}</td><td>${fx(m.peak)}</td><td>${fx(m.r80)}</td><td>${fx(m.bpw)}</td><td>${fx(m.dfo)}</td><td>${m.pe.toFixed(2)}</td></tr>`}).join("")+"</tbody></table>"}}
-function viridis(v){const c=[[68,1,84],[59,82,139],[33,145,140],[94,201,98],[253,231,37]];v=Math.max(0,Math.min(1,v))*(c.length-1);const i=Math.min(c.length-2,Math.floor(v)),f=v-i;return c[i].map((a,k)=>Math.round(a+(c[i+1][k]-a)*f))}
+ const d0=series.length?series[0].d:ref.d,ax=d0.dims[d0.axis];g.fillStyle=ink;g.textAlign="center";g.fillText(xm==="rel"?`${ax.name} / R80`:xm==="shift"?`${ax.name} − R80 [${U(ax).u}]`:`${ax.name} [${U(ax).u}]`,(X0+X1)/2,H-12);
+ const ylab=mode==="diff"?`${t("mode_diff")} (${ref.p.split("/").pop()})`:mode==="ratio"?`${t("mode_ratio")} (${ref.p.split("/").pop()})`:(norm==="none"?d0.quantity:`${d0.quantity}, ${t("normalized")}`);
+ g.save();g.translate(22,(Y0+Y1)/2);g.rotate(-Math.PI/2);g.fillText(ylab,0,0);g.restore();
+ g.save();g.beginPath();g.rect(X0,Y1-2,X1-X0,Y0-Y1+4);g.clip();
+ for(const s of series){g.strokeStyle=s.col;g.fillStyle=s.col;
+  if(s.pts){s.x.forEach((xv,i)=>{const v=s.y[i];if(!isFinite(v)||(logy&&v<=0))return;g.beginPath();g.arc(sx(xv),sy(v),3.5,0,7);g.fill()})}
+  else{g.lineWidth=2.5;g.beginPath();let pen=false;s.x.forEach((xv,i)=>{const v=s.y[i];if(!isFinite(v)||(logy&&v<=0)){pen=false;return}const px=sx(xv),py=sy(v);pen?g.lineTo(px,py):g.moveTo(px,py);pen=true});g.stroke()}}
+ g.restore();
+ g.textAlign="left";g.font="17px system-ui";series.forEach((s,k)=>{g.fillStyle=s.col;if(s.pts){g.beginPath();g.arc(X0+23,Y1+12+k*24,4,0,7);g.fill()}else g.fillRect(X0+14,Y1+10+k*24,18,4);g.fillStyle=ink;const bl=beamLabel(s.d);g.fillText(s.p.split("/").pop()+(bl?"  ·  "+bl:"")+(s.p===RS.ref&&mode==="curves"&&RS.pick.length>1?"  ("+t("reference")+")":""),X0+38,Y1+16+k*24)});
+ const xlab=xm==="rel"?`${ax.name} / R80`:xm==="shift"?`${ax.name} − R80 [${U(ax).u}]`:`${ax.name} [${U(ax).u}]`;
+ if(!main)return;RS.view={X0,X1,Y0,Y1,xmin,xmax,series,unit:xm==="rel"?"× R80":U(ax).u,W};RS.exp={series,xlab,ylab};
+ if($("plBragg").checked){const u=U(ax).u;const raw=one.map(([p,d],k)=>{const uf=U(d.dims[d.axis]).f;return{p,d,col:PAL[k%PAL.length],m:bragg(d.x.map(v=>v*uf),d.y)}});const rm=(raw.find(r=>r.p===RS.ref)||raw[0]).m;const fx=v=>isFinite(v)?(Math.abs(v)<0.005?0:v).toFixed(2):"–";
+  M(`<div style="overflow-x:auto"><table class="metrics" style="margin-top:8px"><thead><tr><th>${t("col_file")}</th><th>${t("ex_particle")}, E</th><th>${t("peak")} [${u}]</th><th>R80 [${u}]</th><th>BPW80 [${u}]</th><th>D80–D20 [${u}]</th><th>${t("peak_entr")}</th><th title="${esc(t("relw_tip"))}">BPW80/R80 [%]</th><th title="${esc(t("relw_tip"))}">(D80–D20)/R80 [%]</th><th title="${esc(t("tail_tip"))}">${t("tail")} [%] ⓘ</th>${raw.length>1?`<th title="${esc(t("dr80_tip"))}">ΔR80 [${u}]</th><th title="${esc(t("quad_tip"))}">${t("bpw_filter")} [${u}] ⓘ</th>`:""}</tr></thead><tbody>`+
+  raw.map(r=>{const m=r.m,isRef=r.m===rm;const q=m.bpw>rm.bpw?Math.sqrt(m.bpw*m.bpw-rm.bpw*rm.bpw):NaN;return `<tr><td><span style="color:${r.col}">■</span> ${esc(r.p.split("/").pop())}${isRef&&raw.length>1?` <span class="mute">(${t("reference")})</span>`:""}</td><td title="${esc(r.d.beam&&r.d.beam.total?r.d.beam.total+" "+t("total"):"")}">${esc(beamLabel(r.d))}</td><td>${fx(m.peak)}</td><td>${fx(m.r80)}</td><td>${fx(m.bpw)}</td><td>${fx(m.dfo)}</td><td>${isFinite(m.pe)?m.pe.toFixed(2):"–"}</td><td>${fx(100*m.bpw/m.r80)}</td><td>${fx(100*m.dfo/m.r80)}</td><td>${fx(100*m.tail)}</td>${raw.length>1?`<td>${isRef?"":fx(m.r80-rm.r80)}</td><td>${isRef?"":fx(q)}</td>`:""}</tr>`}).join("")+"</tbody></table></div>")}}
+/* hover read-out and drag zoom */
+(function(){const c=$("plot"),tip=$("plTip"),sel=$("plSel"),vl=$("plVline");let drag=null;
+ const toCanvas=e=>{const r=c.getBoundingClientRect();return{x:(e.clientX-r.left)*c.width/r.width,y:(e.clientY-r.top)*c.height/r.height,f:r.width/c.width,cx:e.clientX-r.left,cy:e.clientY-r.top}};
+ const toX=(v,px)=>v.xmin+(px-v.X0)/(v.X1-v.X0)*(v.xmax-v.xmin);
+ c.addEventListener("mousemove",e=>{const v=RS.view;if(!v){tip.hidden=true;vl.hidden=true;return}const p=toCanvas(e);if(p.x<v.X0||p.x>v.X1){tip.hidden=true;vl.hidden=true;return}
+  const x=toX(v,p.x);vl.hidden=false;vl.style.left=(p.cx)+"px";vl.style.top=(v.Y1*p.f)+"px";vl.style.height=((v.Y0-v.Y1)*p.f)+"px";
+  tip.innerHTML=`<b>${x.toFixed(2)} ${esc(v.unit)}</b>`+v.series.map(s=>{const y=interp(s.x,s.y,x);return `<div><span style="color:${s.col}">■</span> ${isFinite(y)?(Math.abs(y)<1e-6?0:+y.toPrecision(4)):"–"} <span class="mute">${esc(s.p.split("/").pop())}</span></div>`}).join("");
+  tip.hidden=false;const w=c.getBoundingClientRect().width;tip.style.left=(p.cx>w*0.6?p.cx-tip.offsetWidth-14:p.cx+14)+"px";tip.style.top=(p.cy+12)+"px";
+  if(drag){const l=Math.min(drag.cx,p.cx),r=Math.max(drag.cx,p.cx);sel.hidden=false;sel.style.left=l+"px";sel.style.width=(r-l)+"px";sel.style.top=(v.Y1*p.f)+"px";sel.style.height=((v.Y0-v.Y1)*p.f)+"px"}});
+ c.addEventListener("mouseleave",()=>{tip.hidden=true;vl.hidden=true;sel.hidden=true;drag=null});
+ c.addEventListener("mousedown",e=>{if(!RS.view)return;drag=toCanvas(e);e.preventDefault()});
+ c.addEventListener("mouseup",e=>{const v=RS.view;if(!drag||!v){drag=null;return}const p=toCanvas(e);sel.hidden=true;
+  if(Math.abs(p.x-drag.x)>8){const a=toX(v,Math.max(v.X0,Math.min(drag.x,p.x))),b=toX(v,Math.min(v.X1,Math.max(drag.x,p.x)));RS.zoom=[a,b];drawPlot()}drag=null});
+ c.addEventListener("dblclick",()=>{RS.zoom=null;drawPlot()});})();
 function drawMap(g,W,H,p,d,ink,mute){const G=d.grid,nu=G.length,nv=G[0].length;let mx=0;for(const r of G)for(const v of r)mx=Math.max(mx,v);
  const X0=100,X1=W-150,Y0=H-70,Y1=30,img=g.createImageData(nv,nu);
  for(let u=0;u<nu;u++)for(let v=0;v<nv;v++){const [r,gg,b]=viridis(mx?G[u][v]/mx:0),o=4*((nu-1-u)*nv+v);img.data[o]=r;img.data[o+1]=gg;img.data[o+2]=b;img.data[o+3]=255}
@@ -385,7 +767,7 @@ function drawMap(g,W,H,p,d,ink,mute){const G=d.grid,nu=G.length,nv=G[0].length;l
  g.fillStyle=grd;g.fillRect(X1+24,Y1,22,Y0-Y1);g.fillStyle=ink;g.textAlign="left";g.fillText(mx.toPrecision(3),X1+52,Y1+14);g.fillText("0",X1+52,Y0);
  g.save();g.translate(W-16,(Y0+Y1)/2);g.rotate(-Math.PI/2);g.textAlign="center";g.fillText(d.quantity,0,0);g.restore();
  g.fillStyle=mute;g.textAlign="left";g.fillText(p.split("/").pop()+(d.dims.every(x=>x.n>1)?`  (Σ ${d.dims[d.collapsed].name})`:""),X0,Y1-8);}
-$("plPng").onclick=()=>{const a=document.createElement("a");a.href=$("plot").toDataURL("image/png");a.download=(RS.pick[0]||"plot").split("/").pop().replace(/\.csv$/,"")+".png";a.click()};
+
 
 /* ---------- generators */
 let GENS=[];
@@ -406,7 +788,9 @@ async function gen(preview){store("genFolder",$("genFolder").value);try{const j=
 $("genPrev").onclick=()=>gen(true);$("genMake").onclick=()=>gen(false);
 
 /* ---------- settings */
-async function loadSettings(){await loadInfo();$("setRoot").textContent=INFO.root;$("ver").textContent=INFO.version;renderBins(INFO.cfg.binaries)}
+async function loadSettings(){await loadInfo();const inc=new Set(INFO.cfg.include||[]);
+ $("incBox").innerHTML=(INFO.folders||[]).map(f=>`<label><input type="checkbox" value="${esc(f)}" ${inc.has(f)?"checked":""}> ${esc(f)}</label>`).join("")||`<span class="mute">–</span>`;
+ $("excBox").value=(INFO.cfg.exclude||INFO.default_exclude).join("\n");$("setToast").checked=INFO.cfg.toast!==false;$("setAwake").checked=INFO.cfg.keep_awake!==false;$("setRoot").textContent=INFO.root;$("ver").textContent=INFO.version;renderBins(INFO.cfg.binaries)}
 function renderBins(bins){$("binList").innerHTML=bins.map((b,i)=>`<div class="card" style="margin-bottom:10px" data-i="${i}"><div class="grid2">
  <label>${t("bin_name")}<input class="bn" value="${esc(b.name)}"></label><label>${t("bin_cmd")}<input class="bc" value="${esc(b.cmd)}"></label>
  <label style="grid-column:1/-1">${t("bin_env")}<textarea class="be" style="min-height:60px">${esc(Object.entries(b.env||{}).map(([k,v])=>k+"="+v).join("\n"))}</textarea></label></div>
@@ -414,6 +798,9 @@ function renderBins(bins){$("binList").innerHTML=bins.map((b,i)=>`<div class="ca
  $("binList").querySelectorAll(".brm").forEach(btn=>btn.onclick=()=>{const all=readBins();all.splice(+btn.closest("[data-i]").dataset.i,1);renderBins(all)})}
 function readBins(){return [...$("binList").querySelectorAll("[data-i]")].map(d=>({name:d.querySelector(".bn").value.trim(),cmd:d.querySelector(".bc").value.trim(),
  env:Object.fromEntries(d.querySelector(".be").value.split("\n").map(l=>l.trim()).filter(l=>l.includes("=")).map(l=>[l.slice(0,l.indexOf("=")).trim(),l.slice(l.indexOf("=")+1).trim()]))}))}
+$("scanSave").onclick=async()=>{const include=[...$("incBox").querySelectorAll("input:checked")].map(c=>c.value),exclude=$("excBox").value.split("\n").map(x=>x.trim()).filter(Boolean);
+ try{await api("/api/config",{include,exclude});$("scanMsg").textContent=t("saved");RF.files=[];NAMES.loaded=false;EX.loaded=false}catch(e){$("scanMsg").textContent=t("error")+": "+e.message}};
+$("setAwake").onchange=e=>api("/api/config",{keep_awake:e.target.checked}).then(refreshJobs);
 $("binAdd").onclick=()=>renderBins(readBins().concat([{name:"",cmd:"",env:{}}]));
 $("binDetect").onclick=()=>{const have=readBins();for(const d of INFO.detected)if(!have.some(b=>b.cmd===d.cmd))have.push(d);renderBins(have)};
 $("binSave").onclick=async()=>{try{await api("/api/config",{binaries:readBins()});$("binMsg").textContent=t("saved");await loadInfo()}catch(e){$("binMsg").textContent=t("error")+": "+e.message}};

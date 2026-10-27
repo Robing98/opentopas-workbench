@@ -7,6 +7,5 @@ set "WS=%~1"
 if "%WS%"=="" set "WS=%CD%"
 for /f "usebackq delims=" %%P in (`wsl.exe -e wslpath -a "%~dp0."`) do set "R=%%P"
 for /f "usebackq delims=" %%P in (`wsl.exe -e wslpath -a "%WS%"`) do set "W=%%P"
-start "" cmd /c "timeout /t 2 >nul & start http://localhost:8765"
-wsl.exe --cd "%R%" -e python3 -m opentopas_workbench --workspace "%W%" --no-browser
+wsl.exe --cd "%R%" -e python3 -m opentopas_workbench --workspace "%W%"
 pause

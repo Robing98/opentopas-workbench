@@ -4,3 +4,6 @@ build/
 dist/
 .workbench/
 .pytest_cache/
+workspace/
+plan_peaks/
+_to_delete/
