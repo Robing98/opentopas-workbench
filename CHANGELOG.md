@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Fixes: `rifi_kernel_fit.py` also runs with numpy older than 2.0. It called `np.trapezoid`, which exists only from numpy 2.0 on.
+
 ## 0.5.0
 
 - Speed: the Runs tab no longer resolves every case path with realpath and lists result sub folders once per folder instead of once per case. For 300 cases this drops from about 4,600 file system calls to about 360 after a change (seconds on WSL /mnt/c before), and to none while cached.

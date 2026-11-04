@@ -42,6 +42,11 @@ def test_one_d_triangle_is_uniform():
     assert w[1:-1].std() / w[1:-1].mean() < 0.02            # flat
 
 
+def test_area_is_exact_for_a_straight_line():
+    x = np.linspace(0.0, 3.0, 31)
+    assert kf.area(2.0 * x + 1.0, x) == pytest.approx(12.0)
+
+
 def test_crossed_filters_convolve():
     a = kf.hist_kernel(kf.ridge_samples([0, 0.5, 1.0], [0.0, 2.0, 0.0], 1.0))
     c = kf.convolve_kernels(a, a)
@@ -73,7 +78,7 @@ def test_pin_stl_closed_and_thickness_matches_rings(tmp_path, profile):
     T = kf.stl_thickness(kf.read_stl(str(p)), region=6.0)
     zr, sr = rf.pin_rings(4.0, profile=profile)
     zz = np.linspace(zr[0], zr[-1], 100001); a = (np.interp(zz, zr, sr) / 0.75) ** 2
-    mean = zr[0] + np.trapezoid(a, zz); sd = np.sqrt(zr[0] ** 2 + np.trapezoid(2 * zz * a, zz) - mean ** 2)
+    mean = zr[0] + kf.area(a, zz); sd = np.sqrt(zr[0] ** 2 + kf.area(2 * zz * a, zz) - mean ** 2)
     assert T.mean() == pytest.approx(mean, abs=2e-3) and T.std() == pytest.approx(sd, abs=2e-3)
     assert vol / (9.0 * 9.0) == pytest.approx(mean, abs=2e-3)  # volume per area = mean thickness
 
@@ -85,7 +90,7 @@ def test_equivalent_ridge_has_same_distribution(profile):
     r = kf.ridge_samples(np.round(xs, 3), np.round(zs, 3), 1.5)  # as written into the parameter file
     zr, sr = rf.pin_rings(4.0, profile=profile)
     zz = np.linspace(zr[0], zr[-1], 100001); a = (np.interp(zz, zr, sr) / 0.75) ** 2
-    mean = zr[0] + np.trapezoid(a, zz)
+    mean = zr[0] + kf.area(a, zz)
     assert r.mean() == pytest.approx(mean, abs=2e-3)
 
 

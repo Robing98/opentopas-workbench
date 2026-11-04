@@ -318,6 +318,12 @@ def model(zq, z, d, A, tm, sig, shape):
 
 
 # ------------------------------------------------------------------ curve metrics
+def area(y, x):
+    """Area under a sampled curve by the trapezoid rule (np.trapezoid only exists from numpy 2.0 on)."""
+    y, x = np.asarray(y, float), np.asarray(x, float)
+    return float(np.sum(0.5 * (y[1:] + y[:-1]) * np.diff(x)))
+
+
 def metrics(z, d):
     i = int(np.argmax(d)); dm = d[i]
     def after(level):
@@ -454,7 +460,7 @@ def main():
         if key not in truth_cache: truth_cache[key] = true_kernel(i1, a)
         tk = truth_cache[key]
         dR80 = m0["R80"] - m1["R80"]; q2 = m1["BPW80"] ** 2 - m0["BPW80"] ** 2
-        A0 = np.trapezoid(d1, z1) / np.trapezoid(d0, z0)          # a convolution keeps the area
+        A0 = area(d1, z1) / area(d0, z0)          # a convolution keeps the area
         start = [float(np.clip(A0, 0.01, 99)), float(np.clip(dR80 - 0.3, 0.1, 39)), float(np.clip(np.sqrt(max(q2, 0.01)) / 1.336, 0.3, 14))]
         row = {"variant": var, "particle": i1.get("particle", ""), "energy_MeV": E, "energy_MeV_u": E / A_nuc,
                "file_with": os.path.basename(f1), "R80_without": m0["R80"], "R80_with": m1["R80"], "dR80": dR80,
