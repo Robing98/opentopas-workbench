@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0
 
 - Speed: the Runs tab no longer resolves every case path with realpath and lists result sub folders once per folder instead of once per case. For 300 cases this drops from about 4,600 file system calls to about 360 after a change (seconds on WSL /mnt/c before), and to none while cached.
 - Speed: parsed parameter files and result metrics are kept in `.workbench/index.json`, so after a restart the Runs and Overview tabs only check modification times. Large text files that are not parameter files are no longer read completely; 2D and 3D scorer files are indexed from their header alone.
@@ -18,6 +18,7 @@
 - Tools: `rifi_kernel_fit.py` fits the ripple filter kernel (mean water equivalent thickness and its spread) from depth dose curves with and without the filter, as Gaussian, uniform, pyramid, and free-form kernel, and reports the best shape. The true kernel comes from the TOPAS parameter file (TsRidgeFilter, crossed filters as convolution, TsCAD STL by ray casting through the mesh) or from `--pin`, `--stl`, `--heightmap`; `--show-kernel` only analyses a filter geometry. Pairs are found automatically (every `*rifi0*` curve with all variants, also from the parent folder), PTW .mcc and two-column files are read. `rifi_shapes_figure.py` draws filter shape against thickness distribution and the convolution of a depth dose. `topas2matrad.py`: `--min-spacing` together with `--spacing-bpw` sets the lower limit of the peak distance.
 - Ripple filter generator: 2D straight pyramids (`pyr3`, `pyr4`, `pyr6`, STL) and 1D ridges with the same thickness distribution as the 2D pins (`pin4e`, `pyr4e`), to check that only the distribution matters for the depth dose.
 - API, all additions optional (existing endpoints unchanged): `/api/jobs?hist=N` returns all active jobs plus the last N finished ones, with `counts`, `finished`, and `rev`; `/api/dequeue` accepts `{"all": true}`; `/api/outputs` lists the plottable outputs of parameter files; `/api/params` and `/api/index` carry a `stale` flag; `/file?...&v=MTIME` may be cached by the browser.
+- Python 3.9 or later: the package metadata needs setuptools 77, which does not support Python 3.8. CI also runs the ripple filter tool tests, with NumPy and SciPy.
 
 ## 0.4.0
 

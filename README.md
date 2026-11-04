@@ -28,7 +28,7 @@ A local web UI for [OpenTOPAS](https://github.com/OpenTOPAS/OpenTOPAS) and TOPAS
 
 ## Requirements
 
-- Python 3.8 or later
+- Python 3.9 or later
 - OpenTOPAS or TOPAS 3.9 on Linux, macOS, or Windows via WSL
 
 ## Install and start
