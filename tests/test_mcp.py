@@ -214,11 +214,15 @@ def wait_for(cond, timeout=30.0):
 
 
 def test_server_file_written_and_removed(tmp_path):
+    log = open(tmp_path / "server.out", "w")
     p = subprocess.Popen([sys.executable, "-m", "opentopas_workbench", "--workspace", str(tmp_path), "--no-browser", "--port", "0"],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                         stdout=log, stderr=subprocess.STDOUT)
     try:
         f = tmp_path / ".workbench" / "server.json"
-        s = wait_for(lambda: f.exists() and json.loads(f.read_text()))
+        try:
+            s = wait_for(lambda: f.exists() and json.loads(f.read_text()))
+        except AssertionError:   # say why the workbench did not come up
+            raise AssertionError(f"no server.json; workbench exit {p.poll()}, output: {(tmp_path / 'server.out').read_text()[-2000:]}")
         assert s["pid"] == p.pid and stat.S_IMODE(f.stat().st_mode) == 0o600
         req = urllib.request.Request(s["url"].replace("localhost", "127.0.0.1") + "api/info", headers={"X-Token": s["token"]})
         with urllib.request.urlopen(req) as r: assert os.path.realpath(json.loads(r.read())["root"]) == os.path.realpath(tmp_path)
@@ -226,6 +230,7 @@ def test_server_file_written_and_removed(tmp_path):
         assert not f.exists()
     finally:
         if p.poll() is None: p.kill()
+        log.close()
 
 
 def test_adapter_starts_a_workbench_when_none_runs(tmp_path):
@@ -233,7 +238,8 @@ def test_adapter_starts_a_workbench_when_none_runs(tmp_path):
     pid = None
     try:
         r, out = c.tool("info")
-        assert not r["isError"] and os.path.realpath(out["workspace"]) == os.path.realpath(tmp_path)
+        assert not r["isError"], out
+        assert os.path.realpath(out["workspace"]) == os.path.realpath(tmp_path)
         pid = json.loads((tmp_path / ".workbench" / "server.json").read_text())["pid"]
         assert f"pid {pid}" in out["note"]
         c.close()
