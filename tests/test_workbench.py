@@ -136,7 +136,7 @@ def test_pin_stl_is_watertight():
 # ------------------------------------------------------------------ HTTP
 @pytest.fixture
 def srv(ws):
-    s = ThreadingHTTPServer(("127.0.0.1", 0), wb.H)
+    s = wb.Server(("127.0.0.1", 0), wb.H)
     threading.Thread(target=s.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{s.server_address[1]}"
     s.shutdown()

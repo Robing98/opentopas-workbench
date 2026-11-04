@@ -52,6 +52,51 @@ On first start the workbench looks for TOPAS binaries in `~/.local/bin/topas4`, 
 
 Settings, job history, logs, and a cache of parsed files (`index.json`, safe to delete) live in `WORKSPACE/.workbench/`.
 
+## MCP server
+
+`opentopas-workbench mcp` lets an MCP client such as Claude Code or Claude Desktop drive the workbench: read cases and results, create cases with a generator, queue and stop runs, and read logs. It is a local stdio server (one JSON-RPC message per line) and a thin layer over the HTTP API of a running workbench, so runs it queues show in the Runs tab like any other.
+
+Claude Code, in Linux or in WSL next to TOPAS:
+
+```
+claude mcp add opentopas-workbench -- opentopas-workbench mcp --workspace /path/to/cases
+```
+
+Claude Desktop on Windows with TOPAS in WSL, in `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "opentopas-workbench": {
+      "command": "wsl.exe",
+      "args": ["-e", "/home/USER/.local/bin/opentopas-workbench", "mcp", "--workspace", "/mnt/c/path/to/cases"]
+    }
+  }
+}
+```
+
+`wsl.exe -e` starts the program without a login shell, so `~/.local/bin` is usually not on the `PATH` there: give the full path (`which opentopas-workbench` in WSL prints it). Without installing, from a clone: `"args": ["--cd", "/path/to/clone", "-e", "python3", "-m", "opentopas_workbench", "mcp", "--workspace", "..."]`.
+
+Finding the workbench: a running workbench writes `WORKSPACE/.workbench/server.json` with its address, token, and process id (readable only by you) and removes it on exit. The MCP server reads it; a file left by a process that no longer runs is ignored. When no workbench runs for the workspace, the MCP server starts one in the background (log in `.workbench/server.log`), so the queue keeps running after the client exits. Options:
+
+- `--workspace DIR`: default is the nearest folder upward that holds `.workbench`, else the current folder.
+- `--read-only`: offer only the tools that read; the others are hidden and refused.
+- `--no-start`: report an error with the start command instead of starting a workbench.
+- `--url URL --token TOKEN` (or `OPENTOPAS_WORKBENCH_TOKEN`): use a workbench at this address.
+
+Tools that read: `info`, `list_files`, `list_cases`, `read_file`, `lint`, `list_generators`, `list_results` (particle, energy, R80, BPW80, distal fall-off), `get_curve` (downsampled, peak kept; 2D and 3D as a grid), `queue_status`, `job_log`, `case_outputs`. Tools that write: `write_file`, `generate`, `enqueue`, `dequeue`, `stop`. Paths are relative to the workspace and cannot leave it. Through MCP, nothing in `.workbench` can be written (its settings name the programs that runs execute, and generator plugins are Python), and `server.json` cannot be read. `--read-only` still starts a workbench when none runs; add `--no-start` to change nothing at all.
+
+For scripts and shells without MCP, two commands use the same discovery:
+
+```
+opentopas-workbench enqueue case1.txt case2.txt [--binary NAME] [--subdir DIR] [--skip-existing]
+opentopas-workbench jobs [--history N] [--json]
+```
+
+`enqueue` starts a workbench when none runs; `jobs` never does.
+
+Runs started outside the queue: on Linux and WSL, the Runs tab also lists TOPAS processes (`topas`, `topas4`, and the configured programs) whose working folder or parameter file lies in the workspace, marked "external", with file, start, and elapsed time. They cannot be stopped from the workbench. `queue_status` and `jobs` list them too. On macOS this list stays empty.
+
 ## Writing a generator plugin
 
 Put a Python file into `WORKSPACE/.workbench/generators/` (or into `opentopas_workbench/generators/` to ship it). It needs four names:

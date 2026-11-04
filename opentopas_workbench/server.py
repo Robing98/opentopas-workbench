@@ -10,7 +10,7 @@ Pure Python standard library. Runs on Linux, macOS and WSL.
 Security: listens on 127.0.0.1 only, checks the Host header and requires a per-session token for every API call,
 and only touches files inside the workspace.
 """
-import argparse, base64, csv, fnmatch, io, zipfile, importlib.util, json, os, re, secrets, shutil, signal, subprocess, sys, threading, time, webbrowser
+import argparse, base64, csv, fnmatch, io, zipfile, importlib.util, json, os, re, secrets, shutil, signal, socketserver, subprocess, sys, threading, time, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -541,6 +541,61 @@ def enqueue(files, binary, subdir, skip_existing):
         added.append(f)
     with STATE["lock"]: save_jobs()
     return added, skipped
+
+
+PROC_DIR = "/proc"
+SHELLS = {"sh", "bash", "dash", "zsh"}
+_EXTERNAL = {"t": 0.0, "root": None, "runs": []}
+
+
+def _proc_read(pid, name, binary=False):
+    with open(os.path.join(PROC_DIR, str(pid), name), "rb" if binary else "r") as fh: return fh.read()
+
+
+def external_runs(max_age=3.0):
+    """TOPAS processes that the queue did not start but that work in the workspace (their working folder or parameter file
+    lies in it), so the Runs tab shows every run, also one started in a terminal or by an agent. Linux and WSL read /proc;
+    elsewhere the list is empty. Matched by program name: topas, topas4, and the configured programs."""
+    root = root_real()
+    if time.time() - _EXTERNAL["t"] < max_age and _EXTERNAL["root"] == root: return _EXTERNAL["runs"]
+    runs = []
+    if os.path.isdir(PROC_DIR):
+        names = {"topas", "topas4"} | {os.path.basename(os.path.expanduser(b.get("cmd", ""))) for b in STATE["cfg"].get("binaries", [])}
+        prog_of = {os.path.basename(os.path.expanduser(b.get("cmd", ""))): b["name"] for b in STATE["cfg"].get("binaries", []) if b.get("name")}
+        own = STATE["proc"]; own_pgid = own.pid if own is not None else None   # queue jobs run in their own session
+        try:
+            with open(os.path.join(PROC_DIR, "stat")) as fh: btime = next(int(l.split()[1]) for l in fh if l.startswith("btime"))
+        except (OSError, StopIteration, ValueError, IndexError): btime = None
+        tick = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
+        found = {}
+        for d in os.listdir(PROC_DIR):
+            if not d.isdigit(): continue
+            try:
+                argv = [a.decode("utf-8", "replace") for a in _proc_read(d, "cmdline", True).split(b"\0") if a]
+                if not argv: continue
+                if os.path.basename(argv[0]) in SHELLS and len(argv) > 1 and not argv[1].startswith("-"): argv = argv[1:]
+                prog = os.path.basename(argv[0])
+                if prog not in names: continue
+                stat = _proc_read(d, "stat").rsplit(")", 1)[1].split()   # the command name in brackets may contain spaces
+                ppid, pgid, start = int(stat[1]), int(stat[2]), int(stat[19])
+                if own_pgid is not None and pgid == own_pgid: continue
+                cwd = os.readlink(os.path.join(PROC_DIR, d, "cwd"))
+            except (OSError, ValueError, IndexError):
+                continue   # gone meanwhile, or another user's process
+            param = next((a for a in argv[1:] if not a.startswith("-")), "")
+            ppath = os.path.realpath(os.path.join(cwd, param)) if param else ""
+            inside = lambda p: p == root or p.startswith(root + os.sep)
+            if not (inside(os.path.realpath(cwd)) or (ppath and inside(ppath))): continue
+            run = {"pid": int(d), "program": prog_of.get(prog, prog), "file": relp(ppath) if ppath and inside(ppath) else param,
+                   "cwd": relp(os.path.realpath(cwd)) if inside(os.path.realpath(cwd)) else cwd}
+            if btime is not None:
+                t0 = btime + start / tick
+                run["start"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t0)); run["elapsed"] = round(time.time() - t0)
+            found[int(d)] = (ppid, run)
+        # a wrapper script and the TOPAS binary it starts are one run: keep the outermost process
+        runs = sorted((r for p, (pp, r) in found.items() if pp not in found), key=lambda r: r["pid"])
+    _EXTERNAL.update(t=time.time(), root=root, runs=runs)
+    return runs
 
 
 def stop_current():
@@ -1292,6 +1347,14 @@ def prewarm():
 
 
 # ------------------------------------------------------------------ HTTP
+class Server(ThreadingHTTPServer):
+    def server_bind(self):
+        # HTTPServer.server_bind looks up the host name of the address (socket.getfqdn), a reverse DNS query that can
+        # hang for half a minute on macOS before the workbench answers; the name is not used, so skip it
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 
@@ -1372,7 +1435,7 @@ class H(BaseHTTPRequestHandler):
                             j["eta"] = round(el * (j["total"] - done) / done) if done < j["total"] else 0
                 est = [dict(j) for j in finished[-200:]] + [j for j in jobs if j["status"] in ("queued", "running")]
                 return self.send(200, {"jobs": jobs, "running": running, "awake": AWAKE.status(), "queue_eta": queue_estimate(est),
-                                       "counts": counts, "finished": len(finished), "rev": rev})
+                                       "counts": counts, "finished": len(finished), "rev": rev, "external": external_runs()})
             if u.path == "/api/log":
                 p = resolve(q.get("p", ""))
                 with open(p, errors="replace") as fh: fh.seek(0, 2); size = fh.tell(); fh.seek(max(0, size - 12000)); return self.send(200, {"text": fh.read()})
@@ -1544,8 +1607,42 @@ def open_browser(url):
         print("open the address above in your browser")
 
 
+SERVER_FILE = "server.json"
+
+
+def write_server_file(url):
+    """Address, token and process of this instance in .workbench/server.json, readable by the owner only.
+    The MCP adapter (mcp.py) finds a running workbench through it; the token in it grants the same access as the page."""
+    os.makedirs(wb_dir(), exist_ok=True)
+    path = os.path.join(wb_dir(), SERVER_FILE)
+    tmp = f"{path}.{os.getpid()}.tmp"   # own name per process: two starting at once must not replace each other's file
+    try: os.unlink(tmp)
+    except OSError: pass
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)   # O_EXCL: a leftover file would keep its wider mode
+    with os.fdopen(fd, "w") as fh:
+        json.dump({"url": url, "token": TOKEN, "pid": os.getpid(), "version": VERSION}, fh)
+    os.replace(tmp, path)
+    return path
+
+
+def remove_server_file():
+    """Removes server.json unless a later instance on the same workspace has replaced it."""
+    path = os.path.join(wb_dir(), SERVER_FILE)
+    try:
+        with open(path) as fh:
+            if json.load(fh).get("pid") != os.getpid(): return
+        os.remove(path)
+    except (OSError, ValueError):
+        pass
+
+
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="OpenTOPAS Workbench")
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] in (["mcp"], ["enqueue"], ["jobs"]):
+        from . import mcp
+        return {"mcp": mcp.main, "enqueue": mcp.cli_enqueue, "jobs": mcp.cli_jobs}[argv[0]](argv[1:])
+    ap = argparse.ArgumentParser(description="OpenTOPAS Workbench. Subcommands: mcp (MCP server), enqueue, jobs; "
+                                             "see 'opentopas-workbench mcp --help'")
     ap.add_argument("--workspace", default=os.getcwd(), help="folder with your parameter files (default: current folder)")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-browser", action="store_true")
@@ -1558,18 +1655,25 @@ def main(argv=None):
     srv = None
     for port in range(a.port, a.port + 20):  # the default port may be taken by an earlier instance
         try:
-            srv = ThreadingHTTPServer(("127.0.0.1", port), H); break
+            srv = Server(("127.0.0.1", port), H); break
         except OSError:
             print(f"port {port} is in use, trying {port + 1}")
     if srv is None: sys.exit(f"no free port between {a.port} and {a.port + 19}")
+    port = srv.server_address[1]   # the one the system picked for --port 0
     url = f"http://localhost:{port}/"
-    print(f"OpenTOPAS Workbench {VERSION}\n  workspace: {STATE['root']}\n  open:      {url}\n  stop:      Ctrl+C")
-    if not a.no_browser: open_browser(url)
+    print(f"OpenTOPAS Workbench {VERSION}\n  workspace: {STATE['root']}\n  open:      {url}\n  stop:      Ctrl+C", flush=True)
+    write_server_file(url)
+    # SIGTERM (kill) and SIGHUP (a closing terminal) end like Ctrl+C, so the running job is stopped and server.json goes away
+    def on_term(*_): raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, on_term)
+    if hasattr(signal, "SIGHUP"): signal.signal(signal.SIGHUP, on_term)
     try:
+        if not a.no_browser: open_browser(url)
         srv.serve_forever()
     except KeyboardInterrupt:
         stop_current()
     finally:
+        remove_server_file()
         AWAKE.stop()
 
 
