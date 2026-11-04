@@ -129,12 +129,14 @@ class Workbench:
         if info and os.path.realpath(info.get("root", "")) == self.workspace: return found
         return None
 
-    def _spawn(self):
+    def _refuse_second(self):
         other = workbench_without_file(self.workspace)
         if other:
             # a second workbench would run a second queue on the same files; a version before 0.6.0 writes no server.json
             raise ApiError(f"a workbench (pid {other}) already runs for {self.workspace} but wrote no .workbench/server.json, "
                            f"probably an older version. Restart it with this version, or pass --url and --token.")
+
+    def _spawn(self):
         wb = os.path.join(self.workspace, ".workbench"); os.makedirs(wb, exist_ok=True)
         log = os.path.join(wb, "server.log")
         with open(log, "w") as fh:
@@ -168,9 +170,10 @@ class Workbench:
         if not os.path.isdir(self.workspace): raise ApiError(f"workspace not found: {self.workspace}")
         found = self._from_file()
         if not found:
+            self._refuse_second()
             if not self.start:
                 raise ApiError(f"no workbench is running for {self.workspace}. Start it with "
-                               f"'opentopas-workbench --workspace {self.workspace}', or run the MCP server without --no-start.")
+                               f"'opentopas-workbench --workspace {self.workspace}'.")
             found = self._spawn()
         self.url, self.token = found[0], found[1]
 

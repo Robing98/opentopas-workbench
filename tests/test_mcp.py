@@ -313,8 +313,9 @@ def test_no_second_workbench_beside_one_without_server_file(ws, tmp_path_factory
     assert mcp.workbench_without_file(real) is None
     fake_proc(proc, 13, ["python3", "-m", "opentopas_workbench", "--workspace", "."], ws, pgid=13)   # relative to its cwd
     assert mcp.workbench_without_file(real) == 13
-    with pytest.raises(mcp.ApiError, match="pid 13"):
-        mcp.Workbench(str(ws)).connect()
+    for start in (True, False):   # also without starting: the message has to name the old workbench
+        with pytest.raises(mcp.ApiError, match="pid 13"):
+            mcp.Workbench(str(ws), start=start).connect()
     assert not (ws / ".workbench" / "server.log").exists()   # nothing was started
 
 
