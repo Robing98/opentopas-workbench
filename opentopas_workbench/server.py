@@ -10,7 +10,7 @@ Pure Python standard library. Runs on Linux, macOS and WSL.
 Security: listens on 127.0.0.1 only, checks the Host header and requires a per-session token for every API call,
 and only touches files inside the workspace.
 """
-import argparse, base64, csv, fnmatch, io, zipfile, importlib.util, json, os, re, secrets, shutil, signal, subprocess, sys, threading, time, webbrowser
+import argparse, base64, csv, fnmatch, io, zipfile, importlib.util, json, os, re, secrets, shutil, signal, socketserver, subprocess, sys, threading, time, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -1347,6 +1347,14 @@ def prewarm():
 
 
 # ------------------------------------------------------------------ HTTP
+class Server(ThreadingHTTPServer):
+    def server_bind(self):
+        # HTTPServer.server_bind looks up the host name of the address (socket.getfqdn), a reverse DNS query that can
+        # hang for half a minute on macOS before the workbench answers; the name is not used, so skip it
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = self.server_address[:2]
+
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
 
@@ -1647,7 +1655,7 @@ def main(argv=None):
     srv = None
     for port in range(a.port, a.port + 20):  # the default port may be taken by an earlier instance
         try:
-            srv = ThreadingHTTPServer(("127.0.0.1", port), H); break
+            srv = Server(("127.0.0.1", port), H); break
         except OSError:
             print(f"port {port} is in use, trying {port + 1}")
     if srv is None: sys.exit(f"no free port between {a.port} and {a.port + 19}")

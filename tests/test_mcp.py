@@ -1,6 +1,5 @@
 """The MCP adapter (opentopas_workbench/mcp.py) driven over pipes against a workbench served from this test process."""
 import json, os, signal, stat, subprocess, sys, threading, time, urllib.request
-from http.server import ThreadingHTTPServer
 
 import pytest
 
@@ -25,7 +24,7 @@ def ws(tmp_path):
 
 @pytest.fixture
 def srv(ws):
-    s = ThreadingHTTPServer(("127.0.0.1", 0), wb.H)
+    s = wb.Server(("127.0.0.1", 0), wb.H)
     threading.Thread(target=s.serve_forever, daemon=True).start()
     url = f"http://localhost:{s.server_address[1]}/"
     wb.write_server_file(url)   # what main() does, so the adapter finds this server through the workspace
