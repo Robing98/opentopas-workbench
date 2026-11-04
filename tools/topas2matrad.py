@@ -72,10 +72,21 @@ def main():
     ap.add_argument("--template", required=True, help="matRad proton machine used for lateral kernels and LET")
     ap.add_argument("--name", required=True, help="machine name, the file is protons_<name>.mat")
     ap.add_argument("--fwhm", type=float, default=7.0, help="spot FWHM in air at the isocentre [mm]")
+    ap.add_argument("--fwhm-table", help="energy dependent spot FWHM at the isocentre instead of --fwhm: json with a "
+                    "'focus' object {energy: fwhm_mm} (as exported from the cycle data) or csv energy_MeV,fwhm_mm. "
+                    "Energies outside the table use a fit fwhm = a / E + b to it")
     ap.add_argument("--sigma-table", help="csv with energy_MeV, sigma_noRiFi_mm, sigma_<variant>_mm (from fit_spots.py): "
                     "the increase of the spot size over the reference column is added in quadrature to --fwhm")
     ap.add_argument("--sigma-column", help="column of --sigma-table for this machine, e.g. sigma_RiFi4_mm")
     ap.add_argument("--smooth", type=int, default=3, help="moving average over n bins against MC noise (1 = off)")
+    ap.add_argument("--spacing-bpw", type=float, default=0.0,
+                    help="keep energies whose peaks are about this factor times BPW80 apart (BPW80 of the deeper peak), "
+                         "counted from the deepest one: a depth dependent layer spacing such as the RiFi allows")
+    ap.add_argument("--max-spacing", type=float, default=0.0,
+                    help="upper limit [mm] for the peak distance with --spacing-bpw (deep peaks are wide, large gaps ripple)")
+    ap.add_argument("--min-spacing", type=float, default=0.0,
+                    help="keep only energies whose peaks are at least this far apart [mm], counted from the deepest one; "
+                         "with --spacing-bpw the lower limit for the peak distance")
     ap.add_argument("--out")
     a = ap.parse_args()
     files = sorted({f for p in a.idd for f in glob.glob(p, recursive=True)})
@@ -87,6 +98,17 @@ def main():
         if col not in tab.dtype.names: sys.exit(f"column {col} not in {a.sigma_table}: {tab.dtype.names}")
         inc2 = np.clip(tab[col] ** 2 - tab["sigma_noRiFi_mm"] ** 2, 0, None)
         extra = lambda e: float(np.interp(e, tab["energy_MeV"], inc2))     # added variance [mm2]
+    base_fwhm = lambda e: a.fwhm
+    if a.fwhm_table:
+        if a.fwhm_table.endswith(".json"):
+            import json
+            ft = json.load(open(a.fwhm_table))["focus"]; fe = np.array([float(k) for k in ft]); fw = np.array([float(v) for v in ft.values()])
+        else:
+            t2 = np.genfromtxt(a.fwhm_table, delimiter=",", names=True); fe, fw = t2[t2.dtype.names[0]], t2[t2.dtype.names[1]]
+        o = np.argsort(fe); fe, fw = fe[o], fw[o]
+        ca, cb = np.polyfit(1.0 / fe, fw, 1)                               # fwhm = ca / E + cb, used outside the table
+        base_fwhm = lambda e: float(np.interp(e, fe, fw)) if fe[0] <= e <= fe[-1] else float(ca / e + cb)
+        print(f"spot FWHM from {a.fwhm_table}: {fw.min():.1f} to {fw.max():.1f} mm ({len(fe)} energies), outside: {ca:.0f}/E + {cb:.2f} mm")
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from matload import load_struct
     tpl = load_struct(a.template, "machine")           # v5/v7 or v7.3 (h5py)
@@ -104,6 +126,7 @@ def main():
         Z = dose * area / (n * MEV_J * 1e3)            # MeV cm2/g per primary
         i = int(np.argmax(Z)); peak = z[i]
         r80 = cross_after(z, Z / Z[i], 0.8, i)
+        p80 = next((z[k] + (z[k + 1] - z[k]) * (0.8 * Z[i] - Z[k]) / (Z[k + 1] - Z[k]) for k in range(i - 1, -1, -1) if Z[k] < 0.8 * Z[i] <= Z[k + 1]), np.nan)
         nz = np.where(Z > 1e-4 * Z[i])[0][-1]
         depths = depth_grid(peak, min(z[nz] + 5, z[-1]))
         Zg = np.interp(depths, z, Z)
@@ -113,7 +136,7 @@ def main():
         lat = {k: np.interp(depths * s, td, np.ravel(np.asarray(getattr(t, k), float))) for k in ("sigma1", "sigma2", "weight", "LET", "sigma") if hasattr(t, k)}
         if "sigma1" in lat: lat["sigma1"][0] = 0.0
         if "sigma" in lat: lat["sigma"][0] = 0.0
-        sig_air = float(np.sqrt((a.fwhm / 2.3548) ** 2 + (extra(energy) if extra else 0.0)))
+        sig_air = float(np.sqrt((base_fwhm(energy) / 2.3548) ** 2 + (extra(energy) if extra else 0.0)))
         f0 = t.initFocus
         initFocus = {"dist": np.ravel(np.asarray(f0.dist, float)), "sigma": np.full(np.size(f0.dist), sig_air), "SisFWHMAtIso": 2.3548 * sig_air,
                      "emittance": {"type": "bigaussian", "sigmaX": sig_air, "divX": 1e-12, "corrX": 1e-12, "sigmaY": sig_air, "divY": 1e-12, "corrY": 1e-12}}
@@ -121,9 +144,32 @@ def main():
              "energySpectrum": {"type": "gaussian", "mean": energy, "sigma": energy * spread / 100},
              "initFocus": initFocus, "offset": 0.0, "depths": depths, "Z": Zg}
         e.update(lat)
+        # matRad expects depth tables as columns (N x 1) and the focus tables as rows (1 x N), as in protons_Generic
+        for k in ("depths", "Z", "sigma", "sigma1", "sigma2", "weight", "LET"):
+            if k in e: e[k] = np.asarray(e[k], float).reshape(-1, 1)
+        for k in ("dist", "sigma"): initFocus[k] = np.asarray(initFocus[k], float).reshape(1, -1)
+        e["_bpw80"] = float(r80 - p80)       # helper for --spacing-bpw, not written to the machine
         entries.append(e)
         print(f"{os.path.basename(f)}: {energy:7.2f} MeV  peak {peak:6.1f} mm  R80 {r80:6.1f} mm  Z(0) {Zg[0]:.2f} MeV cm2/g  spot FWHM {2.3548 * sig_air:4.1f} mm  (template {float(np.ravel(t.energy)[0]):.1f} MeV)")
     entries.sort(key=lambda e: e["energy"])
+    if a.min_spacing > 0 and a.spacing_bpw <= 0:
+        kept = [entries[-1]]
+        for e in reversed(entries[:-1]):
+            if kept[-1]["peakPos"] - e["peakPos"] >= a.min_spacing - 0.05: kept.append(e)
+        print(f"--min-spacing {a.min_spacing} mm: {len(kept)} of {len(entries)} energies kept")
+        entries = sorted(kept, key=lambda e: e["energy"])
+    if a.spacing_bpw > 0:
+        kept = [entries[-1]]
+        for e in reversed(entries[:-1]):
+            need = a.spacing_bpw * kept[-1]["_bpw80"]
+            if a.max_spacing > 0: need = min(need, a.max_spacing)
+            need = max(need, a.min_spacing)          # with --min-spacing: never closer than today's constant spacing
+            if kept[-1]["peakPos"] - e["peakPos"] >= need - 0.05: kept.append(e)
+        gaps = [kept[j]["peakPos"] - kept[j + 1]["peakPos"] for j in range(len(kept) - 1)]
+        print(f"--spacing-bpw {a.spacing_bpw}" + (f" (max {a.max_spacing} mm)" if a.max_spacing > 0 else "") + (f" (min {a.min_spacing} mm)" if a.min_spacing > 0 else "") + ": "
+              f"{len(kept)} of {len(entries)} energies kept, peak gaps {min(gaps):.1f} to {max(gaps):.1f} mm"
+              + f" (deep {gaps[0]:.1f} mm, shallow {gaps[-1]:.1f} mm)" if gaps else "")
+        entries = sorted(kept, key=lambda e: e["energy"])
     order = ["energy", "range", "peakPos", "energySpectrum", "initFocus", "offset", "depths", "Z", "sigma", "sigma1", "sigma2", "weight", "LET"]
     dt = [(k, object) for k in order if k in entries[0]]
     data = np.zeros((1, len(entries)), dtype=dt)
@@ -131,7 +177,7 @@ def main():
         for k, _ in dt: data[0, j][k] = e[k]
     meta = {"name": a.name, "radiationMode": "protons", "dataType": str(tpl.meta.dataType),
             "created_on": datetime.date.today().strftime("%d-%b-%Y"), "created_by": "topas2matrad.py (OpenTOPAS Workbench)",
-            "description": f"Depth dose from TOPAS ({len(entries)} energies), lateral kernels and LET from template {tpl.meta.name}, spot FWHM {a.fwhm} mm" + (f" plus TOPAS spot broadening ({a.sigma_column})" if extra else ""),
+            "description": f"Depth dose from TOPAS ({len(entries)} energies), lateral kernels and LET from template {tpl.meta.name}, spot FWHM " + (f"from {os.path.basename(a.fwhm_table)}" if a.fwhm_table else f"{a.fwhm} mm") + (f" plus TOPAS spot broadening ({a.sigma_column})" if extra else ""),
             "SAD": float(tpl.meta.SAD), "BAMStoIsoDist": float(tpl.meta.BAMStoIsoDist)}
     for k in ("LUTspotSize", "LUT_bxWidthminFWHM"):
         if hasattr(tpl.meta, k): meta[k] = getattr(tpl.meta, k)

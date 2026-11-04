@@ -1,9 +1,12 @@
 """Generator: ripple filter (RiFi) depth-dose cases, 1D TsRidgeFilter and 2D pin filters (binary STL).
 
-Example plugin for OpenTOPAS Workbench. Geometry follows Grevillot et al. (2D 2 mm triangle) and generic 1D triangles / 2D pins
-with uniform thickness distribution. Phantom surface at the isocentre, filters 80 cm upstream.
+Example plugin for OpenTOPAS Workbench. Geometry follows Grevillot et al. (2D 2 mm triangle) and generic 1D triangles / 2D pins.
+2D pins: square pins on a 0.1 mm base plate, either shaped for a uniform thickness distribution ("pin", same modulation as a
+1D triangle) or straight pyramids ("pyr", thickness distribution falling linearly). Variants ending in "e" are 1D ridge filters
+with the same thickness distribution as the 2D pins, to check that only the distribution matters for the depth dose.
+Phantom surface at the isocentre, filters 80 cm upstream.
 """
-import math, struct
+import math, re, struct
 
 NAME = {"en": "Ripple filter study", "de": "Ripple-Filter-Studie"}
 DESCRIPTION = {
@@ -21,7 +24,14 @@ VARIANTS = {
     "pin3": {"en": "2D pins 3 mm", "de": "2D-Pins 3 mm"},
     "pin4": {"en": "2D pins 4 mm", "de": "2D-Pins 4 mm"},
     "pin6": {"en": "2D pins 6 mm", "de": "2D-Pins 6 mm"},
+    "pyr3": {"en": "2D pyramids 3 mm", "de": "2D-Pyramiden 3 mm"},
+    "pyr4": {"en": "2D pyramids 4 mm", "de": "2D-Pyramiden 4 mm"},
+    "pyr6": {"en": "2D pyramids 6 mm", "de": "2D-Pyramiden 6 mm"},
+    "pin4e": {"en": "1D equivalent of 2D pins 4 mm", "de": "1D-Äquivalent der 2D-Pins 4 mm"},
+    "pyr4e": {"en": "1D equivalent of 2D pyramids 4 mm", "de": "1D-Äquivalent der 2D-Pyramiden 4 mm"},
 }
+PIN_BASE, PIN_TOP_HALF, PIN_RINGS = 0.1, 0.04, 8     # mm, mm, segments of the pin flank
+PIN_RE = re.compile(r"^(pin|pyr)(\d+(?:\.\d+)?)(e?)$")
 FIELDS = [
     {"key": "ions", "type": "multi", "label": {"en": "Ions", "de": "Ionen"}, "default": ["p"],
      "options": [["p", {"en": "Proton", "de": "Proton"}], ["a", "Helium-4"], ["c", {"en": "Carbon-12", "de": "Kohlenstoff-12"}]]},
@@ -65,17 +75,27 @@ def variant_block(v, lam):
     if v.startswith("t"):
         d = float(v[1:]); n = int(120 / lam)
         return ridge("RiFi1", [0, 0.01, lam / 2 - 0.04, lam / 2 + 0.04, lam - 0.01, lam], [0.3, 0.3, d, d, 0.3, 0.3], lam, n, 80.0)
-    if v.startswith("pin"):
+    m = PIN_RE.match(v)
+    if m:
+        kind, d, equiv = m.group(1), float(m.group(2)), m.group(3)
+        profile = "uniform" if kind == "pin" else "pyramid"
+        if equiv:                                      # 1D ridge with the thickness distribution of the 2D pin
+            xs, zs = equivalent_ridge(d, lam, profile=profile)
+            return ridge("RiFi1", xs, zs, lam, int(120 / lam), 80.0)
         return f'''
 s:Ge/Pins/Type       = "TsCAD"
 s:Ge/Pins/Parent     = "World"
 s:Ge/Pins/Material   = "G4_PLEXIGLASS"
-s:Ge/Pins/InputFile  = "pins_{v[3:]}mm"
+s:Ge/Pins/InputFile  = "{stl_name(kind, m.group(2))}"
 s:Ge/Pins/FileFormat = "stl"
 d:Ge/Pins/Units      = 1 mm
 d:Ge/Pins/TransZ     = 80.0 cm
 '''
     raise ValueError(v)
+
+
+def stl_name(kind, d):
+    return f"pins_{d}mm" if kind == "pin" else f"pyr_{d}mm"
 
 
 def case(ion, e_u, v, hist, spread, lam, prefix):
@@ -130,12 +150,45 @@ d:Ge/Foil/TransZ   = 79.0 cm
     return name + ".txt", s + variant_block(v, lam)
 
 
-# ---------------------------------------------------------------- 2D pin STL (uniform thickness distribution)
-def pins_stl(height, lam=1.5, base=0.1, half=22.5, top_half=0.04, k=8):
+# ---------------------------------------------------------------- 2D pins: rings, STL, 1D equivalent
+def pin_rings(height, lam=1.5, base=PIN_BASE, top_half=PIN_TOP_HALF, k=PIN_RINGS, profile="uniform"):
+    """Heights and half sides of the square pin cross-section, ring 0 = full cell on top of the base plate.
+
+    uniform: area above height t falls linearly (half side ~ sqrt), so every thickness between base and height is
+    equally frequent, like a 1D triangle. pyramid: straight flanks, area falls quadratically, thin parts dominate."""
+    h = height - base
+    zr = [base + h * r / k for r in range(k + 1)]
+    if profile == "uniform": sr = [max((lam / 2) * math.sqrt(1 - r / k), top_half) for r in range(k + 1)]
+    elif profile == "pyramid": sr = [max((lam / 2) * (1 - r / k), top_half) for r in range(k + 1)]
+    else: raise ValueError(f"unknown pin profile {profile}")
+    return zr, sr
+
+
+def equivalent_ridge(height, lam=1.5, base=PIN_BASE, top_half=PIN_TOP_HALF, k=PIN_RINGS, profile="uniform", sub=6):
+    """XPoints and ZPoints of a 1D ridge whose width above each height equals the area fraction of the 2D pin above it.
+
+    Between two rings the pin side changes linearly, so its area fraction changes quadratically; each segment is split
+    into `sub` pieces to follow that."""
+    zr, sr = pin_rings(height, lam, base, top_half, k, profile)
+    pts = []
+    for r in range(k):
+        for j in range(sub):
+            f = j / sub
+            s = sr[r] + (sr[r + 1] - sr[r]) * f
+            pts.append(((lam / 2) * (1 - (s / (lam / 2)) ** 2), zr[r] + (zr[r + 1] - zr[r]) * f))
+    pts.append(((lam / 2) * (1 - (sr[k] / (lam / 2)) ** 2), zr[k]))
+    left = []
+    for x, z in pts:                                   # drop points that collapse onto the previous x (flat steps)
+        if not left or x > left[-1][0] + 1e-6: left.append((x, z))
+    right = [(lam - x, z) for x, z in reversed(left)]
+    xs = [p[0] for p in left + right]; zs = [p[1] for p in left + right]
+    return xs, zs
+
+
+def pins_stl(height, lam=1.5, base=PIN_BASE, half=22.5, top_half=PIN_TOP_HALF, k=PIN_RINGS, profile="uniform"):
     h = height - base
     n = int(round(2 * half / lam)); half = n * lam / 2
-    zr = [base + h * r / k for r in range(k + 1)]
-    sr = [max((lam / 2) * math.sqrt(1 - r / k), top_half) for r in range(k + 1)]
+    zr, sr = pin_rings(height, lam, base, top_half, k, profile)
     zc = (base + h) / 2
     tris = []
     def quad(a, b, c, d): tris.append((a, b, c)); tris.append((a, c, d))
@@ -155,7 +208,7 @@ def pins_stl(height, lam=1.5, base=0.1, half=22.5, top_half=0.04, k=8):
             if j == n - 1: quad((x1, y1, 0), (x0, y1, 0), (x0, y1, base), (x1, y1, base))
             if i == 0:     quad((x0, y1, 0), (x0, y0, 0), (x0, y0, base), (x0, y1, base))
             if i == n - 1: quad((x1, y0, 0), (x1, y1, 0), (x1, y1, base), (x1, y0, base))
-    out = bytearray(b"2D pin ripple filter, OpenTOPAS Workbench".ljust(80, b" ")) + struct.pack("<I", len(tris))
+    out = bytearray(f"2D {profile} pin ripple filter, OpenTOPAS Workbench".encode().ljust(80, b" ")) + struct.pack("<I", len(tris))
     for t in tris:
         t = [(x, y, z - zc) for x, y, z in t]
         u = [t[1][q] - t[0][q] for q in range(3)]; w = [t[2][q] - t[0][q] for q in range(3)]
@@ -174,7 +227,10 @@ def generate(v):
         for e in energies:
             for var in v.get("variants") or []:
                 files.append(case(ion, e, var, v["histories"], float(v["spread"]), lam, v.get("prefix") or "mess"))
-    for var in sorted({x for x in v.get("variants") or [] if x.startswith("pin")}):
-        files.append((f"pins_{var[3:]}mm.stl", pins_stl(float(var[3:]), lam)))
+    for var in sorted(v.get("variants") or []):
+        m = PIN_RE.match(var)
+        if m and not m.group(3):
+            files.append((stl_name(m.group(1), m.group(2)) + ".stl",
+                          pins_stl(float(m.group(2)), lam, profile="uniform" if m.group(1) == "pin" else "pyramid")))
     if not files: raise ValueError("select at least one ion and one variant")
     return files

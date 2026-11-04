@@ -14,10 +14,12 @@ A local web UI for [OpenTOPAS](https://github.com/OpenTOPAS/OpenTOPAS) and TOPAS
 - **Results**: plot TOPAS CSV scorer output and measured curves (PTW `.mcc`, IBA `.asc`, column files). Overlay curves with normalisation, log axis, drag zoom, hover read-out, and difference or ratio to a reference. Bragg peak metrics (R80, BPW80, D80-D20, ΔR80, filter BPW80). 2D and 3D binnings show as a heat map.
 - **Export**: plots as PNG or SVG in a print style, plotted data as CSV, results and images as ZIP. Plot settings can be saved as named views.
 - **Variations**: copy a parameter file with one parameter set to a list of values; output names get a matching suffix.
-- **Notifications and keep-awake**: browser or Windows notification when runs fail or the queue is done; system sleep is blocked while runs are queued.
+- **Notifications and keep-awake**: browser or Windows notification when runs fail or the queue is done; system sleep is blocked while runs are queued, optionally the display stays on as well (see [Long runs on Windows laptops](#long-runs-on-windows-laptops)).
 - **Generators**: plugins that write parameter sets from a form.
   - `pencil_beam`: any particle from protons to oxygen, an energy list, phantom material, depth dose, and an optional 2D map. Sets `EMRangeMax` for light ions above the default table range.
-  - `ripple_filter`: depth-dose studies with 1D, crossed, and 2D-pin ripple filters (pins written as binary STL).
+  - `ripple_filter`: depth-dose studies with 1D, crossed, and 2D ripple filters (pins and pyramids written as binary STL, plus 1D ridges with the same thickness distribution as a 2D filter).
+- **Navigation**: tabs follow the workflow from generating cases to comparing results; "plot results" links in Runs, the queue, and the Overview lead straight to the curves. The address keeps the tab, the open file, and the plotted curves, so Back, Forward, and bookmarks work. Press `?` for the keyboard shortcuts (`1` to `6` switch tabs, `/` focuses the filter).
+- **Large workspaces**: hundreds of cases and big non-TOPAS files (matRad `.mat`, DICOM) are fine. Only parameter files and scorer output are read, parsed facts are cached, and the lists refresh in the background.
 - English and German UI, light and dark theme.
 
 | Files | Runs | Generators |
@@ -42,13 +44,13 @@ Without installing, from a clone of this repository:
 ./workbench.sh PATH_TO_YOUR_CASES
 ```
 
-On Windows with TOPAS in WSL, run `workbench.bat PATH_TO_YOUR_CASES` from a Command Prompt, or double-click it to use the current folder.
+On Windows with TOPAS in WSL, run `workbench.bat PATH_TO_YOUR_CASES` from a Command Prompt, or double-click it. Without a folder, both launchers use a folder named `workspace` next to them if it exists (it is in `.gitignore`), otherwise the current folder.
 
 The browser opens `http://localhost:8765`. Options: `--port`, `--no-browser`.
 
 On first start the workbench looks for TOPAS binaries in `~/.local/bin/topas4`, `~/Applications/TOPAS/OpenTOPAS-install/bin/topas`, `~/topas/topas/bin/topas`, and `topas` on `PATH`. To add or change one, open **Settings**. Environment variables such as `TOPAS_G4_DATA_DIR` go there too.
 
-Settings, job history, and logs live in `WORKSPACE/.workbench/`.
+Settings, job history, logs, and a cache of parsed files (`index.json`, safe to delete) live in `WORKSPACE/.workbench/`.
 
 ## Writing a generator plugin
 
@@ -89,3 +91,29 @@ Issues and pull requests are welcome, see [CONTRIBUTING.md](CONTRIBUTING.md).
 ## License
 
 MIT, see [LICENSE](LICENSE).
+
+## Ripple filter tools
+
+In `tools/` (need numpy, scipy, matplotlib):
+
+- `rifi_kernel_fit.py FOLDER` fits the filter kernel from depth doses with and without filter: the curve with filter is the curve without, convolved with the distribution of water equivalent thickness across one filter period. It reports mean thickness and spread per energy for a Gaussian, uniform, pyramid, and free-form kernel and compares them with the kernel computed from the filter geometry in the TOPAS parameter file. `--show-kernel --stl FILE` analyses the STL of a printed filter without any curves.
+- `rifi_shapes_figure.py shapes` and `rifi_shapes_figure.py convolution WITHOUT WITH` draw the relation between filter shape and kernel, and the depth dose with filter as a sum of shifted copies.
+- `topas2matrad.py` builds a matRad machine file from TOPAS depth doses.
+
+## Long runs on Windows laptops
+
+Many current laptops use Modern Standby instead of classic sleep. To check, run `powercfg /a` in a Command Prompt: "Standby (S0 Low Power Idle)" means Modern Standby. On these laptops Windows can enter standby once the display is off or the computer is locked, even while the workbench blocks sleep. TOPAS in WSL then pauses until you wake the computer.
+
+To keep runs going:
+
+1. In **Settings**, turn on **Keep the display on as well**.
+2. To lock the computer during runs without the display turning off, set the display timeout of the lock screen to never (on mains power):
+
+   ```
+   powercfg /setacvalueindex SCHEME_CURRENT SUB_VIDEO VIDEOCONLOCK 0
+   powercfg /setactive SCHEME_CURRENT
+   ```
+
+3. Keep the laptop on mains power with the lid open, or set the lid action for mains power to **Do nothing**.
+
+While a run is queued, `powercfg /requests` lists `powershell.exe` under SYSTEM and EXECUTION, and under DISPLAY with the option on.

@@ -22,6 +22,7 @@
   --acc:#7fb0ff; --acc-ink:#0b1220; --link:#9cc2ff; --ok:#5fd38a; --warn:#fbbf24; --err:#ff8a8a; --sel:#22324d;
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{margin:0;font:15px/1.5 system-ui,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink)}
 a{color:var(--link);text-decoration:underline;text-underline-offset:2px}
 :focus-visible{outline:3px solid var(--focus);outline-offset:1px}
@@ -90,23 +91,75 @@ canvas{cursor:crosshair;width:100%;height:440px;border:1px solid var(--line);bor
 .ac{position:absolute;z-index:3;background:var(--card);border:1px solid var(--line);border-radius:7px;box-shadow:0 6px 18px rgba(0,0,0,.3);max-height:230px;overflow:auto;min-width:340px;font:13px/1.5 ui-monospace,Consolas,monospace}
 .ac div{padding:2px 10px;cursor:pointer;white-space:nowrap}.ac div.on{background:var(--sel)}.ac .src{color:var(--mute);float:right;margin-left:16px}
 .inc{font-size:13px;margin-top:6px}.inc .miss{color:var(--err)}
+nav button{display:inline-flex;align-items:center;gap:6px}
+nav .sep{width:1px;align-self:stretch;background:var(--line);margin:4px 3px}
+.cnt{min-width:20px;padding:0 6px;border-radius:999px;background:var(--acc);color:var(--acc-ink);font-size:12px;font-weight:700;line-height:18px;text-align:center}
+.cnt[hidden]{display:none}
+nav button[aria-selected="true"] .cnt{background:var(--acc-ink);color:var(--acc)}
+button.badge{font-size:13px;line-height:1.5;color:var(--ink)}
+#runBadge{max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* long paths shrink with an ellipsis (full path on hover) so status and action columns stay visible */
+td.f{max-width:1px;width:100%;overflow:hidden;text-overflow:ellipsis}
+.conn{flex-basis:100%;order:20;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:5px 10px;border:1px solid var(--warn);border-radius:8px;background:color-mix(in srgb,var(--warn) 12%,var(--card));font-size:14px}
+.conn[hidden]{display:none}.conn.dead{border-color:var(--err);background:color-mix(in srgb,var(--err) 12%,var(--card))}
+.conn button{padding:2px 10px}
+.toasts{position:fixed;right:16px;bottom:16px;z-index:30;display:grid;gap:8px;max-width:min(420px,calc(100vw - 32px))}
+.toast{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--acc);border-radius:8px;padding:8px 12px;box-shadow:0 6px 18px rgba(0,0,0,.25);font-size:14px;overflow-wrap:anywhere}
+.toast.err{border-left-color:var(--err)}.toast.ok{border-left-color:var(--ok)}
+td.empty{white-space:normal;text-align:center;color:var(--mute);padding:28px 12px}
+td.empty button{margin-top:8px}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--acc);border-radius:50%;animation:spin .8s linear infinite;vertical-align:-1px;margin-right:7px}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation-duration:4s}}
+button.armed{background:var(--err);border-color:var(--err);color:var(--card);font-weight:600}
+tr.qsec td{background:var(--sunken);color:var(--mute);font-size:13px;font-weight:600;padding:3px 8px}
+tr.qsec:hover{background:var(--sunken)}
+td.acts{text-align:right;padding:2px 6px}
+.rowact{padding:0 8px;font-size:13px;line-height:1.6;margin-left:4px}
+a.ed-link{margin-left:8px;text-decoration:none;color:var(--mute)}a.ed-link:hover{color:var(--link)}td.f a.ed-link{margin:0 6px 0 0}
+a.res{text-decoration:none}a.res:hover{text-decoration:underline}
+tr.more td{text-align:center;padding:6px}tr.more:hover{background:transparent}
+.plholder{position:absolute;inset:1px;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;color:var(--mute);pointer-events:none}
+.plholder[hidden]{display:none}
+.ovl{position:fixed;inset:0;z-index:25;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px}.ovl[hidden]{display:none}
+.dlg{max-width:540px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.35)}.dlg td{white-space:normal}
+kbd{font:12.5px ui-monospace,Consolas,monospace;padding:1px 6px;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;background:var(--sunken);white-space:nowrap}
+@media (max-width:720px){
+  header{gap:6px 8px;padding:8px 12px}
+  header h1{font-size:15px;margin:0}
+  nav{order:10;flex-basis:100%;flex-wrap:nowrap;overflow-x:auto;padding-bottom:2px}
+  nav button{flex:none;padding:4px 9px;font-size:14px}
+  nav .sep{display:none}
+  #langSel,#themeSel{max-width:116px;padding:3px 6px}
+  #runBadge,#awakeBadge{display:none}
+  td.f{white-space:normal;overflow-wrap:break-word}
+  main{padding:10px}
+  .card{padding:10px}
+}
+@media (max-width:520px){header h1{display:none}}
 </style>
 </head>
 <body>
 <header>
   <h1>OpenTOPAS Workbench</h1>
+  <!-- order follows the usual flow: prepare cases, run them, look at the results -->
   <nav role="tablist">
-    <button role="tab" data-tab="files" data-i18n="tab_files"></button>
-    <button role="tab" data-tab="run" data-i18n="tab_run"></button>
-    <button role="tab" data-tab="explorer" data-i18n="tab_explorer"></button>
-    <button role="tab" data-tab="results" data-i18n="tab_results"></button>
-    <button role="tab" data-tab="gen" data-i18n="tab_gen"></button>
-    <button role="tab" data-tab="settings" data-i18n="tab_settings"></button>
+    <button role="tab" data-tab="files"><span data-i18n="tab_files"></span></button>
+    <button role="tab" data-tab="gen"><span data-i18n="tab_gen"></span></button>
+    <span class="sep" aria-hidden="true"></span>
+    <button role="tab" data-tab="run"><span data-i18n="tab_run"></span><span id="runCnt" class="cnt" hidden></span></button>
+    <span class="sep" aria-hidden="true"></span>
+    <button role="tab" data-tab="explorer"><span data-i18n="tab_explorer"></span></button>
+    <button role="tab" data-tab="results"><span data-i18n="tab_results"></span></button>
+    <span class="sep" aria-hidden="true"></span>
+    <button role="tab" data-tab="settings"><span data-i18n="tab_settings"></span></button>
   </nav>
   <span class="spacer"></span>
-  <span id="awakeBadge" class="badge" hidden></span><span id="runBadge" class="badge" hidden></span>
+  <span id="awakeBadge" class="badge" hidden></span><button type="button" id="runBadge" class="badge" hidden></button>
+  <button type="button" id="helpBtn" class="badge" data-i18n-title="help_title">?</button>
   <select id="langSel" aria-label="Language"><option value="de">Deutsch</option><option value="en">English</option></select>
   <select id="themeSel" aria-label="Theme"><option value="auto" data-i18n="theme_auto"></option><option value="light" data-i18n="theme_light"></option><option value="dark" data-i18n="theme_dark"></option></select>
+  <div id="conn" class="conn" hidden role="status"><span id="connMsg"></span><button type="button" id="connBtn"></button></div>
 </header>
 <main>
 
@@ -150,19 +203,20 @@ canvas{cursor:crosshair;width:100%;height:440px;border:1px solid var(--line);bor
   <div class="split">
     <div class="card">
       <h2 data-i18n="run_files"></h2>
-      <p id="rfStale" class="err" hidden></p><div class="row"><label><span data-i18n="scope"></span> <select id="rfScope" class="scopeSel" data-k="scope_run"></select></label><input id="rfFilter" style="flex:1" data-i18n-ph="filter_ph"><label><input type="checkbox" id="rfOpen"> <span data-i18n="only_not_done"></span></label></div>
+      <div class="row"><label><span data-i18n="scope"></span> <select id="rfScope" class="scopeSel" data-k="scope_run"></select></label><input id="rfFilter" style="flex:1" data-i18n-ph="filter_ph"><label><input type="checkbox" id="rfOpen"> <span data-i18n="only_not_done"></span></label></div>
       <div class="row">
         <label><span data-i18n="binary"></span> <select id="rfBin"></select></label>
         <label><span data-i18n="subdir"></span> <input id="rfSub" size="12" data-i18n-ph="subdir_ph"></label>
         <label><input type="checkbox" id="rfSkip" checked> <span data-i18n="skip_existing"></span></label>
       </div>
-      <div class="row"><button id="rfAll" data-i18n="select_all"></button><button id="rfNone" data-i18n="select_none"></button><button class="pri" id="rfRun" data-i18n="enqueue"></button><span id="rfMsg" class="mute" role="status"></span></div>
+      <div class="row"><button id="rfAll" data-i18n="select_all"></button><button id="rfNone" data-i18n="select_none"></button><span id="rfCount" class="mute"></span><button class="pri" id="rfRun" data-i18n="enqueue"></button><button id="rfPlot" data-i18n="rf_plot"></button><span id="rfMsg" class="mute" role="status"></span></div>
       <div class="scroll"><table><thead><tr><th></th><th data-i18n="col_file"></th><th data-i18n="col_results"></th><th data-i18n="col_last"></th></tr></thead><tbody id="rfBody"></tbody></table></div>
     </div>
     <div class="card">
       <div class="row" style="margin-bottom:6px"><h2 style="margin:0" data-i18n="queue"></h2><span id="qEta" class="mute"></span></div>
-      <div class="row"><button id="qStop" data-i18n="stop_current"></button><button id="qRemove" data-i18n="remove_queued"></button><button id="qClear" data-i18n="clear_history"></button></div>
-      <div class="scroll" style="max-height:min(420px,40vh)"><table><thead><tr><th>#</th><th data-i18n="col_file"></th><th data-i18n="binary"></th><th data-i18n="col_status"></th><th data-i18n="col_time"></th></tr></thead><tbody id="qBody"></tbody></table></div>
+      <div class="row"><button id="qStop" data-i18n="stop_current"></button><button id="qRemove" data-i18n="remove_queued"></button><button id="qClear" data-i18n="clear_history"></button>
+        <span class="spacer"></span><label><span data-i18n="q_show"></span> <select id="qShow"><option value="all" data-i18n="q_show_all"></option><option value="active" data-i18n="q_show_active"></option><option value="failed" data-i18n="q_show_failed"></option></select></label></div>
+      <div class="scroll" style="max-height:min(420px,40vh)"><table id="qTable"><thead><tr><th>#</th><th data-i18n="col_file"></th><th data-i18n="binary"></th><th data-i18n="col_status"></th><th data-i18n="col_time"></th><th></th></tr></thead><tbody id="qRun"></tbody><tbody id="qWait"></tbody><tbody id="qBody"></tbody></table></div>
       <div id="liveBox" class="live" hidden></div>
       <h2 style="margin-top:14px" id="logTitle" data-i18n="log"></h2>
       <pre id="logOut"></pre>
@@ -206,6 +260,8 @@ canvas{cursor:crosshair;width:100%;height:440px;border:1px solid var(--line);bor
   </div>
 </section>
 <div id="lightbox" class="lb" hidden role="dialog" aria-modal="true"><button id="lbPrev" aria-label="previous">‹</button><figure><img id="lbImg" alt=""><figcaption id="lbCap"></figcaption></figure><button id="lbNext" aria-label="next">›</button><button id="lbClose" class="lbx" aria-label="close">✕</button><a id="lbDl" class="lbdl" data-i18n="download"></a></div>
+<div id="help" class="ovl" hidden role="dialog" aria-modal="true" aria-labelledby="helpTitle"><div class="card dlg"><div class="row" style="justify-content:space-between"><h2 id="helpTitle" style="margin:0" data-i18n="help_title"></h2><button type="button" id="helpClose" data-i18n="close"></button></div><table id="helpBody"></table></div></div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
 
 <!-- RESULTS -->
 <section id="results" class="tab">
@@ -213,7 +269,7 @@ canvas{cursor:crosshair;width:100%;height:440px;border:1px solid var(--line);bor
     <div class="card">
       <h2 data-i18n="res_files"></h2>
       <div class="row" id="resCrumbs"></div>
-      <div class="row"><input id="resFilter" style="flex:1" data-i18n-ph="filter_ph"><button id="resAll" data-i18n="select_all"></button><button id="resNone" data-i18n="select_none"></button></div>
+      <div class="row"><input id="resFilter" style="flex:1" data-i18n-ph="filter_ph"><button id="resAll" data-i18n="select_all"></button><button id="resNone" data-i18n="select_none"></button><button id="resReload" data-i18n-title="reload_tip">↻</button></div>
       <div class="scroll"><table><thead><tr><th></th><th data-i18n="col_name"></th><th data-i18n="col_mtime"></th></tr></thead><tbody id="resBody"></tbody></table></div>
       <p class="mute" data-i18n="res_hint"></p>
     </div>
@@ -240,7 +296,7 @@ canvas{cursor:crosshair;width:100%;height:440px;border:1px solid var(--line);bor
         <span class="mute" data-i18n="export"></span><button id="plPng">PNG</button><select id="plScale" aria-label="scale"><option value="1">1×</option><option value="2" selected>2×</option><option value="3">3×</option></select><button id="plSvg">SVG</button><button id="plCsv" data-i18n="exp_data"></button><button id="plCopy" data-i18n="exp_copy"></button>
         <label title=""><input type="checkbox" id="plLight" checked> <span data-i18n="exp_light"></span></label><span id="plExpMsg" class="mute"></span>
       </div>
-      <div class="plotwrap"><canvas id="plot" width="1200" height="560" aria-label="plot"></canvas><div id="plVline" class="vline" hidden></div><div id="plSel" class="zsel" hidden></div><div id="plTip" class="ptip" hidden></div></div>
+      <div class="plotwrap"><canvas id="plot" width="1200" height="560" aria-label="plot"></canvas><div id="plEmpty" class="plholder" data-i18n="pl_empty"></div><div id="plVline" class="vline" hidden></div><div id="plSel" class="zsel" hidden></div><div id="plTip" class="ptip" hidden></div></div>
       <p class="mute" style="font-size:13px;margin:4px 0 0" data-i18n="plot_hint"></p>
       <div id="plMetrics"></div>
       <h2 style="margin-top:14px" data-i18n="images"></h2>
@@ -258,7 +314,7 @@ canvas{cursor:crosshair;width:100%;height:440px;border:1px solid var(--line);bor
     <div class="row" style="margin-top:12px">
       <label><span data-i18n="target_folder"></span> <input id="genFolder" size="24"></label>
       <label><input type="checkbox" id="genOver"> <span data-i18n="overwrite"></span></label>
-      <button id="genPrev" data-i18n="preview"></button><button class="pri" id="genMake" data-i18n="create"></button><span id="genMsg" class="mute" role="status"></span>
+      <button id="genPrev" data-i18n="preview"></button><button class="pri" id="genMake" data-i18n="create"></button><span id="genMsg" class="mute" role="status"></span><button id="genToRuns" hidden></button>
     </div>
     <pre id="genOut"></pre>
   </div>
@@ -272,6 +328,8 @@ canvas{cursor:crosshair;width:100%;height:440px;border:1px solid var(--line);bor
     <p class="mute" data-i18n="set_ws_hint"></p>
     <p><label><input type="checkbox" id="setAwake"> <span data-i18n="keep_awake"></span></label> <span id="awakeMsg" class="mute"></span></p>
     <p class="mute" style="font-size:13px" data-i18n="keep_awake_hint"></p>
+    <p><label><input type="checkbox" id="setDisplay"> <span data-i18n="keep_display"></span></label></p>
+    <p class="mute" style="font-size:13px" data-i18n="keep_display_hint"></p>
     <h2 data-i18n="scan_title"></h2>
     <p class="mute" style="font-size:13px" data-i18n="scan_hint"></p>
     <div class="grid2">
@@ -294,7 +352,7 @@ canvas{cursor:crosshair;width:100%;height:440px;border:1px solid var(--line);bor
 <script>
 const TOKEN="%TOKEN%";
 const I18N={
- de:{stale:"Keine Verbindung zur Workbench, Stand {t}. Seite neu laden (F5).",scope:"Ordner",scope_all:"ganzer Arbeitsordner",view_saved:"Ansicht",view_name_ph:"Name der Ansicht",view_save:"Ansicht speichern",view_need:"Erst Dateien auswählen und einen Namen eingeben.",export:"Export:",exp_data:"Daten (CSV)",exp_copy:"Kopieren",exp_light:"heller Druckstil",copied:"In die Zwischenablage kopiert.",ex_zip:"Auswahl als ZIP",ex_img_zip:"Bilder als ZIP",download:"Herunterladen",notes:"Benachrichtigungen",note_browser:"Browser-Meldung",note_sound:"Ton",note_each:"bei jedem fertigen Lauf (sonst nur Fehler und Ende der Warteschlange)",note_testbtn:"Testen",note_test:"So sieht eine Benachrichtigung aus.",note_failed:"Lauf fehlgeschlagen",note_queue_done:"Warteschlange fertig.",note_denied:"Der Browser hat Meldungen blockiert.",note_toast:"Windows-Meldung, wenn keine Seite offen ist (WSL)",var_btn:"Variationen",var_title:"Variationen dieser Datei",var_param:"Parameter",var_values_ph:"Werte, durch Komma getrennt, z. B. 70, 100, 150",var_run:"Anlegen und rechnen",var_hint:"Ohne Einheit wird die Einheit der Vorlage übernommen, Strings bekommen Anführungszeichen. Die Scorer-Ausgaben erhalten denselben Zusatz, damit nichts überschrieben wird. Platzhalter im Dateinamen: {name}, {value}.",tab_explorer:"Übersicht",ex_title:"Alle Ergebnisse im Arbeitsordner",ex_search_ph:"Suche, mehrere Wörter = alle müssen passen",ex_kind:"Art",ex_all:"alle",ex_k_data:"Simulation",ex_k_meas:"Messung",ex_k_img:"Bild",ex_particle:"Teilchen",ex_energy:"Energie",ex_folder:"Ordner",ex_reload:"Neu einlesen",ex_tags:"Merkmale",ex_reftag:"Referenz-Merkmal",ex_ref_hint:"Abweichungen beziehen sich auf die Datei mit diesem Merkmal im gleichen Ordner bei gleichem Teilchen und gleicher Energie.",ex_formulas:"Eigene Formelspalten",ex_formula_hint:"Variablen: r80, bpw80, peak, energy, rel_bpw, tail, dfo, ref_r80, ref_bpw80, ref_peak, dr80, dbpw80, bpw_filter, r80_bk, dev_bk. Funktionen: sqrt, abs, log, log10, exp, pow, min, max, round, ^ für Potenz. Gespeichert in diesem Browser.",ex_fname_ph:"Name",ex_fexpr_ph:"Formel, z. B. 100*(bpw80-ref_bpw80)/ref_bpw80",ex_fadd:"Spalte hinzufügen",ex_unknown:"unbekannt",ex_plot:"Auswahl plotten",ex_csv:"Tabelle als CSV",ex_rows:"Datenzeilen",ex_files:"Dateien gefiltert",ex_legend:"Formeln:",ex_images:"Bilder",f_bk_note:"Näherung für Wasser",ex_ref_rule:"Gelb: mehr als 3 % Abweichung von Bragg-Kleeman.",f_dr80:"R80 − R80 der Referenz",f_quad:"√(BPW80² − BPW80²ref)",f_bk:"Bragg-Kleeman-Reichweite in Wasser",f_devbk:"(R80 − R80 BK) / R80 BK in %",tab_files:"Dateien",tab_run:"Läufe",tab_results:"Ergebnisse",tab_gen:"Generatoren",tab_settings:"Einstellungen",
+ de:{n_selected:"{n} von {m} ausgewählt",scope:"Ordner",scope_all:"ganzer Arbeitsordner",view_saved:"Ansicht",view_name_ph:"Name der Ansicht",view_save:"Ansicht speichern",view_need:"Erst Dateien auswählen und einen Namen eingeben.",export:"Export:",exp_data:"Daten (CSV)",exp_copy:"Kopieren",exp_light:"heller Druckstil",copied:"In die Zwischenablage kopiert.",ex_zip:"Auswahl als ZIP",ex_img_zip:"Bilder als ZIP",download:"Herunterladen",notes:"Benachrichtigungen",note_browser:"Browser-Meldung",note_sound:"Ton",note_each:"bei jedem fertigen Lauf (sonst nur Fehler und Ende der Warteschlange)",note_testbtn:"Testen",note_test:"So sieht eine Benachrichtigung aus.",note_failed:"Lauf fehlgeschlagen",note_queue_done:"Warteschlange fertig.",note_denied:"Der Browser hat Meldungen blockiert.",note_toast:"Windows-Meldung, wenn keine Seite offen ist (WSL)",var_btn:"Variationen",var_title:"Variationen dieser Datei",var_param:"Parameter",var_values_ph:"Werte, durch Komma getrennt, z. B. 70, 100, 150",var_run:"Anlegen und rechnen",var_hint:"Ohne Einheit wird die Einheit der Vorlage übernommen, Strings bekommen Anführungszeichen. Die Scorer-Ausgaben erhalten denselben Zusatz, damit nichts überschrieben wird. Platzhalter im Dateinamen: {name}, {value}.",tab_explorer:"Übersicht",ex_title:"Alle Ergebnisse im Arbeitsordner",ex_search_ph:"Suche, mehrere Wörter = alle müssen passen",ex_kind:"Art",ex_all:"alle",ex_k_data:"Simulation",ex_k_meas:"Messung",ex_k_img:"Bild",ex_particle:"Teilchen",ex_energy:"Energie",ex_folder:"Ordner",ex_reload:"Neu einlesen",ex_tags:"Merkmale",ex_reftag:"Referenz-Merkmal",ex_ref_hint:"Abweichungen beziehen sich auf die Datei mit diesem Merkmal im gleichen Ordner bei gleichem Teilchen und gleicher Energie.",ex_formulas:"Eigene Formelspalten",ex_formula_hint:"Variablen: r80, bpw80, peak, energy, rel_bpw, tail, dfo, ref_r80, ref_bpw80, ref_peak, dr80, dbpw80, bpw_filter, r80_bk, dev_bk. Funktionen: sqrt, abs, log, log10, exp, pow, min, max, round, ^ für Potenz. Gespeichert in diesem Browser.",ex_fname_ph:"Name",ex_fexpr_ph:"Formel, z. B. 100*(bpw80-ref_bpw80)/ref_bpw80",ex_fadd:"Spalte hinzufügen",ex_unknown:"unbekannt",ex_plot:"Auswahl plotten",ex_csv:"Tabelle als CSV",ex_rows:"Datenzeilen",ex_files:"Dateien gefiltert",ex_legend:"Formeln:",ex_images:"Bilder",f_bk_note:"Näherung für Wasser",ex_ref_rule:"Gelb: mehr als 3 % Abweichung von Bragg-Kleeman.",f_dr80:"R80 − R80 der Referenz",f_quad:"√(BPW80² − BPW80²ref)",f_bk:"Bragg-Kleeman-Reichweite in Wasser",f_devbk:"(R80 − R80 BK) / R80 BK in %",tab_files:"Dateien",tab_run:"Läufe",tab_results:"Ergebnisse",tab_gen:"Generatoren",tab_settings:"Einstellungen",
   theme_auto:"Design: System",theme_light:"Hell",theme_dark:"Dunkel",
   files_title:"Arbeitsordner",col_name:"Name",col_size:"Größe",col_mtime:"Geändert",col_file:"Datei",col_last:"Letzter Lauf",col_status:"Status",col_time:"Zeit",
   fm_name_ph:"Name oder Ziel, z. B. neu.txt oder ordner/kopie.txt",fm_newdir:"Neuer Ordner",fm_newfile:"Neue Datei",fm_move:"Umbenennen / Verschieben",fm_copy:"Kopieren",fm_trash:"In Papierkorb",fm_queue:"Rechnen",
@@ -308,10 +366,16 @@ const I18N={
   res_files:"Scorer-Ausgaben und Messdaten",res_hint:"Zeile anklicken wählt aus, Umschalt+Klick wählt einen Bereich, Ziehen über mehrere Zeilen wählt alle davon. Dateien anhaken, um Kurven zu überlagern, auch aus verschiedenen Ordnern. Messdaten: PTW .mcc, IBA .asc oder Spalten (x in mm, Wert). 2D/3D-Daten erscheinen als Karte.",view:"Darstellung",mode_curves:"Kurven",mode_diff:"Differenz zur Referenz",mode_ratio:"Verhältnis zur Referenz",reference:"Referenz",zoom_peak:"Peak-Zoom",zoom_reset:"Zoom zurücksetzen",clear_sel:"Auswahl leeren",selected:"ausgewählt",plot_hint:"Bereich mit der Maus aufziehen zum Zoomen, Doppelklick setzt zurück.",peak_entr:"Peak/Eingang",xaxis:"Tiefenachse",loading:"lädt …",live_elapsed:"läuft seit",live_rate:"Rate",live_cores:"Kerne",ph_init:"Initialisierung (Geometrie, Physiktabellen)",ph_run:"Simulation",ph_output:"Ausgabe schreiben",q_rest:"Rest",q_finish:"fertig ca.",q_unknown:"ohne Schätzung",q_eta_wait:"Restzeit erscheint, sobald ein Lauf fertig ist",total:"gesamt",no_r80:"Ohne R80 (kein Bragg-Peak im Phantom), bei relativer Tiefe nicht dargestellt",x_abs:"absolut",x_shift:"Tiefe − R80",x_rel:"Tiefe / R80",tail:"Schwanz",tail_tip:"Dosis hinter dem distalen Abfall (bei R80 + max(10 mm, 4 × (D80–D20))) relativ zum Maximum: Fragmentierungsschwanz",relw_tip:"Breite relativ zur Reichweite: vergleichbar zwischen Ionen bei unterschiedlicher Reichweite",bpw_filter:"BPW80 Filter",dr80_tip:"R80 minus R80 der Referenz",quad_tip:"√(BPW80² − BPW80²Referenz): Beitrag des Filters zur Peakbreite, wenn die Referenz die Kurve ohne Filter ist",plot:"Plot",statistic:"Statistik",normalize:"Normierung",
   norm_none:"keine",norm_max:"auf Maximum",norm_first:"auf Eingang",norm_sum:"auf Fläche",normalized:"normiert",log_y:"log. y-Achse",bragg:"Bragg-Kennzahlen",collapse:"Summieren über",save_png:"Als PNG speichern",images:"Bilder im Ordner",
   peak:"Peak",gen_title:"Parameterdateien erzeugen",generator:"Generator",target_folder:"Zielordner",overwrite:"vorhandene überschreiben",create:"Anlegen",created:"angelegt",
-  set_title:"Einstellungen",scan_title:"Durchsuchte Ordner",scan_hint:"Gilt für Läufe, Übersicht und Autovervollständigung. Der Reiter Dateien zeigt weiterhin alles. Ohne Haken wird der ganze Arbeitsordner durchsucht.",scan_include:"Nur diese Ordner durchsuchen",scan_exclude:"Ausschließen (ein Muster pro Zeile, z. B. tools oder */alt)",keep_awake:"PC während Berechnungen wach halten",keep_awake_hint:"Verhindert den Standby, solange Läufe in der Warteschlange sind. Der Bildschirm darf trotzdem ausgehen. Zuklappen des Laptops kann je nach Energieeinstellung weiterhin Standby auslösen.",awake_badge:"wach",awake_on:"aktiv",workspace:"Arbeitsordner",set_ws_hint:"Der Arbeitsordner wird beim Start festgelegt: --workspace ORDNER.",binaries:"TOPAS-Programme",
+  set_title:"Einstellungen",scan_title:"Durchsuchte Ordner",scan_hint:"Gilt für Läufe, Übersicht und Autovervollständigung. Der Reiter Dateien zeigt weiterhin alles. Ohne Haken wird der ganze Arbeitsordner durchsucht.",scan_include:"Nur diese Ordner durchsuchen",scan_exclude:"Ausschließen (ein Muster pro Zeile, z. B. tools oder */alt)",keep_awake:"PC während Berechnungen wach halten",keep_awake_hint:"Verhindert den Standby, solange Läufe in der Warteschlange sind. Zuklappen des Laptops kann je nach Energieeinstellung weiterhin Standby auslösen.",keep_display:"Bildschirm dabei anlassen",keep_display_hint:"Für Laptops mit Modern Standby (powercfg /a zeigt „S0 Low Power Idle“): Dort geht Windows oft trotzdem in den Standby, sobald der Bildschirm aus oder der PC gesperrt ist. Zum Sperren mit laufendem Bildschirm siehe README.",awake_badge:"wach",awake_on:"aktiv",workspace:"Arbeitsordner",set_ws_hint:"Der Arbeitsordner wird beim Start festgelegt: --workspace ORDNER.",binaries:"TOPAS-Programme",
   bin_hint:"Name, Befehl und Umgebungsvariablen (eine pro Zeile, NAME=WERT). TOPAS 3.9 braucht TOPAS_G4_DATA_DIR.",bin_add:"Programm hinzufügen",bin_detect:"Automatisch erkennen",bin_name:"Name",bin_cmd:"Befehl",bin_env:"Umgebung",remove:"Entfernen",
+  confirm_q:"Wirklich? Nochmal klicken",conn_lost:"Keine Verbindung zur Workbench seit {t}. Neuer Versuch läuft …",conn_retry:"Jetzt versuchen",conn_restart:"Die Workbench wurde neu gestartet. Seite neu laden, um weiterzuarbeiten.",conn_reload:"Neu laden",conn_failed:"Workbench nicht erreichbar",timeout:"Zeitüberschreitung",
+  help_title:"Tastenkürzel",close:"Schließen",k_tabs:"Reiter wechseln (Reihenfolge wie oben)",k_filter:"Filter oder Suche des Reiters",k_help:"Diese Übersicht",k_esc:"Dialog oder Bildansicht schließen",k_save:"Datei im Editor speichern",k_range:"Bereich in Tabellen auswählen (oder über Zeilen ziehen)",k_back:"Zurück und Vor im Browser wechseln die Reiter; die Adresse merkt sich Reiter, Datei und Plot-Auswahl.",
+  loading_index:"Ergebnisse werden eingelesen … beim ersten Mal kann das bei großen Arbeitsordnern etwas dauern.",rf_empty:"Keine Parameterdateien in diesem Ordner.",rf_empty_gen:"Mit Generatoren anlegen",no_match:"Nichts passt zum Filter.",clear_filter:"Filter leeren",ex_empty:"Noch keine Ergebnisse in diesem Ordner. Fertige Läufe erscheinen hier automatisch.",show_more:"{n} weitere anzeigen",
+  q_empty:"Die Warteschlange ist leer. Links Dateien auswählen und „In Warteschlange“ klicken.",q_active:"Aktiv",q_n_active:"{r} läuft, {w} wartend",q_history:"Verlauf",q_show:"Anzeigen",q_show_all:"alles",q_show_active:"nur aktive",q_show_failed:"nur Fehler",requeue:"Erneut rechnen",remove_job:"Aus der Warteschlange entfernen",removed_n:"{n} entfernt",requeued:"erneut in der Warteschlange",
+  plot_short:"Plot",plot_outputs:"Ausgaben plotten",open_editor:"Im Editor öffnen",rf_plot:"Ergebnisse plotten",no_outputs:"Keine plotbaren Ergebnisse für die Auswahl gefunden.",gen_to_runs:"{n} Dateien unter Läufe öffnen",pl_empty:"Links Dateien anhaken oder in der Übersicht auswählen, um sie zu plotten.",reload_tip:"Neu einlesen",
+  unsaved_q:"Ungespeicherte Änderungen. Nochmal klicken verwirft sie, Strg+S speichert.",
   error:"Fehler"},
- en:{stale:"No connection to the workbench, state of {t}. Reload the page (F5).",scope:"Folder",scope_all:"whole workspace",view_saved:"View",view_name_ph:"View name",view_save:"Save view",view_need:"Select files and enter a name first.",export:"Export:",exp_data:"Data (CSV)",exp_copy:"Copy",exp_light:"light print style",copied:"Copied to the clipboard.",ex_zip:"Selection as ZIP",ex_img_zip:"Images as ZIP",download:"Download",notes:"Notifications",note_browser:"Browser notification",note_sound:"Sound",note_each:"for every finished run (otherwise only failures and end of queue)",note_testbtn:"Test",note_test:"This is what a notification looks like.",note_failed:"Run failed",note_queue_done:"Queue finished.",note_denied:"The browser blocked notifications.",note_toast:"Windows notification when no page is open (WSL)",var_btn:"Variations",var_title:"Variations of this file",var_param:"Parameter",var_values_ph:"Values, comma separated, e.g. 70, 100, 150",var_run:"Create and run",var_hint:"Without a unit the unit of the template is kept, strings get quotes. Scorer outputs get the same suffix so nothing is overwritten. File name placeholders: {name}, {value}.",tab_explorer:"Overview",ex_title:"All results in the workspace",ex_search_ph:"Search, several words must all match",ex_kind:"Kind",ex_all:"all",ex_k_data:"Simulation",ex_k_meas:"Measurement",ex_k_img:"Image",ex_particle:"Particle",ex_energy:"Energy",ex_folder:"Folder",ex_reload:"Reload",ex_tags:"Tags",ex_reftag:"Reference tag",ex_ref_hint:"Deviations refer to the file with this tag in the same folder with the same particle and energy.",ex_formulas:"Custom formula columns",ex_formula_hint:"Variables: r80, bpw80, peak, energy, rel_bpw, tail, dfo, ref_r80, ref_bpw80, ref_peak, dr80, dbpw80, bpw_filter, r80_bk, dev_bk. Functions: sqrt, abs, log, log10, exp, pow, min, max, round, ^ for power. Stored in this browser.",ex_fname_ph:"Name",ex_fexpr_ph:"Formula, e.g. 100*(bpw80-ref_bpw80)/ref_bpw80",ex_fadd:"Add column",ex_unknown:"unknown",ex_plot:"Plot selection",ex_csv:"Table as CSV",ex_rows:"data rows",ex_files:"files after filter",ex_legend:"Formulas:",ex_images:"Images",f_bk_note:"approximation for water",ex_ref_rule:"Yellow: more than 3 % off Bragg-Kleeman.",f_dr80:"R80 minus R80 of the reference",f_quad:"√(BPW80² − BPW80²ref)",f_bk:"Bragg-Kleeman range in water",f_devbk:"(R80 − R80 BK) / R80 BK in %",tab_files:"Files",tab_run:"Runs",tab_results:"Results",tab_gen:"Generators",tab_settings:"Settings",
+ en:{n_selected:"{n} of {m} selected",scope:"Folder",scope_all:"whole workspace",view_saved:"View",view_name_ph:"View name",view_save:"Save view",view_need:"Select files and enter a name first.",export:"Export:",exp_data:"Data (CSV)",exp_copy:"Copy",exp_light:"light print style",copied:"Copied to the clipboard.",ex_zip:"Selection as ZIP",ex_img_zip:"Images as ZIP",download:"Download",notes:"Notifications",note_browser:"Browser notification",note_sound:"Sound",note_each:"for every finished run (otherwise only failures and end of queue)",note_testbtn:"Test",note_test:"This is what a notification looks like.",note_failed:"Run failed",note_queue_done:"Queue finished.",note_denied:"The browser blocked notifications.",note_toast:"Windows notification when no page is open (WSL)",var_btn:"Variations",var_title:"Variations of this file",var_param:"Parameter",var_values_ph:"Values, comma separated, e.g. 70, 100, 150",var_run:"Create and run",var_hint:"Without a unit the unit of the template is kept, strings get quotes. Scorer outputs get the same suffix so nothing is overwritten. File name placeholders: {name}, {value}.",tab_explorer:"Overview",ex_title:"All results in the workspace",ex_search_ph:"Search, several words must all match",ex_kind:"Kind",ex_all:"all",ex_k_data:"Simulation",ex_k_meas:"Measurement",ex_k_img:"Image",ex_particle:"Particle",ex_energy:"Energy",ex_folder:"Folder",ex_reload:"Reload",ex_tags:"Tags",ex_reftag:"Reference tag",ex_ref_hint:"Deviations refer to the file with this tag in the same folder with the same particle and energy.",ex_formulas:"Custom formula columns",ex_formula_hint:"Variables: r80, bpw80, peak, energy, rel_bpw, tail, dfo, ref_r80, ref_bpw80, ref_peak, dr80, dbpw80, bpw_filter, r80_bk, dev_bk. Functions: sqrt, abs, log, log10, exp, pow, min, max, round, ^ for power. Stored in this browser.",ex_fname_ph:"Name",ex_fexpr_ph:"Formula, e.g. 100*(bpw80-ref_bpw80)/ref_bpw80",ex_fadd:"Add column",ex_unknown:"unknown",ex_plot:"Plot selection",ex_csv:"Table as CSV",ex_rows:"data rows",ex_files:"files after filter",ex_legend:"Formulas:",ex_images:"Images",f_bk_note:"approximation for water",ex_ref_rule:"Yellow: more than 3 % off Bragg-Kleeman.",f_dr80:"R80 minus R80 of the reference",f_quad:"√(BPW80² − BPW80²ref)",f_bk:"Bragg-Kleeman range in water",f_devbk:"(R80 − R80 BK) / R80 BK in %",tab_files:"Files",tab_run:"Runs",tab_results:"Results",tab_gen:"Generators",tab_settings:"Settings",
   theme_auto:"Theme: system",theme_light:"Light",theme_dark:"Dark",
   files_title:"Workspace",col_name:"Name",col_size:"Size",col_mtime:"Modified",col_file:"File",col_last:"Last run",col_status:"Status",col_time:"Time",
   fm_name_ph:"Name or target, e.g. new.txt or folder/copy.txt",fm_newdir:"New folder",fm_newfile:"New file",fm_move:"Rename / move",fm_copy:"Copy",fm_trash:"Move to trash",fm_queue:"Run",
@@ -322,11 +386,17 @@ const I18N={
   select_all:"all",select_none:"none",enqueue:"Add to queue",queue:"Queue",stop_current:"Stop current run",remove_queued:"Remove waiting",clear_history:"Clear history",log:"Log",
   added:"added",skipped:"skipped",nothing_selected:"Nothing selected.",no_binary:"No program configured, see Settings.",outputs:"Outputs",
   st_queued:"waiting",st_running:"running",st_done:"done",st_failed:"failed",st_stopped:"stopped",st_aborted:"aborted",st_removed:"removed",running_badge:"running",
-  res_files:"Scorer output and measurements",res_hint:"Click a row to select it, shift+click selects a range, drag across rows to select them all. Tick files to overlay curves, also across folders. Measurements: PTW .mcc, IBA .asc, or columns (x in mm, value). 2D/3D data show as a map.",view:"View",mode_curves:"Curves",mode_diff:"Difference to reference",mode_ratio:"Ratio to reference",reference:"Reference",zoom_peak:"Zoom to peak",zoom_reset:"Reset zoom",clear_sel:"Clear selection",selected:"selected",plot_hint:"Drag across the plot to zoom, double-click to reset.",peak_entr:"Peak/entrance",xaxis:"Depth axis",loading:"loading …",live_elapsed:"running for",live_rate:"Rate",live_cores:"cores",ph_init:"Initialisation (geometry, physics tables)",ph_run:"Simulation",ph_output:"Writing output",q_rest:"Remaining",q_finish:"done at",q_unknown:"without estimate",q_eta_wait:"remaining time appears once a run has finished",total:"total",no_r80:"No R80 (no Bragg peak in the phantom), not shown with relative depth",x_abs:"absolute",x_shift:"depth − R80",x_rel:"depth / R80",tail:"Tail",tail_tip:"Dose beyond the distal fall-off (at R80 + max(10 mm, 4 × (D80–D20))) relative to the maximum: fragmentation tail",relw_tip:"Width relative to the range: comparable between ions with different ranges",bpw_filter:"BPW80 filter",dr80_tip:"R80 minus R80 of the reference",quad_tip:"√(BPW80² − BPW80²reference): filter contribution to the peak width when the reference is the curve without filter",plot:"Plot",statistic:"Statistic",normalize:"Normalise",
-  norm_none:"none",norm_max:"to maximum",norm_first:"to entrance",norm_sum:"to area",normalized:"normalised",log_y:"log y axis",bragg:"Bragg metrics",collapse:"Sum over",save_png:"Save as PNG",images:"Images in folder",
+  res_files:"Scorer output and measurements",res_hint:"Click a row to select it, shift+click selects a range, drag across rows to select them all. Tick files to overlay curves, also across folders. Measurements: PTW .mcc, IBA .asc, or columns (x in mm, value). 2D/3D data show as a map.",view:"View",mode_curves:"Curves",mode_diff:"Difference to reference",mode_ratio:"Ratio to reference",reference:"Reference",zoom_peak:"Zoom to peak",zoom_reset:"Reset zoom",clear_sel:"Clear selection",selected:"selected",plot_hint:"Drag across the plot to zoom, double-click to reset.",peak_entr:"Peak/entrance",xaxis:"Depth axis",loading:"loading …",live_elapsed:"running for",live_rate:"Rate",live_cores:"cores",ph_init:"Initialization (geometry, physics tables)",ph_run:"Simulation",ph_output:"Writing output",q_rest:"Remaining",q_finish:"done at",q_unknown:"without estimate",q_eta_wait:"remaining time appears once a run has finished",total:"total",no_r80:"No R80 (no Bragg peak in the phantom), not shown with relative depth",x_abs:"absolute",x_shift:"depth − R80",x_rel:"depth / R80",tail:"Tail",tail_tip:"Dose beyond the distal fall-off (at R80 + max(10 mm, 4 × (D80–D20))) relative to the maximum: fragmentation tail",relw_tip:"Width relative to the range: comparable between ions with different ranges",bpw_filter:"BPW80 filter",dr80_tip:"R80 minus R80 of the reference",quad_tip:"√(BPW80² − BPW80²reference): filter contribution to the peak width when the reference is the curve without filter",plot:"Plot",statistic:"Statistic",normalize:"Normalize",
+  norm_none:"none",norm_max:"to maximum",norm_first:"to entrance",norm_sum:"to area",normalized:"normalized",log_y:"log y axis",bragg:"Bragg metrics",collapse:"Sum over",save_png:"Save as PNG",images:"Images in folder",
   peak:"Peak",gen_title:"Generate parameter files",generator:"Generator",target_folder:"Target folder",overwrite:"overwrite existing",create:"Create",created:"created",
-  set_title:"Settings",scan_title:"Searched folders",scan_hint:"Applies to Runs, Overview, and autocompletion. The Files tab still shows everything. With nothing ticked, the whole workspace is searched.",scan_include:"Only search these folders",scan_exclude:"Exclude (one pattern per line, e.g. tools or */old)",keep_awake:"Keep the computer awake during runs",keep_awake_hint:"Prevents sleep while runs are queued. The display may still turn off. Closing the laptop lid can still trigger sleep, depending on your power settings.",awake_badge:"awake",awake_on:"active",workspace:"Workspace",set_ws_hint:"The workspace is set at start-up: --workspace FOLDER.",binaries:"TOPAS programs",
+  set_title:"Settings",scan_title:"Searched folders",scan_hint:"Applies to Runs, Overview, and autocompletion. The Files tab still shows everything. With nothing ticked, the whole workspace is searched.",scan_include:"Only search these folders",scan_exclude:"Exclude (one pattern per line, e.g. tools or */old)",keep_awake:"Keep the computer awake during runs",keep_awake_hint:"Prevents sleep while runs are queued. Closing the laptop lid can still trigger sleep, depending on your power settings.",keep_display:"Keep the display on as well",keep_display_hint:"For laptops with Modern Standby (powercfg /a lists \"S0 Low Power Idle\"): there, Windows often still enters standby once the display is off or the computer is locked. To lock with the display on, see the README.",awake_badge:"awake",awake_on:"active",workspace:"Workspace",set_ws_hint:"The workspace is set at startup: --workspace FOLDER.",binaries:"TOPAS programs",
   bin_hint:"Name, command and environment variables (one per line, NAME=VALUE). TOPAS 3.9 needs TOPAS_G4_DATA_DIR.",bin_add:"Add program",bin_detect:"Detect automatically",bin_name:"Name",bin_cmd:"Command",bin_env:"Environment",remove:"Remove",
+  confirm_q:"Sure? Click again",conn_lost:"No connection to the workbench since {t}. Retrying …",conn_retry:"Retry now",conn_restart:"The workbench was restarted. Reload the page to continue.",conn_reload:"Reload",conn_failed:"Workbench not reachable",timeout:"Request timed out",
+  help_title:"Keyboard shortcuts",close:"Close",k_tabs:"Switch tabs (in the order shown above)",k_filter:"Filter or search of the current tab",k_help:"This overview",k_esc:"Close a dialog or the image viewer",k_save:"Save the file in the editor",k_range:"Select a range in tables (or drag across rows)",k_back:"Back and forward in the browser switch tabs; the address keeps the tab, file, and plot selection.",
+  loading_index:"Reading results … the first scan of a large workspace can take a moment.",rf_empty:"No parameter files in this folder.",rf_empty_gen:"Create some with Generators",no_match:"Nothing matches the filter.",clear_filter:"Clear filter",ex_empty:"No results in this folder yet. Finished runs show up here automatically.",show_more:"Show {n} more",
+  q_empty:"The queue is empty. Select files on the left and click “Add to queue”.",q_active:"Active",q_n_active:"{r} running, {w} waiting",q_history:"History",q_show:"Show",q_show_all:"all",q_show_active:"active only",q_show_failed:"failures only",requeue:"Run again",remove_job:"Remove from the queue",removed_n:"{n} removed",requeued:"queued again",
+  plot_short:"Plot",plot_outputs:"Plot outputs",open_editor:"Open in editor",rf_plot:"Plot results",no_outputs:"No plottable results found for the selection.",gen_to_runs:"Open {n} files in Runs",pl_empty:"Tick files on the left or select them in the Overview to plot them.",reload_tip:"Reload",
+  unsaved_q:"Unsaved changes. Click again to discard them, Ctrl+S saves.",
   error:"Error"}};
 let LANG=document.documentElement.lang||"de";
 const $=id=>document.getElementById(id);
@@ -335,12 +405,32 @@ const t=k=>(I18N[LANG]&&I18N[LANG][k])||I18N.en[k]||k;
 const L=o=>o&&typeof o==="object"?(o[LANG]||o.en||Object.values(o)[0]):o;
 function store(k,v){try{localStorage.setItem("wb_"+k,v)}catch(e){}}
 function recall(k){try{return localStorage.getItem("wb_"+k)}catch(e){return null}}
-function applyI18n(){document.documentElement.lang=LANG;document.querySelectorAll("[data-i18n]").forEach(e=>e.textContent=t(e.dataset.i18n));document.querySelectorAll("[data-i18n-ph]").forEach(e=>e.placeholder=t(e.dataset.i18nPh));}
-async function api(path,body){const r=await fetch(path,{method:body?"POST":"GET",headers:{"X-Token":TOKEN,"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined});
- const j=await r.json().catch(()=>({error:r.statusText}));if(!r.ok)throw new Error(j.error||r.status);return j;}
+function applyI18n(){document.documentElement.lang=LANG;document.querySelectorAll("[data-i18n]").forEach(e=>e.textContent=t(e.dataset.i18n));document.querySelectorAll("[data-i18n-ph]").forEach(e=>e.placeholder=t(e.dataset.i18nPh));
+ document.querySelectorAll("[data-i18n-title]").forEach(e=>{e.title=t(e.dataset.i18nTitle);e.setAttribute("aria-label",e.title)});
+ document.querySelectorAll("nav [role=tab]").forEach((b,i)=>b.title=`${i+1} / Alt+${i+1}`);}
+/* polling state lives here because api() marks the page as orphaned when the server was restarted (new token) */
+const POLL={t:null,busy:false,again:false,okAt:Date.now(),fails:0,dead:false,err:""};
+async function api(path,body,opt){opt=opt||{};const ctl=new AbortController();const tm=opt.timeout?setTimeout(()=>ctl.abort(),opt.timeout):null;let r;
+ try{r=await fetch(path,{method:body?"POST":"GET",headers:{"X-Token":TOKEN,"Content-Type":"application/json"},body:body?JSON.stringify(body):undefined,signal:ctl.signal})}
+ catch(e){const err=new Error(e.name==="AbortError"?t("timeout"):t("conn_failed"));err.net=true;throw err}
+ finally{if(tm)clearTimeout(tm)}
+ const j=await r.json().catch(()=>({error:r.statusText}));
+ if(r.status===403&&j.error==="bad token"&&!POLL.dead){POLL.dead=true;connState()}
+ if(!r.ok){const err=new Error(j.error||r.status);err.status=r.status;throw err}return j;}
+/* short, self-closing messages; errors that nobody catches end up here instead of only in the console */
+function toast(msg,kind){const box=$("toasts");if([...box.children].some(c=>c.textContent===msg))return;const d=document.createElement("div");d.className="toast "+(kind||"");d.setAttribute("role",kind==="err"?"alert":"status");d.textContent=msg;box.appendChild(d);
+ setTimeout(()=>d.remove(),kind==="err"?8000:4000);while(box.children.length>4)box.firstChild.remove()}
+window.addEventListener("unhandledrejection",e=>{const m=e.reason&&e.reason.message?e.reason.message:String(e.reason);if(!POLL.dead)toast(t("error")+": "+m,"err")});
+/* destructive buttons ask by changing into "Sure? Click again" for a few seconds (no browser dialogs) */
+function armed(btn,fn){btn.addEventListener("click",async e=>{if(btn.dataset.armed){clearTimeout(btn._t);delete btn.dataset.armed;btn.classList.remove("armed");btn.textContent=btn._label;await fn(e);return}
+ btn._label=btn.textContent;btn.dataset.armed="1";btn.classList.add("armed");btn.textContent=t("confirm_q");
+ btn._t=setTimeout(()=>{delete btn.dataset.armed;btn.classList.remove("armed");btn.textContent=btn._label},4000)})}
+const debounce=(fn,ms)=>{let h=null;return (...a)=>{clearTimeout(h);h=setTimeout(()=>fn(...a),ms)}};
+const loc=()=>LANG==="de"?"de-DE":"en-GB";
 const fmtSize=b=>b>1e6?(b/1e6).toFixed(1)+" MB":b>1e3?Math.round(b/1e3)+" kB":b+" B";
 const fmtTime=s=>new Date(s*1000).toLocaleString(LANG==="de"?"de-DE":"en-GB",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"});
-const fileUrl=p=>`/file?p=${encodeURIComponent(p)}&token=${TOKEN}&t=${Date.now()}`;
+/* with v (the file's mtime) the server lets the browser keep the file, so re-rendered galleries do not download again */
+const fileUrl=(p,v)=>`/file?p=${encodeURIComponent(p)}&token=${TOKEN}&`+(v!=null?`v=${encodeURIComponent(v)}`:`t=${Date.now()}`);
 
 /* ---------- multi-select in checkbox tables: click a row, shift+click for a range, drag over rows */
 function multiSelect(tbody,onChange){
@@ -356,12 +446,42 @@ function multiSelect(tbody,onChange){
  window.addEventListener("mouseup",()=>{if(!drag)return;drag=null;document.body.style.userSelect="";onChange()});
  tbody.addEventListener("click",e=>{if(e.target.matches("input[type=checkbox]"))e.preventDefault()});   // state is handled on mousedown
  tbody.addEventListener("keydown",e=>{if(e.key===" "&&e.target.matches("input[type=checkbox]")){e.preventDefault();e.target.checked=!e.target.checked;e.target.closest("tr").classList.toggle("sel",e.target.checked);onChange()}});}
-/* ---------- tabs, language, theme */
-function showTab(id){document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id===id));document.querySelectorAll("nav [role=tab]").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===id));store("tab",id);
- if(id==="files")fmLoad(FM.path);if(id==="run")loadParams();if(id==="results"){resLoad(RS.path);loadViews()}if(id==="explorer")exLoad(false);if(id==="gen")loadGens();if(id==="settings")loadSettings();}
+/* ---------- navigation: tabs, address (deep links, back and forward), keyboard shortcuts */
+const TABS=["files","gen","run","explorer","results","settings"];
+let CUR=null,ROUTED="";
+const isTab=id=>CUR===id;
+function tabHash(id){const p=new URLSearchParams();if(id==="results")RS.pick.forEach(f=>p.append("f",f));if(id==="files"&&FM.file)p.set("p",FM.file);const q=p.toString();return "#"+id+(q?"?"+q:"")}
+function syncHash(push){if(!CUR)return;const h=tabHash(CUR);if(location.hash===h)return;ROUTED=h;try{history[push?"pushState":"replaceState"](null,"",h)}catch(e){}}
+function showTab(id,opt){opt=opt||{};if(!TABS.includes(id))id="files";const changed=CUR!==id;CUR=id;
+ document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id===id));document.querySelectorAll("nav [role=tab]").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===id));store("tab",id);
+ if(!opt.fromHash)syncHash(changed&&!opt.replace);
+ if(id==="files"&&!opt.noload)fmLoad(FM.path);if(id==="run"){loadParams();renderQueue(true);showJob(true)}if(id==="results"){resLoad(RS.path);loadViews()}if(id==="explorer")exLoad(false);if(id==="gen")loadGens();if(id==="settings")loadSettings();
+ if(changed&&id==="run")poll();}
+/* #run, #results?f=a.csv&f=b.csv, #files?p=dir/case.txt */
+function routeFromHash(){const h=location.hash;if(!h||h===ROUTED)return !!h&&TABS.includes(h.slice(1).split("?")[0]);ROUTED=h;
+ const s=h.slice(1),i=s.indexOf("?"),id=i<0?s:s.slice(0,i),p=new URLSearchParams(i<0?"":s.slice(i+1));if(!TABS.includes(id))return false;
+ if(id==="results"){const f=p.getAll("f");if(f.length&&f.join("\n")!==RS.pick.join("\n")){RS.pick=f;RS.zoom=null;savePick()}}
+ if(id==="files"&&p.get("p")){showTab("files",{fromHash:true,noload:true});if(p.get("p")!==FM.file)openFile(p.get("p"));return true}
+ showTab(id,{fromHash:true});return true}
+window.addEventListener("popstate",routeFromHash);window.addEventListener("hashchange",routeFromHash);
 document.querySelectorAll("nav [role=tab]").forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
+$("runBadge").onclick=()=>showTab("run");
+const FILTER_OF={files:"fmName",gen:"genSel",run:"rfFilter",explorer:"exQ",results:"resFilter",settings:"excBox"};
+function helpOpen(){const k=a=>a.map(x=>`<kbd>${esc(x)}</kbd>`).join(" "),de=LANG==="de";
+ $("helpBody").innerHTML=[[k(["1"])+" … "+k(["6"])+" "+(de?"oder":"or")+" "+k(["Alt+1"])+" … "+k(["Alt+6"]),t("k_tabs")],[k(["/"]),t("k_filter")],[k([(de?"Strg":"Ctrl")+"+S"]),t("k_save")],
+  [k([(de?"Umschalt+Klick":"Shift+click")]),t("k_range")],[k(["?"]),t("k_help")],[k(["Esc"]),t("k_esc")]].map(([a,b])=>`<tr><td>${a}</td><td>${esc(b)}</td></tr>`).join("")+
+  `<tr><td colspan="2" class="mute">${esc(t("k_back"))}</td></tr>`;$("help").hidden=false;$("helpClose").focus()}
+function helpClose(){$("help").hidden=true}
+$("helpBtn").onclick=helpOpen;$("helpClose").onclick=helpClose;$("help").onclick=e=>{if(e.target.id==="help")helpClose()};
+document.addEventListener("keydown",e=>{const typing=e.target&&e.target.closest&&e.target.closest("input,textarea,select,[contenteditable]");
+ const m=/^Digit([1-6])$/.exec(e.code||"");
+ if(m&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey&&(e.altKey||!typing)&&$("lightbox").hidden&&$("help").hidden){e.preventDefault();showTab(TABS[+m[1]-1]);return}
+ if(e.key==="Escape"&&!$("help").hidden){helpClose();return}
+ if(typing||e.ctrlKey||e.metaKey||e.altKey)return;
+ if(e.key==="?"){e.preventDefault();$("help").hidden?helpOpen():helpClose();return}
+ if(e.key==="/"&&$("lightbox").hidden&&$("help").hidden){const f=$(FILTER_OF[CUR]);if(f){e.preventDefault();f.focus();if(f.select)f.select()}}});
 $("langSel").value=recall("lang")||((navigator.language||"").toLowerCase().startsWith("de")?"de":"en");LANG=$("langSel").value;
-$("langSel").onchange=e=>{LANG=e.target.value;store("lang",LANG);applyI18n();api("/api/config",{lang:LANG}).catch(()=>{});showTab(recall("tab")||"files");};
+$("langSel").onchange=e=>{LANG=e.target.value;store("lang",LANG);applyI18n();api("/api/config",{lang:LANG}).catch(()=>{});Q.html={};Q.out="";showTab(CUR||"files",{replace:true});};
 function applyTheme(v){if(v==="auto")document.documentElement.removeAttribute("data-theme");else document.documentElement.dataset.theme=v;}
 $("themeSel").value=recall("theme")||"auto";applyTheme($("themeSel").value);$("themeSel").onchange=e=>{store("theme",e.target.value);applyTheme(e.target.value);if(RS.last)drawPlot();};
 
@@ -378,12 +498,14 @@ async function fmLoad(p){try{const j=await api("/api/ls?p="+encodeURIComponent(p
  $("fmBody").querySelectorAll("tr").forEach(tr=>{if(tr.dataset.up){tr.onclick=()=>fmLoad(j.path.split("/").slice(0,-1).join("/"));return;}
   tr.onclick=()=>fmSelect(tr);tr.ondblclick=()=>{if(tr.dataset.d==="1")fmLoad(join(FM.path,tr.dataset.n))};tr.onkeydown=e=>{if(e.key==="Enter"){tr.dataset.d==="1"?fmLoad(join(FM.path,tr.dataset.n)):fmSelect(tr)}}});
  $("fmMsg").textContent=`${j.items.length} ${t("entries")}`;}catch(e){$("fmMsg").textContent=t("error")+": "+e.message}}
-async function fmSelect(tr){$("fmBody").querySelectorAll("tr").forEach(r=>r.classList.remove("sel"));tr.classList.add("sel");
- const n=tr.dataset.n;FM.sel=join(FM.path,n);FM.dir=tr.dataset.d==="1";$("fmName").value=n;$("fmTitle").textContent=FM.sel;$("fmSaveMsg").textContent="";$("fmLintOut").innerHTML="";
+async function fmSelect(tr){const n=tr.dataset.n,target=join(FM.path,n);
+ if(ED.dirty&&FM.file&&target!==FM.file){if(!FM.leave||Date.now()-FM.leave>5000){FM.leave=Date.now();$("fmSaveMsg").textContent=t("unsaved_q");return}}
+ FM.leave=0;setDirty(false);$("fmBody").querySelectorAll("tr").forEach(r=>r.classList.remove("sel"));tr.classList.add("sel");
+ FM.sel=target;FM.dir=tr.dataset.d==="1";$("fmName").value=n;$("fmTitle").textContent=FM.sel;$("fmSaveMsg").textContent="";$("fmLintOut").innerHTML="";
  const ext=n.includes(".")?n.slice(n.lastIndexOf(".")).toLowerCase():"";["edWrap","fmSave","fmLint","fmVar","varBox"].forEach(i=>$(i).hidden=true);$("fmView").innerHTML="";$("fmInc").innerHTML="";FM.file=null;acClose();
  if(FM.dir){$("fmView").textContent=t("folder_hint");return}
  if([".png",".jpg",".svg"].includes(ext)){$("fmView").innerHTML=`<img alt="" style="max-width:100%;border:1px solid var(--line);border-radius:7px;background:#fff" src="${fileUrl(FM.sel)}">`;return}
- if(TEXT.includes(ext)){try{const j=await api("/api/read?p="+encodeURIComponent(FM.sel));const ta=$("fmEd");ta.value=j.text;ta.scrollTop=0;ta.scrollLeft=0;["edWrap","fmSave"].forEach(i=>$(i).hidden=false);$("fmLint").hidden=ext!==".txt";$("fmVar").hidden=ext!==".txt";$("varBox").hidden=true;FM.file=FM.sel;ED.param=ext===".txt";ED.lint=j.lint||[];
+ if(TEXT.includes(ext)){try{const j=await api("/api/read?p="+encodeURIComponent(FM.sel));const ta=$("fmEd");ta.value=j.text;ta.scrollTop=0;ta.scrollLeft=0;["edWrap","fmSave"].forEach(i=>$(i).hidden=false);$("fmLint").hidden=ext!==".txt";$("fmVar").hidden=ext!==".txt";$("varBox").hidden=true;FM.file=FM.sel;ED.param=ext===".txt";ED.lint=j.lint||[];if(isTab("files"))syncHash(false);
   if(ED.param){showLint(j.lint);showIncludes(j.includes);loadNames()}highlight()}catch(e){$("fmView").textContent=e.message}return}
  $("fmView").textContent=t("no_preview");}
 function showLint(list){if(!list){$("fmLintOut").innerHTML="";return}
@@ -396,12 +518,14 @@ $("fmNewDir").onclick=()=>needName()&&fmDo("/api/mkdir",{p:fmTarget()});
 $("fmNewFile").onclick=()=>needName()&&fmDo("/api/newfile",{p:fmTarget()});
 $("fmMove").onclick=()=>need()&&needName()&&fmDo("/api/move",{src:FM.sel,dst:$("fmName").value.trim()});
 $("fmCopy").onclick=()=>need()&&needName()&&fmDo("/api/copy",{src:FM.sel,dst:$("fmName").value.trim()});
-$("fmTrash").onclick=()=>need()&&fmDo("/api/trash",{p:FM.sel});
-$("fmQueue").onclick=()=>{if(!need())return;if(!FM.sel.endsWith(".txt")){$("fmMsg").textContent=t("select_first");return}showTab("run");RF.preselect=[FM.sel];renderParams();};
-$("fmSave").onclick=async()=>{try{const j=await api("/api/write",{p:FM.file,text:$("fmEd").value});$("fmSaveMsg").textContent=t("saved")+" "+new Date().toLocaleTimeString();if(ED.param){ED.lint=j.lint;showLint(j.lint);showIncludes(j.includes);highlight();NAMES.loaded=false}}catch(e){$("fmSaveMsg").textContent=t("error")+": "+e.message}};
+armed($("fmTrash"),async()=>{if(!need())return;if(FM.sel===FM.file){setDirty(false);FM.file=null}await fmDo("/api/trash",{p:FM.sel})});
+$("fmQueue").onclick=()=>{if(!need())return;if(!FM.sel.endsWith(".txt")){$("fmMsg").textContent=t("select_first");return}goRunsWith([FM.sel])};
+function setDirty(v){ED.dirty=v;if(FM.file)$("fmTitle").textContent=(v?"● ":"")+FM.file}
+window.addEventListener("beforeunload",e=>{if(ED.dirty){e.preventDefault();e.returnValue=""}});
+$("fmSave").onclick=async()=>{try{const j=await api("/api/write",{p:FM.file,text:$("fmEd").value});setDirty(false);$("fmSaveMsg").textContent=t("saved")+" "+new Date().toLocaleTimeString();if(ED.param){ED.lint=j.lint;showLint(j.lint);showIncludes(j.includes);highlight();NAMES.loaded=false}}catch(e){$("fmSaveMsg").textContent=t("error")+": "+e.message}};
 $("fmLint").onclick=()=>liveLint(true);
 /* ---------- editor: highlighting, live lint, includes, autocomplete */
-const ED={param:false,lint:[],timer:null};
+const ED={param:false,lint:[],timer:null,dirty:false};
 function hlLine(l){const h=l.indexOf("#");let code=h>=0?l.slice(0,h):l,com=h>=0?l.slice(h):"";let out;
  const m=code.match(/^(\s*)([a-z]{1,2}:)([^=\s]+)(\s*=\s*)(.*)$/);
  if(m){const val=esc(m[5]).replace(/(&quot;[^&]*?&quot;)|(-?\d+\.?\d*(?:[eE][+-]?\d+)?)|([A-Za-z%][\w%/]*)/g,(x,str,num,word)=>str?`<span class="hl-s">${str}</span>`:num?`<span class="hl-n">${num}</span>`:`<span class="hl-u">${word}</span>`);
@@ -445,7 +569,7 @@ function acMove(d){AC.idx=(AC.idx+d+AC.items.length)%AC.items.length;$("acBox").
 function acAccept(){const ta=$("fmEd"),pos=ta.selectionStart,name=AC.items[AC.idx][0],ins=name==="includeFile"?"includeFile = ":name+" = ";
  ta.setRangeText(ins,AC.start,pos,"end");acClose();highlight();liveLint();ta.focus()}
 let _cw=0;function charWidth(){if(!_cw){const c=document.createElement("canvas").getContext("2d");c.font=getComputedStyle($("fmEd")).font;_cw=c.measureText("MMMMMMMMMM").width/10}return _cw}
-$("fmEd").addEventListener("input",()=>{highlight();acUpdate(false);liveLint()});
+$("fmEd").addEventListener("input",()=>{if(!ED.dirty)setDirty(true);highlight();acUpdate(false);liveLint()});
 $("fmEd").addEventListener("scroll",()=>{syncScroll();if(AC.open)acClose()});
 $("fmEd").addEventListener("blur",()=>setTimeout(acClose,150));
 $("fmEd").addEventListener("click",acClose);
@@ -454,47 +578,118 @@ $("fmEd").addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key==="s")
  if(AC.open){if(e.key==="ArrowDown"){e.preventDefault();acMove(1)}else if(e.key==="ArrowUp"){e.preventDefault();acMove(-1)}else if(e.key==="Enter"||e.key==="Tab"){e.preventDefault();acAccept()}else if(e.key==="Escape"){e.preventDefault();acClose()}}});
 
 /* ---------- runs */
-const RF={files:[],last:{},results:{},preselect:[]};let INFO=null;
-function fillScopes(){const fs=INFO.folders||[];for(const sel of document.querySelectorAll(".scopeSel")){const cur=recall(sel.dataset.k)||"";sel.innerHTML="";sel.add(new Option(t("scope_all"),""));for(const f of fs)sel.add(new Option(f,f));sel.value=fs.includes(cur)?cur:""}}
+const RF={files:[],last:{},results:{},preselect:[],loaded:false,seq:0};let INFO=null,INFO_AT=0;
+function fillScopes(){const fs=INFO.folders||[];for(const sel of document.querySelectorAll(".scopeSel")){const cur=recall(sel.dataset.k)||"";sel.innerHTML="";sel.add(new Option(t("scope_all"),""));for(const f of fs)sel.add(new Option("\u00a0\u00a0".repeat(f.split("/").length-1)+f.split("/").pop(),f));sel.value=fs.includes(cur)?cur:""}}
 const scopeQ=id=>{const v=$(id).value;return v?"?scope="+encodeURIComponent(v):""};
-async function loadInfo(){INFO=await api("/api/info");fillScopes();const sel=$("rfBin"),cur=sel.value;sel.innerHTML="";for(const b of INFO.cfg.binaries)sel.add(new Option(b.name,b.name));if(cur)sel.value=cur;else if(recall("bin"))sel.value=recall("bin");}
-$("rfBin").onchange=e=>store("bin",e.target.value);
-async function loadParams(){await loadInfo();if(!RF.files.length)$("rfMsg").textContent=t("loading");let j;try{j=await api("/api/params"+scopeQ("rfScope"))}catch(e){$("rfMsg").textContent=t("error")+": "+e.message;return}$("rfMsg").textContent="";RF.files=j.files;RF.last=j.last;RF.results=j.results||{};renderParams();refreshJobs();}
+/* folders and binaries change rarely; every tab used to fetch them again on each visit */
+async function loadInfo(force){if(INFO&&!force&&Date.now()-INFO_AT<60000)return INFO;const j=await api("/api/info");INFO=j;INFO_AT=Date.now();fillScopes();
+ const sel=$("rfBin"),cur=sel.value||recall("bin");sel.innerHTML="";for(const b of INFO.cfg.binaries)sel.add(new Option(b.name,b.name));if(cur)sel.value=cur;if(!sel.value&&sel.options.length)sel.selectedIndex=0;return INFO}
+$("rfBin").onchange=e=>{store("bin",e.target.value);renderParams()};
+function rfState(html){$("rfBody").innerHTML=`<tr><td colspan="4" class="empty">${html}</td></tr>`;$("rfCount").textContent=""}
+async function loadParams(quiet,again){const seq=++RF.seq;again=again||0;if(!RF.loaded&&!quiet)rfState(`<span class="spin"></span>${esc(t("loading"))}`);
+ /* the first visit asks for folders and files at the same time; the folder picker is filled from the stored choice */
+ const sc=INFO?$("rfScope").value:(recall("scope_run")||""),q=sc?"?scope="+encodeURIComponent(sc):"";let j;
+ try{j=(await Promise.all([loadInfo(),api("/api/params"+q)]))[1]}
+ catch(e){if(sc&&e.status===400){store("scope_run","");if(INFO)$("rfScope").value="";return loadParams(quiet,again)}if(seq===RF.seq&&!RF.loaded)rfState(esc(t("error")+": "+e.message));else toast(t("error")+": "+e.message,"err");return}
+ if(seq!==RF.seq)return;const sig=JSON.stringify([j.files,j.results,j.last]);   // repeated quiet reloads mostly bring the same list
+ if(!(quiet&&RF.loaded&&sig===RF.sig)){$("rfMsg").textContent="";RF.sig=sig;RF.files=j.files;RF.last=j.last;RF.results=j.results||{};RF.loaded=true;renderParams()}
+ if(j.stale&&again<3)setTimeout(()=>{if(isTab("run"))loadParams(true,again+1)},1500);}  // answered from an expired walk while the server walks again
 const fmtDur=s=>s<90?Math.round(s)+" s":s<5400?Math.round(s/60)+" min":(s/3600).toFixed(1)+" h";
-function renderParams(){const f=$("rfFilter").value.toLowerCase(),open=$("rfOpen").checked,bin=$("rfBin").value;
+const words=v=>v.toLowerCase().split(/\s+/).filter(Boolean);
+const pathHtml=p=>esc(p).replace(/\//g,"/<wbr>");   // narrow windows wrap paths at folder boundaries
+function renderParams(){if(!RF.loaded)return;const f=words($("rfFilter").value),open=$("rfOpen").checked,bin=$("rfBin").value,sub=$("rfSub").value.trim();
  const checked=new Set([...document.querySelectorAll(".rfc:checked")].map(e=>e.value).concat(RF.preselect));RF.preselect=[];
- const sub=$("rfSub").value.trim();
- $("rfBody").innerHTML=RF.files.filter(x=>x.toLowerCase().includes(f)).filter(x=>!open||!((RF.results[x]||[]).includes(sub))).map(x=>{const l=RF.last[x+"|"+bin],r=RF.results[x]||[];
-  return `<tr class="${checked.has(x)?"sel":""}" style="cursor:pointer"><td><input type="checkbox" class="rfc" value="${esc(x)}" ${checked.has(x)?"checked":""} aria-label="${esc(x)}"></td><td>${esc(x)}</td><td>${r.length?`<span class="res">✓</span> ${r.map(d=>esc(d||t("here"))).join(", ")}`:""}</td><td>${l?`<span class="st-${l.status}">${t("st_"+l.status)}</span> <span class="mute">${esc((l.end||"").slice(5,16))}</span>`:""}</td></tr>`}).join("");}
-multiSelect($("rfBody"),()=>{});
-$("rfSub").oninput=renderParams;
-$("rfScope").onchange=()=>{store("scope_run",$("rfScope").value);RF.files=[];loadParams()};$("exScope").onchange=async()=>{store("scope_ex",$("exScope").value);exLoad(true)};
-$("rfFilter").oninput=renderParams;$("rfOpen").onchange=renderParams;
-$("rfAll").onclick=()=>document.querySelectorAll(".rfc").forEach(c=>{c.checked=true;c.closest("tr").classList.add("sel")});$("rfNone").onclick=()=>document.querySelectorAll(".rfc").forEach(c=>{c.checked=false;c.closest("tr").classList.remove("sel")});
+ const list=RF.files.filter(x=>{const l=x.toLowerCase();return f.every(w=>l.includes(w))}).filter(x=>!open||!((RF.results[x]||[]).includes(sub)));
+ if(!RF.files.length){rfState(`${esc(t("rf_empty"))}<br><button type="button" data-go="gen">${esc(t("rf_empty_gen"))}</button>`);return}
+ if(!list.length){rfState(`${esc(t("no_match"))}<br><button type="button" data-clear="1">${esc(t("clear_filter"))}</button>`);return}
+ const ed=esc(t("open_editor")),pl=esc(t("rf_plot"));
+ $("rfBody").innerHTML=list.map(x=>{const l=RF.last[x+"|"+bin],r=RF.results[x]||[],c=checked.has(x),ex=esc(x);
+  return `<tr class="${c?"sel":""}" style="cursor:pointer"><td><input type="checkbox" class="rfc" value="${ex}" ${c?"checked":""} aria-label="${ex}"></td><td class="f" title="${ex}"><a href="#" class="ed-link" data-edit="${ex}" title="${ed}" aria-label="${ed}">✎</a>${pathHtml(x)}</td><td>${r.length?`<a href="#" class="res" data-plot="${ex}" title="${pl}">✓ ${r.map(d=>esc(d||t("here"))).join(", ")}</a>`:""}</td><td>${l?`<span class="st-${l.status}">${t("st_"+l.status)}</span> <span class="mute">${esc((l.end||"").slice(5,16))}</span>`:""}</td></tr>`}).join("");rfCount();}
+function rfCount(){const all=document.querySelectorAll(".rfc"),n=[...all].filter(c=>c.checked).length;$("rfCount").textContent=all.length?t("n_selected").replace("{n}",n).replace("{m}",all.length):""}
+multiSelect($("rfBody"),rfCount);
+$("rfBody").addEventListener("click",e=>{const a=e.target.closest("a[data-edit],a[data-plot],button[data-go],button[data-clear]");if(!a)return;e.preventDefault();
+ if(a.dataset.edit)openInEditor(a.dataset.edit);else if(a.dataset.plot)plotCases([a.dataset.plot]);else if(a.dataset.go)showTab(a.dataset.go);else{$("rfFilter").value="";$("rfOpen").checked=false;rfSave();renderParams()}});
+/* filters and options survive reloads; typing re-renders after a short pause instead of on every key */
+const RF_KEYS=[["rfFilter","rf_filter","value"],["rfOpen","rf_open","checked"],["rfSub","rf_sub","value"],["rfSkip","rf_skip","checked"]];
+function rfSave(){for(const [id,k,prop] of RF_KEYS)store(k,prop==="checked"?($(id).checked?"1":"0"):$(id).value)}
+for(const [id,k,prop] of RF_KEYS){const v=recall(k);if(v!=null){if(prop==="checked")$(id).checked=v==="1";else $(id).value=v}}
+const rfRender=debounce(()=>{rfSave();renderParams()},150);
+$("rfSub").oninput=rfRender;$("rfFilter").oninput=rfRender;$("rfOpen").onchange=()=>{rfSave();renderParams()};$("rfSkip").onchange=rfSave;
+$("rfScope").onchange=()=>{store("scope_run",$("rfScope").value);RF.loaded=false;loadParams()};$("exScope").onchange=async()=>{store("scope_ex",$("exScope").value);EX.items=[];exLoad(true)};
+$("rfAll").onclick=()=>{document.querySelectorAll(".rfc").forEach(c=>{c.checked=true;c.closest("tr").classList.add("sel")});rfCount()};$("rfNone").onclick=()=>{document.querySelectorAll(".rfc").forEach(c=>{c.checked=false;c.closest("tr").classList.remove("sel")});rfCount()};
 $("rfRun").onclick=async()=>{const files=[...document.querySelectorAll(".rfc:checked")].map(e=>e.value);if(!files.length){$("rfMsg").textContent=t("nothing_selected");return}
  if(!$("rfBin").value){$("rfMsg").textContent=t("no_binary");return}
- try{const j=await api("/api/enqueue",{files,binary:$("rfBin").value,subdir:$("rfSub").value.trim(),skip:$("rfSkip").checked});$("rfMsg").textContent=`${j.added.length} ${t("added")}, ${j.skipped.length} ${t("skipped")}`;refreshJobs()}catch(e){$("rfMsg").textContent=t("error")+": "+e.message}};
-let JOBSEL=null;
-async function refreshJobs(){const j=await api("/api/jobs");checkTransitions(j.jobs);
+ try{const j=await api("/api/enqueue",{files,binary:$("rfBin").value,subdir:$("rfSub").value.trim(),skip:$("rfSkip").checked});$("rfMsg").textContent=`${j.added.length} ${t("added")}, ${j.skipped.length} ${t("skipped")}`;poll()}catch(e){$("rfMsg").textContent=t("error")+": "+e.message}};
+$("rfPlot").onclick=()=>plotCases([...document.querySelectorAll(".rfc:checked")].map(e=>e.value));
+async function plotCases(files){if(!files.length){toast(t("nothing_selected"));return}
+ const j=await api("/api/outputs",{files});const out=[...new Set(files.flatMap(f=>j.outputs[f]||[]))];if(!out.length){toast(t("no_outputs"));return}plotPaths(out)}
+function plotPaths(paths){if(!paths.length)return;RS.pick=paths.slice();RS.zoom=null;RS.path=paths[0].split("/").slice(0,-1).join("/");savePick();showTab("results")}
+/* hand-over from Files, Generators, and variations: show these files selected, even if the folder or filter would hide them */
+async function goRunsWith(files,folder){RF.preselect=files.slice();await loadInfo(true).catch(()=>{});
+ const sc=folder&&INFO&&INFO.folders.includes(folder)?folder:($("rfScope").value&&files.every(f=>f.startsWith($("rfScope").value+"/"))?$("rfScope").value:"");
+ $("rfScope").value=sc;store("scope_run",sc);$("rfFilter").value="";$("rfOpen").checked=false;rfSave();RF.loaded=false;RF.files=[];showTab("run")}
+async function openInEditor(rel){showTab("files",{noload:true});await openFile(rel);syncHash(false)}
+
+/* ---------- queue: active jobs first, history newest first and paged, rendered only when something changed */
+const Q={more:30,moreWait:50,show:recall("q_show")||"all",html:{},out:"",sel:null,logKey:"",fin:null};let JOBS=null;
+const FAILED=["failed","stopped","aborted"];
+$("qShow").value=Q.show;$("qShow").onchange=()=>{Q.show=$("qShow").value;store("q_show",Q.show);Q.more=30;poll()};
+async function refreshJobs(){const hist=Q.show==="failed"?5000:Q.more+5;const j=await api("/api/jobs?hist="+hist,null,{timeout:12000});JOBS=j;checkTransitions(j.jobs);
  const aw=j.awake||{};$("awakeBadge").hidden=!aw.active;$("awakeBadge").textContent="☕ "+t("awake_badge");$("awakeBadge").title=aw.method||"";
  $("awakeMsg").textContent=aw.active?`${t("awake_on")} (${aw.method})`:aw.error?`${t("error")}: ${aw.error}`:"";
  const run=j.jobs.find(x=>x.status==="running"),wait=j.jobs.filter(x=>x.status==="queued").length;
  const qe=j.queue_eta;const etaTxt=qe&&(run||wait)?`${t("q_rest")} ≈ ${fmtDur(qe.seconds)}, ${t("q_finish")} ${qe.finish}${qe.unknown?` (${qe.unknown} ${t("q_unknown")})`:""}`:(run||wait)?t("q_eta_wait"):"";
  $("qEta").textContent=etaTxt?"· "+etaTxt:"";
- $("runBadge").hidden=!run&&!wait;$("runBadge").textContent=(run?`${t("running_badge")}: ${run.file.split("/").pop()}${run.progress!=null?" "+Math.round(run.progress*100)+" %":""} (+${wait})`:`${t("st_queued")}: ${wait}`)+(qe&&(run||wait)?`, ${t("q_finish")} ${qe.finish}`:"");$("runBadge").title=etaTxt;
- $("qBody").innerHTML=j.jobs.slice().reverse().map(x=>`<tr data-id="${x.id}" class="${JOBSEL===x.id?"sel":""}" style="cursor:pointer"><td>${x.id}</td><td>${esc(x.file)}${x.subdir?` <span class="mute">→ ${esc(x.subdir)}</span>`:""}</td><td>${esc(x.binary)}</td><td class="st-${x.status}">${t("st_"+x.status)}</td><td class="mute">${x.status==="running"?(x.progress!=null?`<span class="bar"><i style="width:${(x.progress*100).toFixed(1)}%"></i></span>${Math.round(x.progress*100)} %, ${t("eta")} ${fmtDur(x.eta)}`:x.done!=null?`${x.done} ${t("histories_done")}`:esc((x.start||"").slice(11,16))):x.seconds!=null?fmtDur(x.seconds):esc((x.start||x.queued||"").slice(11,16))}</td></tr>`).join("");
- $("qBody").querySelectorAll("tr").forEach(tr=>tr.onclick=()=>{JOBSEL=+tr.dataset.id;refreshJobs()});
- renderLive(run);
- const show=j.jobs.find(x=>x.id===JOBSEL)||run||j.jobs[j.jobs.length-1];
- if(show){$("logTitle").textContent=`${t("log")}: #${show.id} ${show.file}`;
-  if(show.log){try{const l=await api("/api/log?p="+encodeURIComponent(show.log));const pre=$("logOut"),end=pre.scrollTop+pre.clientHeight>=pre.scrollHeight-30;pre.innerHTML=colorLog(l.text);if(end)pre.scrollTop=pre.scrollHeight}catch(e){}}else $("logOut").textContent=show.error||"";
-  const hs=(show.hints||[]).concat(show.error?[show.error]:[]);$("jobHints").textContent=hs.length&&show.status!=="done"?t("log_hints")+"\n"+hs.join("\n"):"";
-  $("jobOut").innerHTML=(show.outputs||[]).length?`<span class="mute">${t("outputs")}:</span> `+show.outputs.map(o=>`<a href="#" data-o="${esc(o)}">${esc(o.split("/").pop())}</a>`).join(" "):"";
-  $("jobOut").querySelectorAll("a").forEach(a=>a.onclick=e=>{e.preventDefault();const o=a.dataset.o;RS.path=o.split("/").slice(0,-1).join("/");RS.pick=[o];showTab("results")});}
- const fin=j.jobs.filter(x=>x.status!=="queued"&&x.status!=="running").length;  // refresh results and last-run columns after every finished job
- if(RF.files.length&&refreshJobs.fin!=null&&fin!==refreshJobs.fin&&document.getElementById("run").classList.contains("on")){const p=await api("/api/params"+scopeQ("rfScope"));RF.last=p.last;RF.results=p.results||{};renderParams()}
- refreshJobs.fin=fin;}
-const fmtN=n=>Math.round(n).toLocaleString(LANG==="de"?"de-DE":"en-GB");
+ $("runBadge").hidden=!run&&!wait;$("runBadge").textContent=(run?`▶ ${run.file.split("/").pop()}${run.progress!=null?" "+Math.round(run.progress*100)+" %":""}`:`${t("st_queued")}: ${wait}`)+(qe&&(run||wait)?` · ${t("q_finish")} ${qe.finish}`:"");
+ $("runBadge").title=(run?`${t("running_badge")}: ${run.file} (+${wait})\n`:"")+etaTxt;
+ const n=(run?1:0)+wait;$("runCnt").hidden=!n;$("runCnt").textContent=n;
+ const fin=j.finished!=null?j.finished:j.jobs.filter(x=>x.status!=="queued"&&x.status!=="running").length;
+ if(Q.fin!=null&&fin!==Q.fin){RS.gen++;EX.dirty=true;if(isTab("run")&&RF.loaded)loadParams(true);if(isTab("explorer"))exLoad(true,true);if(isTab("results")&&RS.pick.length)loadPlot()}  // a run finished: results and last-run columns change
+ Q.fin=fin;
+ if(isTab("run")){renderQueue();await showJob()}}
+function sec(txt){return `<tr class="qsec"><td colspan="6">${esc(txt)}</td></tr>`}
+function jobTime(x){return x.status==="running"?(x.progress!=null?`<span class="bar"><i style="width:${(x.progress*100).toFixed(1)}%"></i></span>${Math.round(x.progress*100)} %, ${t("eta")} ${fmtDur(x.eta)}`:x.done!=null?`${x.done} ${t("histories_done")}`:esc((x.start||"").slice(11,16))):x.seconds!=null?fmtDur(x.seconds):esc((x.start||x.queued||"").slice(11,16))}
+function jobRow(x){const rm=esc(t("remove_job")),rq=esc(t("requeue"));
+ const acts=x.status==="queued"?`<button type="button" class="rowact" data-deq="${x.id}" title="${rm}" aria-label="${rm}">✕</button>`:x.status==="running"?"":
+  ((x.outputs||[]).some(o=>DATAEXT.test(o))?`<button type="button" class="rowact" data-plotjob="${x.id}">${esc(t("plot_short"))}</button>`:"")+`<button type="button" class="rowact" data-requeue="${x.id}" title="${rq}" aria-label="${rq}">↻</button>`;
+ return `<tr data-id="${x.id}" class="${Q.sel===x.id?"sel":""}" style="cursor:pointer"><td>${x.id}</td><td class="f" title="${esc(x.file)}${x.subdir?" → "+esc(x.subdir):""}">${pathHtml(x.file)}${x.subdir?` <span class="mute">→ ${esc(x.subdir)}</span>`:""}</td><td>${esc(x.binary)}</td><td class="st-${x.status}">${t("st_"+x.status)}</td><td class="mute">${jobTime(x)}</td><td class="acts">${acts}</td></tr>`}
+const moreRow=(n,k)=>`<tr class="more"><td colspan="6"><button type="button" data-${k}="1">${esc(t("show_more").replace("{n}",n))}</button></td></tr>`;
+function setBody(id,html,force){if(force||Q.html[id]!==html){Q.html[id]=html;$(id).innerHTML=html}}
+function renderQueue(force){const j=JOBS;if(!j||!isTab("run"))return;
+ const running=j.jobs.filter(x=>x.status==="running"),waiting=j.jobs.filter(x=>x.status==="queued");
+ let fin=j.jobs.filter(x=>x.status!=="running"&&x.status!=="queued").reverse();if(Q.show==="failed")fin=fin.filter(x=>FAILED.includes(x.status));
+ const act=running.length||waiting.length;
+ setBody("qRun",act?sec(`${t("q_active")} · ${t("q_n_active").replace("{r}",running.length).replace("{w}",waiting.length)}`)+running.map(jobRow).join(""):"",force);
+ const ws=Math.min(Q.moreWait,waiting.length);
+ setBody("qWait",waiting.slice(0,ws).map(jobRow).join("")+(waiting.length>ws?moreRow(Math.min(200,waiting.length-ws),"morewait"):""),force);
+ let h="";
+ if(Q.show!=="active"&&fin.length){const total=Q.show==="failed"?fin.length:(j.finished!=null?j.finished:fin.length),shown=Math.min(Q.more,fin.length);
+  h=sec(`${t("q_history")} · ${total}`)+fin.slice(0,shown).map(x=>jobRow(x)).join("")+(total>shown?moreRow(Math.min(100,total-shown),"more"):"")}
+ if(!act&&!h)h=`<tr><td colspan="6" class="empty">${esc(t("q_empty"))}</td></tr>`;
+ setBody("qBody",h,force)}
+const jobById=id=>JOBS&&JOBS.jobs.find(x=>x.id===id);
+async function requeue(x){const j=await api("/api/enqueue",{files:[x.file],binary:x.binary,subdir:x.subdir||"",skip:false});if(j.added.length)toast(`${x.file.split("/").pop()}: ${t("requeued")}`,"ok");poll()}
+$("qTable").addEventListener("click",async e=>{const b=e.target.closest("button");
+ if(b){e.stopPropagation();const x=jobById(+(b.dataset.deq||b.dataset.requeue||b.dataset.plotjob));
+  if(b.dataset.more){Q.more+=100;poll()}else if(b.dataset.morewait){Q.moreWait+=200;renderQueue()}else if(b.dataset.deq){await api("/api/dequeue",{ids:[+b.dataset.deq]});poll()}
+  else if(b.dataset.requeue&&x)await requeue(x);else if(b.dataset.plotjob&&x)plotPaths(x.outputs.filter(o=>DATAEXT.test(o)));return}
+ const tr=e.target.closest("tr[data-id]");if(tr){Q.sel=+tr.dataset.id;renderQueue(true);showJob(true)}});
+/* log, hints, and actions of the selected job (or the running one); a finished job's log is fetched once */
+async function showJob(force){const j=JOBS;if(!j||!isTab("run"))return;const run=j.jobs.find(x=>x.status==="running");renderLive(run);
+ const show=jobById(Q.sel)||run||j.jobs[j.jobs.length-1];
+ if(!show){$("logTitle").textContent=t("log");$("logOut").textContent="";$("jobHints").textContent="";$("jobOut").innerHTML="";Q.out="";return}
+ $("logTitle").textContent=`${t("log")}: #${show.id} ${show.file}`;const key=show.id+"|"+show.status;
+ if(show.log){if(force||show.status==="running"||key!==Q.logKey){Q.logKey=key;try{const l=await api("/api/log?p="+encodeURIComponent(show.log),null,{timeout:12000});const pre=$("logOut"),end=pre.scrollTop+pre.clientHeight>=pre.scrollHeight-30;pre.innerHTML=colorLog(l.text);if(end)pre.scrollTop=pre.scrollHeight}catch(e){}}}
+ else{Q.logKey=key;$("logOut").textContent=show.error||""}
+ const hs=(show.hints||[]).concat(show.error?[show.error]:[]);$("jobHints").textContent=hs.length&&show.status!=="done"?t("log_hints")+"\n"+hs.join("\n"):"";
+ const outs=show.outputs||[],plotable=outs.filter(o=>DATAEXT.test(o));
+ const html=`<button type="button" data-open="1">${esc(t("open_editor"))}</button>`+(plotable.length?`<button type="button" class="pri" data-plotall="1">${esc(t("plot_outputs"))} (${plotable.length})</button>`:"")+
+  (FAILED.includes(show.status)||show.status==="done"||show.status==="removed"?`<button type="button" data-again="1">${esc(t("requeue"))}</button>`:"")+
+  (outs.length?`<span class="mute">${t("outputs")}:</span> `+outs.map(o=>`<a href="#" data-o="${esc(o)}">${esc(o.split("/").pop())}</a>`).join(" "):"");
+ $("jobOut").dataset.id=show.id;if(html!==Q.out){Q.out=html;$("jobOut").innerHTML=html}}
+$("jobOut").addEventListener("click",e=>{const el=e.target.closest("a,button");if(!el)return;e.preventDefault();const x=jobById(+$("jobOut").dataset.id);if(!x)return;
+ if(el.dataset.o)plotPaths([el.dataset.o]);else if(el.dataset.plotall)plotPaths(x.outputs.filter(o=>DATAEXT.test(o)));else if(el.dataset.open)openInEditor(x.file);else if(el.dataset.again)requeue(x)});
+const fmtN=n=>Math.round(n).toLocaleString(loc());
 const fmtClock=s=>{s=Math.max(0,Math.round(s));const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;return (h?h+":"+String(m).padStart(2,"0"):m)+":"+String(x).padStart(2,"0")};
 function renderLive(run){const box=$("liveBox");if(!run||!run.live){box.hidden=true;return}box.hidden=false;const L=run.live,ph=["init","run","output"],cur=ph.indexOf(L.phase);
  const pr=run.progress!=null?run.progress:(L.phase==="output"?1:0);
@@ -502,17 +697,28 @@ function renderLive(run){const box=$("liveBox");if(!run||!run.live){box.hidden=t
   <div class="ph">${ph.map((p,i)=>`<span class="${i===cur?"on":i<cur?"done":""}">${i<cur?"✓ ":""}${t("ph_"+p)}</span>`).join("")}</div>
   <div class="big"><i style="width:${(pr*100).toFixed(1)}%"></i></div>
   <div class="kv"><span>${t("histories_done")}: <b>${L.est_done!=null?fmtN(L.est_done):run.done!=null?fmtN(run.done):"–"}</b>${run.total?" / "+fmtN(run.total):""}${run.progress!=null?` (${(run.progress*100).toFixed(1)} %)`:""}</span>
-   ${L.rate?`<span>${t("live_rate")}: <b>${fmtN(L.rate)}/s</b></span>`:""}${L.cores!=null?`<span>CPU: <b>${L.cores.toLocaleString(LANG==="de"?"de-DE":"en-GB")} ${t("live_cores")}</b></span>`:""}${L.rss_mb!=null?`<span>RAM: <b>${fmtN(L.rss_mb)} MB</b></span>`:""}</div>
+   ${L.rate?`<span>${t("live_rate")}: <b>${fmtN(L.rate)}/s</b></span>`:""}${L.cores!=null?`<span>CPU: <b>${L.cores.toLocaleString(loc())} ${t("live_cores")}</b></span>`:""}${L.rss_mb!=null?`<span>RAM: <b>${fmtN(L.rss_mb)} MB</b></span>`:""}</div>
   <div class="last" title="${esc(L.last)}">${esc(L.last)}</div>`}
 const ERRL=/(\berror\b|exception|quitting|exiting|segmentation|abort|unknown parameter)/i,WRNL=/\bwarning\b|WWWW/i;
 function colorLog(txt){return txt.split("\n").map(l=>ERRL.test(l)&&!/not necessarily an error/i.test(l)?`<span class="log-err">${esc(l)}</span>`:WRNL.test(l)?`<span class="log-wrn">${esc(l)}</span>`:esc(l)).join("\n")}
-$("qStop").onclick=()=>api("/api/stop",{}).then(refreshJobs);
-$("qRemove").onclick=async()=>{const j=await api("/api/jobs");await api("/api/dequeue",{ids:j.jobs.filter(x=>x.status==="queued").map(x=>x.id)});refreshJobs()};
-$("qClear").onclick=()=>api("/api/clearhistory",{}).then(refreshJobs);
-let _tick=0,_okAt=Date.now();setInterval(()=>{_tick++;const onRun=document.getElementById("run").classList.contains("on");if(onRun?_tick%2===0:_tick%5===0)refreshJobs().then(()=>{_okAt=Date.now()},e=>console.error("refreshJobs",e));const st=$("rfStale");if(st){const age=(Date.now()-_okAt)/1000;st.hidden=age<20;st.textContent=t("stale").replace("{t}",new Date(_okAt).toLocaleTimeString())}},1000);  // 2 s on the Runs tab, 5 s elsewhere
+armed($("qStop"),async()=>{await api("/api/stop",{});poll()});
+armed($("qRemove"),async()=>{const j=await api("/api/dequeue",{all:true});toast(t("removed_n").replace("{n}",j.removed||0),"ok");poll()});
+armed($("qClear"),async()=>{await api("/api/clearhistory",{});Q.sel=null;Q.more=30;poll()});
+
+/* ---------- polling: one request at a time, slower in the background, backs off while the server is unreachable */
+function pollDelay(){if(document.hidden)return 10000;const base=isTab("run")?2000:5000;return POLL.fails?Math.min(15000,base*Math.pow(2,Math.min(POLL.fails,3))):base}
+async function poll(){if(POLL.dead)return;if(POLL.busy){POLL.again=true;return}clearTimeout(POLL.t);POLL.busy=true;
+ try{await refreshJobs();POLL.okAt=Date.now();POLL.fails=0;POLL.err=""}catch(e){POLL.fails++;POLL.err=e.message;console.error("refreshJobs",e)}
+ finally{POLL.busy=false}
+ connState();if(POLL.dead)return;if(POLL.again){POLL.again=false;return poll()}POLL.t=setTimeout(poll,pollDelay())}
+function connState(){const el=$("conn");
+ if(POLL.dead){el.hidden=false;el.classList.add("dead");$("connMsg").textContent=t("conn_restart");$("connBtn").textContent=t("conn_reload");$("connBtn").onclick=()=>location.reload();return}
+ const down=POLL.fails>=2;el.hidden=!down;el.classList.remove("dead");
+ if(down){$("connMsg").textContent=t("conn_lost").replace("{t}",new Date(POLL.okAt).toLocaleTimeString(loc()));el.title=POLL.err;$("connBtn").textContent=t("conn_retry");$("connBtn").onclick=()=>poll()}}
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)poll()});
 
 /* ---------- explorer */
-const EX={items:[],sort:{k:"path",d:1},tags:new Set(),sel:new Set(),imgs:[],lb:0,loaded:false};
+const EX={items:[],sort:{k:"path",d:1},tags:new Set(),sel:new Set(),imgs:[],lb:0,loaded:false,dirty:false,seq:0,limit:300,imgKey:null};
 const FKEY="wb_formulas";
 function getFormulas(){try{return JSON.parse(localStorage.getItem(FKEY)||"null")||[{name:"ΔR80 %",expr:"100*(r80-ref_r80)/ref_r80"}]}catch(e){return []}}
 function setFormulas(f){try{localStorage.setItem(FKEY,JSON.stringify(f))}catch(e){}}
@@ -525,8 +731,12 @@ function compileFormula(expr){const ok=/^[\s\d.eE+\-*/()%,^a-z_]*$/i.test(expr);
 /* Bragg-Kleeman range in water: R[mm] = 0.022 E^1.77 * A/Z^2 (E in MeV/u), ~1-2 % for protons 70-250 MeV */
 const PZA={p:[1,1],"d":[2,1],"He-4":[4,2],"He-3":[3,2],"Li-7":[7,3],"C-12":[12,6],"O-16":[16,8],"N-14":[14,7],"Ne-20":[20,10]};
 function rangeBK(part,e){const za=PZA[part];if(!za||!e)return NaN;return 0.022*Math.pow(e,1.77)*za[0]/(za[1]*za[1])}
-async function exLoad(force){if(EX.loaded&&!force){exRender();return}if(!INFO)await loadInfo();$("exCount").textContent="…";try{EX.items=(await api("/api/index"+scopeQ("exScope"))).items;EX.loaded=true}catch(e){$("exCount").textContent=t("error")+": "+e.message;return}exFillFilters();exRender()}
-function exFillFilters(){const fill=(id,vals,fmt)=>{const s=$(id),cur=s.value;s.innerHTML=`<option value="">${t("ex_all")}</option>`+vals.map(v=>`<option value="${esc(v)}">${esc(fmt?fmt(v):v)}</option>`).join("");s.value=vals.map(String).includes(cur)?cur:""};
+async function exLoad(force,quiet,again){again=again||0;if(EX.loaded&&!force&&!EX.dirty){exRender();return}if(!INFO)await loadInfo();const seq=++EX.seq;
+ if(!EX.items.length&&!quiet){const m=`<span class="spin"></span>${esc(t("loading_index"))}`;$("exCount").innerHTML=m;$("exBody").innerHTML=`<tr><td class="empty">${m}</td></tr>`}
+ let j;try{j=await api("/api/index"+scopeQ("exScope"))}catch(e){if(seq===EX.seq)$("exCount").textContent=t("error")+": "+e.message;return}
+ if(seq!==EX.seq)return;EX.items=j.items;EX.loaded=true;EX.dirty=false;exFillFilters();exRender();
+ if(j.stale&&again<3)setTimeout(()=>{if(isTab("explorer"))exLoad(true,true,again+1)},1500)}  // answered from an expired index that is being rebuilt
+function exFillFilters(){const fill=(id,vals,fmt)=>{const s=$(id),cur=s.value||recall(id)||"";s.innerHTML=`<option value="">${t("ex_all")}</option>`+vals.map(v=>`<option value="${esc(v)}">${esc(fmt?fmt(v):v)}</option>`).join("");s.value=vals.map(String).includes(cur)?cur:""};
  const uniq=a=>[...new Set(a.filter(v=>v!=null&&v!==""))];
  fill("exPart",uniq(EX.items.map(i=>i.particle)).sort());fill("exEn",uniq(EX.items.map(i=>i.energy)).sort((a,b)=>a-b));fill("exFolder",uniq(EX.items.map(i=>i.folder)).sort(),v=>v||"/");
  const cnt={};for(const i of EX.items)for(const tg of i.tags)cnt[tg]=(cnt[tg]||0)+1;
@@ -552,22 +762,34 @@ function exRender(){const all=exFiltered(),cols=exCols();let rows=exDerive(all.f
  $("exHead").innerHTML=`<tr><th></th>${cols.map(c=>`<th data-k="${esc(c.k)}" title="${esc(c.title||"")}" style="cursor:pointer">${esc(c.label)}${c.title?" ⓘ":""}${EX.sort.k===c.k?(EX.sort.d>0?" ▲":" ▼"):""}${c.err?` <span style="color:var(--err)">!</span>`:""}</th>`).join("")}</tr>`;
  $("exHead").querySelectorAll("th[data-k]").forEach(th=>th.onclick=()=>{EX.sort={k:th.dataset.k,d:EX.sort.k===th.dataset.k?-EX.sort.d:1};exRender()});
  const fmt=(x,n)=>x==null||Number.isNaN(x)?"":typeof x==="number"?(Math.abs(x)<0.5*Math.pow(10,-n)?0:x).toFixed(n):esc(x);
- $("exBody").innerHTML=rows.slice(0,2000).map((v,ri)=>`<tr data-p="${esc(v.path)}" class="${EX.sel.has(v.path)?"sel":""}" style="cursor:pointer"><td><input type="checkbox" ${EX.sel.has(v.path)?"checked":""} aria-label="${esc(v.name)}"></td>${cols.map(c=>{const x=exVal(v,c);
-   if(c.k==="name")return `<td title="${esc(v.path)}">${v.kind==="measured"?"● ":""}${esc(v.name)}${v.isRef?` <span class="mute">(${t("reference")})</span>`:""}</td>`;
+ const ed=esc(t("open_editor")),ncol=cols.length+1;
+ /* a few hundred rows render quickly; the rest come on demand, sorting and filters still see every row */
+ $("exBody").innerHTML=!rows.length?`<tr><td colspan="${ncol}" class="empty">${EX.items.length?`${esc(t("no_match"))}<br><button type="button" data-exclear="1">${esc(t("clear_filter"))}</button>`:esc(t("ex_empty"))}</td></tr>`:
+  rows.slice(0,EX.limit).map((v,ri)=>`<tr data-p="${esc(v.path)}" class="${EX.sel.has(v.path)?"sel":""}" style="cursor:pointer"><td><input type="checkbox" ${EX.sel.has(v.path)?"checked":""} aria-label="${esc(v.name)}"></td>${cols.map(c=>{const x=exVal(v,c);
+   if(c.k==="name")return `<td title="${esc(v.path)}">${v.kind==="measured"?"● ":""}${esc(v.name)}${v.isRef?` <span class="mute">(${t("reference")})</span>`:""}${v.param?`<a href="#" class="ed-link" data-edit="${esc(v.param)}" title="${ed}: ${esc(v.param)}" aria-label="${ed}">✎</a>`:""}</td>`;
    if(c.k==="folder")return `<td class="mute">${esc(v.folder||"/")}</td>`;
-   const dev=(c.k==="dev_bk"&&Math.abs(x)>3)?' style="color:var(--warn)"':"";return `<td class="${c.num?"metrics":""}"${dev}>${fmt(x,c.num||0)}</td>`}).join("")}</tr>`).join("");
+   const dev=(c.k==="dev_bk"&&Math.abs(x)>3)?' style="color:var(--warn)"':"";return `<td class="${c.num?"metrics":""}"${dev}>${fmt(x,c.num||0)}</td>`}).join("")}</tr>`).join("")+
+  (rows.length>EX.limit?`<tr class="more"><td colspan="${ncol}"><button type="button" data-exmore="1">${esc(t("show_more").replace("{n}",Math.min(500,rows.length-EX.limit)))}</button></td></tr>`:"");
  multiSelect($("exBody"),()=>{$("exBody").querySelectorAll("tr").forEach(tr=>{const c=tr.querySelector("input");c.checked?EX.sel.add(tr.dataset.p):EX.sel.delete(tr.dataset.p)});exCount()});
  EX.allCount=all.length;exCount();
  $("exLegend").innerHTML=`<b>${t("ex_legend")}</b> ΔR80 = R80 − R80<sub>ref</sub>; ${t("bpw_filter")} = √(BPW80² − BPW80²<sub>ref</sub>); R80 BK = 0.022 mm · E<sup>1.77</sup> · A/Z² (Bragg-Kleeman, ${t("f_bk_note")}); Δ BK = (R80 − R80 BK)/R80 BK. ${t("ex_ref_rule")}`;
  EX.imgs=all.filter(i=>i.kind==="image");$("exImgCount").textContent=`(${EX.imgs.length})`;
- $("exImgs").innerHTML=EX.imgs.slice(0,300).map((i,k)=>`<figure data-k="${k}"><img loading="lazy" alt="${esc(i.name)}" src="${fileUrl(i.path)}"><figcaption title="${esc(i.path)}">${esc(i.name)}</figcaption></figure>`).join("");
- $("exImgs").querySelectorAll("figure").forEach(f=>f.onclick=()=>lbOpen(+f.dataset.k));
+ const key=EX.imgs.slice(0,300).map(i=>i.path+"@"+i.mtime).join("|");   // typing in the search must not rebuild unchanged thumbnails
+ if(key!==EX.imgKey){EX.imgKey=key;$("exImgs").innerHTML=EX.imgs.slice(0,300).map((i,k)=>`<figure data-k="${k}"><img loading="lazy" alt="${esc(i.name)}" src="${fileUrl(i.path,i.mtime)}"><figcaption title="${esc(i.path)}">${esc(i.name)}</figcaption></figure>`).join("");
+  $("exImgs").querySelectorAll("figure").forEach(f=>f.onclick=()=>lbOpen(+f.dataset.k))}
  renderFormulaList()}
 function exCount(){$("exCount").textContent=`${EX.rows.length} ${t("ex_rows")} (${EX.allCount} ${t("ex_files")}), ${EX.sel.size} ${t("selected")}`}
-["exQ"].forEach(i=>$(i).oninput=exRender);["exKind","exPart","exEn","exFolder"].forEach(i=>$(i).onchange=exRender);$("exRef").oninput=exRender;
+/* filters are remembered per browser; the search re-renders after a short pause, not on every key */
+const EX_F=["exQ","exKind","exPart","exEn","exFolder","exRef"];
+for(const id of ["exQ","exKind","exRef"]){const v=recall(id);if(v!=null)$(id).value=v}
+const exFilter=()=>{EX.limit=300;EX_F.forEach(id=>store(id,$(id).value));exRender()};
+const exFilterSoon=debounce(exFilter,150);
+$("exQ").oninput=exFilterSoon;$("exRef").oninput=debounce(exFilter,300);["exKind","exPart","exEn","exFolder"].forEach(i=>$(i).onchange=exFilter);
+$("exBody").addEventListener("click",e=>{const el=e.target.closest("a[data-edit],button[data-exmore],button[data-exclear]");if(!el)return;e.preventDefault();
+ if(el.dataset.edit)openInEditor(el.dataset.edit);else if(el.dataset.exmore){EX.limit+=500;exRender()}else{["exQ","exKind","exPart","exEn","exFolder"].forEach(id=>{$(id).value="";store(id,"")});EX.tags.clear();exFillFilters();exFilter()}});
 $("exReload").onclick=()=>exLoad(true);
 $("exNone").onclick=()=>{EX.sel.clear();exRender()};
-$("exPlot").onclick=()=>{if(!EX.sel.size)return;RS.pick=[...EX.sel].filter(p=>EX.items.find(i=>i.path===p&&i.kind!=="image"));RS.zoom=null;showTab("results")};
+$("exPlot").onclick=()=>{if(!EX.sel.size){toast(t("nothing_selected"));return}plotPaths([...EX.sel].filter(p=>EX.items.find(i=>i.path===p&&i.kind!=="image")))};
 $("exCsv").onclick=()=>{const cols=EX.cols,q=v=>/[;"\n]/.test(v)?`"${String(v).replace(/"/g,'""')}"`:v;
  const lines=[["path"].concat(cols.slice(1).map(c=>c.label)).join(";")].concat(EX.rows.map(v=>[v.path].concat(cols.slice(1).map(c=>{const x=exVal(v,c);return x==null||Number.isNaN(x)?"":typeof x==="number"?String(+x.toPrecision(6)).replace(".",LANG==="de"?",":"."):x})).map(q).join(";")));
  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["﻿"+lines.join("\r\n")],{type:"text/csv"}));a.download="results_overview.csv";a.click()};
@@ -576,7 +798,7 @@ function renderFormulaList(){const fs=getFormulas();$("exFList").innerHTML=fs.ma
 $("exFAdd").onclick=()=>{const name=$("exFName").value.trim(),expr=$("exFExpr").value.trim();if(!name||!expr)return;try{compileFormula(expr)}catch(e){$("exFMsg").textContent=e.message;return}
  const fs=getFormulas().filter(f=>f.name!==name);fs.push({name,expr});setFormulas(fs);$("exFName").value="";$("exFExpr").value="";$("exFMsg").textContent="";exRender()};
 /* lightbox */
-function lbOpen(k){EX.lb=k;const i=EX.imgs[k];if(!i)return;$("lbImg").src=fileUrl(i.path);$("lbCap").textContent=`${i.path}  (${k+1}/${EX.imgs.length})`;$("lbDl").href=fileUrl(i.path)+"&dl=1";$("lbDl").setAttribute("download",i.name);$("lightbox").hidden=false;$("lbClose").focus()}
+function lbOpen(k){EX.lb=k;const i=EX.imgs[k];if(!i)return;$("lbImg").src=fileUrl(i.path,i.mtime);$("lbCap").textContent=`${i.path}  (${k+1}/${EX.imgs.length})`;$("lbDl").href=fileUrl(i.path)+"&dl=1";$("lbDl").setAttribute("download",i.name);$("lightbox").hidden=false;$("lbClose").focus()}
 function lbClose(){$("lightbox").hidden=true}
 $("lbPrev").onclick=()=>lbOpen((EX.lb-1+EX.imgs.length)%EX.imgs.length);$("lbNext").onclick=()=>lbOpen((EX.lb+1)%EX.imgs.length);$("lbClose").onclick=lbClose;
 $("lightbox").onclick=e=>{if(e.target.id==="lightbox")lbClose()};
@@ -627,8 +849,8 @@ const VIEW_CTL=["plNorm","plMode","plX","plStat"],VIEW_CHK=["plLog","plBragg"];
 $("plViewSave").onclick=async()=>{const name=($("plViewName").value||$("plView").value).trim();if(!name||!RS.pick.length){plMsg(t("view_need"));return}
  const v={name,pick:RS.pick,ref:RS.ref,zoom:RS.zoom,saved:new Date().toISOString().slice(0,16)};VIEW_CTL.forEach(i=>v[i]=$(i).value);VIEW_CHK.forEach(i=>v[i]=$(i).checked);
  VIEWS=VIEWS.filter(x=>x.name!==name).concat([v]).sort((a,b)=>natCmp(a.name,b.name));await api("/api/views",{views:VIEWS});await loadViews();$("plView").value=name;$("plViewName").value="";plMsg(t("saved"))};
-$("plViewDel").onclick=async()=>{const name=$("plView").value;if(!name)return;VIEWS=VIEWS.filter(x=>x.name!==name);await api("/api/views",{views:VIEWS});await loadViews()};
-$("plView").onchange=async()=>{const v=VIEWS.find(x=>x.name===$("plView").value);if(!v)return;RS.pick=[...v.pick];RS.ref=v.ref;VIEW_CTL.forEach(i=>{if(v[i]!=null)$(i).value=v[i]});VIEW_CHK.forEach(i=>{if(v[i]!=null)$(i).checked=v[i]});
+armed($("plViewDel"),async()=>{const name=$("plView").value;if(!name)return;VIEWS=VIEWS.filter(x=>x.name!==name);await api("/api/views",{views:VIEWS});await loadViews()});
+$("plView").onchange=async()=>{const v=VIEWS.find(x=>x.name===$("plView").value);if(!v)return;RS.pick=[...v.pick];savePick();RS.ref=v.ref;VIEW_CTL.forEach(i=>{if(v[i]!=null)$(i).value=v[i]});VIEW_CHK.forEach(i=>{if(v[i]!=null)$(i).checked=v[i]});
  await loadPlot();RS.zoom=v.zoom||null;drawPlot();resLoad(RS.path)};
 /* ---------- notifications */
 const NOTE={prev:null};
@@ -650,32 +872,41 @@ $("fmVar").onclick=()=>{const box=$("varBox");box.hidden=!box.hidden;if(box.hidd
 async function variants(preview,run){const vals=$("varValues").value.split(/[,;]/).map(x=>x.trim()).filter(Boolean);if(!vals.length||!FM.file)return;
  try{const j=await api("/api/variants",{src:FM.file,param:$("varParam").value,values:vals,pattern:$("varPattern").value.trim()||"{name}_{value}",preview,overwrite:$("varOver").checked});
   if(preview){$("varOut").textContent=j.names.join("\n")+"\n\n"+j.example}else{$("varOut").textContent=`${j.written.length} ${t("created")}, ${j.skipped.length} ${t("skipped")}\n`+j.written.join("\n");await fmLoad(FM.path);NAMES.loaded=false;
-   if(run&&j.written.length){RF.preselect=j.written;showTab("run")}}}catch(e){$("varOut").textContent=t("error")+": "+e.message}}
+   if(run&&j.written.length)goRunsWith(j.written)}}catch(e){$("varOut").textContent=t("error")+": "+e.message}}
 $("varPrev").onclick=()=>variants(true,false);$("varMake").onclick=()=>variants(false,false);$("varRun").onclick=()=>variants(false,true);
 
 /* ---------- results */
-const RS={path:"",pick:[],data:{},last:null,zoom:null,ref:null,view:null};
+const RS={path:recall("res_path")||"",pick:[],data:{},last:null,zoom:null,ref:null,view:null,items:[],cache:new Map(),gen:0,seq:0};
+try{const v=JSON.parse(recall("pick")||"[]");if(Array.isArray(v))RS.pick=v.filter(x=>typeof x==="string").slice(0,200)}catch(e){}
+/* the plot selection survives reloads and is part of the address, so a plot can be bookmarked or reopened with Back */
+function savePick(){store("pick",JSON.stringify(RS.pick.slice(0,200)));if(isTab("results"))syncHash(false)}
 const DATAEXT=/\.(csv|mcc|asc|dat|tsv)$/i;
-async function resLoad(p){const j=await api("/api/ls?p="+encodeURIComponent(p));RS.path=j.path;crumbs($("resCrumbs"),j.path,resLoad);
- const f=$("resFilter").value.toLowerCase();const dirs=j.items.filter(i=>i.dir),csvs=j.items.filter(i=>!i.dir&&DATAEXT.test(i.name)&&i.name.toLowerCase().includes(f));
- const up=j.path?`<tr data-up="1"><td></td><td colspan="2"><a href="#">..</a></td></tr>`:"";
+async function resLoad(p){let j;try{j=await api("/api/ls?p="+encodeURIComponent(p))}catch(e){if(p)return resLoad("");toast(t("error")+": "+e.message,"err");return}
+ RS.path=j.path;store("res_path",j.path);RS.items=j.items;crumbs($("resCrumbs"),j.path,resLoad);renderResList();loadPlot()}
+/* filtering works on the listing already loaded: no new request and no reloading of the plotted curves */
+function renderResList(){const p=RS.path,f=$("resFilter").value.toLowerCase();const dirs=RS.items.filter(i=>i.dir),csvs=RS.items.filter(i=>!i.dir&&DATAEXT.test(i.name)&&i.name.toLowerCase().includes(f));
+ const up=p?`<tr data-up="1"><td></td><td colspan="2"><a href="#">..</a></td></tr>`:"";
  $("resBody").innerHTML=up+dirs.map(i=>`<tr data-dir="${esc(i.name)}" style="cursor:pointer"><td></td><td>📁 ${esc(i.name)}</td><td></td></tr>`).join("")+
-  csvs.map(i=>{const full=join(j.path,i.name);return `<tr style="cursor:pointer"><td><input type="checkbox" class="rsc" value="${esc(full)}" ${RS.pick.includes(full)?"checked":""} aria-label="${esc(i.name)}"></td><td>${esc(i.name)}</td><td class="mute">${fmtTime(i.mtime)}</td></tr>`}).join("");
- $("resBody").querySelectorAll("tr[data-up]").forEach(tr=>tr.onclick=()=>resLoad(j.path.split("/").slice(0,-1).join("/")));
- $("resBody").querySelectorAll("tr[data-dir]").forEach(tr=>tr.ondblclick=tr.onclick=()=>resLoad(join(j.path,tr.dataset.dir)));
+  csvs.map(i=>{const full=join(p,i.name);return `<tr style="cursor:pointer"><td><input type="checkbox" class="rsc" value="${esc(full)}" ${RS.pick.includes(full)?"checked":""} aria-label="${esc(i.name)}"></td><td>${esc(i.name)}</td><td class="mute">${fmtTime(i.mtime)}</td></tr>`}).join("");
+ $("resBody").querySelectorAll("tr[data-up]").forEach(tr=>tr.onclick=e=>{e.preventDefault();resLoad(p.split("/").slice(0,-1).join("/"))});
+ $("resBody").querySelectorAll("tr[data-dir]").forEach(tr=>tr.ondblclick=tr.onclick=()=>resLoad(join(p,tr.dataset.dir)));
  $("resBody").querySelectorAll(".rsc:checked").forEach(c=>c.closest("tr").classList.add("sel"));
  multiSelect($("resBody"),()=>{const boxes=[...document.querySelectorAll(".rsc")];const here=new Set(boxes.map(b=>b.value));
-  RS.pick=RS.pick.filter(p=>!here.has(p)||boxes.find(b=>b.value===p).checked);boxes.forEach(b=>{if(b.checked&&!RS.pick.includes(b.value))RS.pick.push(b.value)});loadPlot()});
- const imgs=j.items.filter(i=>/\.(png|jpg|svg)$/i.test(i.name)&&i.name.toLowerCase().includes(f));
- $("resImgs").innerHTML=imgs.map(i=>`<figure style="margin:0"><img loading="lazy" alt="${esc(i.name)}" src="${fileUrl(join(j.path,i.name))}"><figcaption class="mute">${esc(i.name)}</figcaption></figure>`).join("");
- loadPlot();}
-$("resFilter").oninput=()=>resLoad(RS.path);
-$("resAll").onclick=()=>{document.querySelectorAll(".rsc").forEach(c=>{if(!c.checked){c.checked=true;c.closest("tr").classList.add("sel");if(!RS.pick.includes(c.value))RS.pick.push(c.value)}});loadPlot()};
-$("resNone").onclick=()=>{const here=new Set([...document.querySelectorAll(".rsc")].map(c=>{c.checked=false;c.closest("tr").classList.remove("sel");return c.value}));RS.pick=RS.pick.filter(p=>!here.has(p));loadPlot()};
-$("plClear").onclick=()=>{RS.pick=[];RS.zoom=null;document.querySelectorAll(".rsc").forEach(c=>c.checked=false);loadPlot()};
-async function loadPlot(){renderPicked();if(!RS.pick.length){RS.last=null;clearPlot();return}
- const stat=$("plStat").value||0,col=$("plCollapse").value,scan=$("plScan").value||0;const data={};
- await Promise.all(RS.pick.map(async p=>{try{data[p]=await api(`/api/csv?p=${encodeURIComponent(p)}&stat=${stat}&collapse=${col}&scan=${scan}`)}catch(e){data[p]={error:e.message}}}));
+  RS.pick=RS.pick.filter(x=>!here.has(x)||boxes.find(b=>b.value===x).checked);boxes.forEach(b=>{if(b.checked&&!RS.pick.includes(b.value))RS.pick.push(b.value)});savePick();loadPlot()});
+ const imgs=RS.items.filter(i=>/\.(png|jpg|svg)$/i.test(i.name)&&i.name.toLowerCase().includes(f));
+ $("resImgs").innerHTML=imgs.map(i=>`<figure style="margin:0"><img loading="lazy" alt="${esc(i.name)}" src="${fileUrl(join(p,i.name),i.mtime)}"><figcaption class="mute">${esc(i.name)}</figcaption></figure>`).join("")}
+$("resFilter").oninput=debounce(renderResList,150);
+$("resReload").onclick=()=>{RS.gen++;resLoad(RS.path)};
+$("resAll").onclick=()=>{document.querySelectorAll(".rsc").forEach(c=>{if(!c.checked){c.checked=true;c.closest("tr").classList.add("sel");if(!RS.pick.includes(c.value))RS.pick.push(c.value)}});savePick();loadPlot()};
+$("resNone").onclick=()=>{const here=new Set([...document.querySelectorAll(".rsc")].map(c=>{c.checked=false;c.closest("tr").classList.remove("sel");return c.value}));RS.pick=RS.pick.filter(p=>!here.has(p));savePick();loadPlot()};
+$("plClear").onclick=()=>{RS.pick=[];RS.zoom=null;document.querySelectorAll(".rsc").forEach(c=>{c.checked=false;c.closest("tr").classList.remove("sel")});savePick();loadPlot()};
+async function loadPlot(){renderPicked();$("plEmpty").hidden=RS.pick.length>0;if(!RS.pick.length){RS.last=null;RS.data={};clearPlot();return}
+ const stat=$("plStat").value||0,col=$("plCollapse").value,scan=$("plScan").value||0,seq=++RS.seq,data={};
+ /* curves fetched with the same settings come from memory; a finished run or the reload button starts over (RS.gen) */
+ const key=p=>`${RS.gen}|${stat}|${col}|${scan}|${p}`;
+ await Promise.all(RS.pick.map(async p=>{const k=key(p);if(RS.cache.has(k)){data[p]=RS.cache.get(k);return}
+  try{data[p]=await api(`/api/csv?p=${encodeURIComponent(p)}&stat=${stat}&collapse=${col}&scan=${scan}`);RS.cache.set(k,data[p])}catch(e){data[p]={error:e.message}}}));
+ if(seq!==RS.seq)return;if(RS.cache.size>400)RS.cache.clear();
  RS.data={};for(const p of RS.pick)RS.data[p]=data[p];
  const first=Object.values(RS.data).find(d=>!d.error&&!d.measured)||Object.values(RS.data).find(d=>!d.error);
  if(first){const s=$("plStat"),cur=s.value;s.innerHTML="";first.stats.forEach((n,i)=>s.add(new Option(n,i)));s.value=cur||0;$("plCollapseL").hidden=!(first.mode==="2d"&&first.dims.every(d=>d.n>1))}
@@ -782,15 +1013,19 @@ function renderGen(){const g=GENS.find(x=>x.id===$("genSel").value);if(!g){$("ge
 $("genSel").onchange=renderGen;
 function genValues(){const g=GENS.find(x=>x.id===$("genSel").value),v={};for(const f of g.fields){const id="gf_"+f.key;
  if(f.type==="multi")v[f.key]=[...document.querySelectorAll(`input[name="${id}"]:checked`)].map(e=>e.value);else if(f.type==="bool")v[f.key]=$(id).checked;else if(f.type==="number")v[f.key]=parseFloat($(id).value.replace(",","."));else v[f.key]=$(id).value}return v}
-async function gen(preview){store("genFolder",$("genFolder").value);try{const j=await api("/api/generate",{id:$("genSel").value,values:genValues(),folder:$("genFolder").value.trim(),overwrite:$("genOver").checked,preview});
+async function gen(preview){store("genFolder",$("genFolder").value);$("genToRuns").hidden=true;const folder=$("genFolder").value.trim().replace(/^\/+|\/+$/g,"");
+ try{const j=await api("/api/generate",{id:$("genSel").value,values:genValues(),folder,overwrite:$("genOver").checked,preview});
  if(preview){$("genOut").textContent=j.names.join("  ")+"\n\n"+j.example;$("genMsg").textContent=`${j.names.length} ${LANG==="de"?"Dateien":"files"}`}
- else{$("genMsg").textContent=`${j.written.length} ${t("created")}, ${j.skipped.length} ${t("skipped")}`;$("genOut").textContent=j.written.join("\n")}}catch(e){$("genMsg").textContent=t("error")+": "+e.message}}
+ else{$("genMsg").textContent=`${j.written.length} ${t("created")}, ${j.skipped.length} ${t("skipped")}`;$("genOut").textContent=j.written.join("\n");
+  /* the usual next step: select the new cases in Runs (skipped ones too, they may not have run yet) */
+  const cases=j.written.concat(j.skipped).filter(n=>n.endsWith(".txt")).map(n=>join(folder,n));
+  if(cases.length){const b=$("genToRuns");b.hidden=false;b.textContent=t("gen_to_runs").replace("{n}",cases.length);b.onclick=()=>goRunsWith(cases,folder)}}}catch(e){$("genMsg").textContent=t("error")+": "+e.message}}
 $("genPrev").onclick=()=>gen(true);$("genMake").onclick=()=>gen(false);
 
 /* ---------- settings */
-async function loadSettings(){await loadInfo();const inc=new Set(INFO.cfg.include||[]);
+async function loadSettings(){await loadInfo(true);const inc=new Set(INFO.cfg.include||[]);
  $("incBox").innerHTML=(INFO.folders||[]).map(f=>`<label><input type="checkbox" value="${esc(f)}" ${inc.has(f)?"checked":""}> ${esc(f)}</label>`).join("")||`<span class="mute">–</span>`;
- $("excBox").value=(INFO.cfg.exclude||INFO.default_exclude).join("\n");$("setToast").checked=INFO.cfg.toast!==false;$("setAwake").checked=INFO.cfg.keep_awake!==false;$("setRoot").textContent=INFO.root;$("ver").textContent=INFO.version;renderBins(INFO.cfg.binaries)}
+ $("excBox").value=(INFO.cfg.exclude||INFO.default_exclude).join("\n");$("setToast").checked=INFO.cfg.toast!==false;$("setAwake").checked=INFO.cfg.keep_awake!==false;$("setDisplay").checked=INFO.cfg.keep_display===true;$("setRoot").textContent=INFO.root;$("ver").textContent=INFO.version;renderBins(INFO.cfg.binaries)}
 function renderBins(bins){$("binList").innerHTML=bins.map((b,i)=>`<div class="card" style="margin-bottom:10px" data-i="${i}"><div class="grid2">
  <label>${t("bin_name")}<input class="bn" value="${esc(b.name)}"></label><label>${t("bin_cmd")}<input class="bc" value="${esc(b.cmd)}"></label>
  <label style="grid-column:1/-1">${t("bin_env")}<textarea class="be" style="min-height:60px">${esc(Object.entries(b.env||{}).map(([k,v])=>k+"="+v).join("\n"))}</textarea></label></div>
@@ -799,14 +1034,15 @@ function renderBins(bins){$("binList").innerHTML=bins.map((b,i)=>`<div class="ca
 function readBins(){return [...$("binList").querySelectorAll("[data-i]")].map(d=>({name:d.querySelector(".bn").value.trim(),cmd:d.querySelector(".bc").value.trim(),
  env:Object.fromEntries(d.querySelector(".be").value.split("\n").map(l=>l.trim()).filter(l=>l.includes("=")).map(l=>[l.slice(0,l.indexOf("=")).trim(),l.slice(l.indexOf("=")+1).trim()]))}))}
 $("scanSave").onclick=async()=>{const include=[...$("incBox").querySelectorAll("input:checked")].map(c=>c.value),exclude=$("excBox").value.split("\n").map(x=>x.trim()).filter(Boolean);
- try{await api("/api/config",{include,exclude});$("scanMsg").textContent=t("saved");RF.files=[];NAMES.loaded=false;EX.loaded=false}catch(e){$("scanMsg").textContent=t("error")+": "+e.message}};
-$("setAwake").onchange=e=>api("/api/config",{keep_awake:e.target.checked}).then(refreshJobs);
+ try{await api("/api/config",{include,exclude});$("scanMsg").textContent=t("saved");RF.files=[];RF.loaded=false;NAMES.loaded=false;EX.loaded=false;EX.items=[];INFO_AT=0}catch(e){$("scanMsg").textContent=t("error")+": "+e.message}};
+$("setAwake").onchange=e=>api("/api/config",{keep_awake:e.target.checked}).then(()=>poll());
+$("setDisplay").onchange=e=>api("/api/config",{keep_display:e.target.checked}).then(()=>poll());
 $("binAdd").onclick=()=>renderBins(readBins().concat([{name:"",cmd:"",env:{}}]));
 $("binDetect").onclick=()=>{const have=readBins();for(const d of INFO.detected)if(!have.some(b=>b.cmd===d.cmd))have.push(d);renderBins(have)};
 $("binSave").onclick=async()=>{try{await api("/api/config",{binaries:readBins()});$("binMsg").textContent=t("saved");await loadInfo()}catch(e){$("binMsg").textContent=t("error")+": "+e.message}};
 
 /* ---------- start */
-applyI18n();showTab(recall("tab")||"files");refreshJobs();
+applyI18n();if(!routeFromHash())showTab(recall("tab")||"files",{replace:true});poll();
 </script>
 </body>
 </html>

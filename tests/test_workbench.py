@@ -1,4 +1,4 @@
-import importlib.util, json, os, struct, threading, urllib.request, urllib.error
+import importlib.util, json, os, struct, threading, time, urllib.request, urllib.error
 from http.server import ThreadingHTTPServer
 
 import pytest
@@ -269,7 +269,12 @@ def test_keep_awake_wsl_command(ws, monkeypatch):
     import base64
     script = base64.b64decode(calls[0][-1]).decode("utf-16-le")
     assert calls[0][0] == "powershell.exe" and "SetThreadExecutionState(0x80000001)" in script and "keepawake.flag" in script
+    assert "PowerCreateRequest" in script and "foreach($t in 1,3)" in script
     assert (ws / ".workbench" / "keepawake.flag").exists()
+    k.start(display=True)   # switching the option restarts the helper with the display request
+    script = base64.b64decode(calls[-1][-1]).decode("utf-16-le")
+    assert len(calls) == 2 and "foreach($t in 0,1,3)" in script and "SetThreadExecutionState(0x80000003)" in script
+    assert k.status()["method"] == "Windows power request, display on"
     k.stop()
     assert not (ws / ".workbench" / "keepawake.flag").exists()
 
@@ -340,3 +345,151 @@ def test_scope_per_tab(ws):
         wb.scope_dir("missing")
     with pytest.raises(Exception):
         wb.scope_dir("../x")
+
+
+def test_list_folders_nested(ws):
+    for d in ("workspace/plan_peaks/spot_dist", "workspace/ba_rifi", "_to_delete/x", ".hidden"):
+        (ws / d).mkdir(parents=True, exist_ok=True)
+    f = wb.list_folders()
+    assert "workspace/plan_peaks" in f and "workspace/plan_peaks/spot_dist" in f
+    assert not any(x.startswith("_to_delete") or x.startswith(".") for x in f)
+    assert wb.list_param_files("workspace/plan_peaks") == []
+
+
+# ------------------------------------------------------------------ caching and responsiveness
+PARAM = 's:Ge/X/Type = "TsBox"\n'
+
+
+class ReadCounter:
+    """Wraps a file object and counts the characters handed out by read()."""
+    total = 0
+    def __init__(self, fh): self.fh = fh
+    def read(self, *a):
+        s = self.fh.read(*a); ReadCounter.total += len(s); return s
+    def __enter__(self): return self
+    def __exit__(self, *a): self.fh.close()
+    def __getattr__(self, k): return getattr(self.fh, k)
+
+
+def test_file_info_reads_only_the_start_of_other_text(ws, monkeypatch):
+    (ws / "dump.txt").write_text("0.1 0.2 0.3\n" * 200000)   # a 2.4 MB text export, not a parameter file
+    (ws / "case.txt").write_text(PARAM + "# padding\n" * 20000 + 's:Sc/A/OutputFile = "late"\n')
+    ReadCounter.total = 0
+    monkeypatch.setattr(wb, "open", lambda *a, **k: ReadCounter(open(*a, **k)), raising=False)
+    assert wb.file_info(str(ws / "dump.txt"))["param"] is False
+    assert ReadCounter.total <= wb.TXT_HEAD
+    assert wb.file_info(str(ws / "case.txt"))["outs"] == ["late"]   # parameter files are still read to the end
+
+
+def test_parsed_facts_survive_a_restart(ws, monkeypatch):
+    (ws / "c").mkdir()
+    for k in range(3): (ws / "c" / f"case{k}.txt").write_text(PARAM + f's:Sc/A/OutputFile = "o{k}"\n')
+    assert len(wb.list_params()["files"]) == 3
+    with open(ws / ".workbench" / "index.json") as fh: assert json.load(fh)["v"] == 4
+    wb._PC["root"] = None; wb.invalidate_cache()   # what a new process sees
+    opened = []
+    monkeypatch.setattr(wb, "open", lambda f, *a, **k: (opened.append(str(f)), open(f, *a, **k))[1], raising=False)
+    assert len(wb.list_params()["files"]) == 3
+    assert [f for f in opened if f.endswith(".txt")] == []
+
+
+def test_soft_invalidation_answers_from_the_old_walk_and_refreshes(ws):
+    (ws / "a.txt").write_text(PARAM); wb.invalidate_cache()
+    assert wb.list_params()["files"] == ["a.txt"]
+    (ws / "b.txt").write_text(PARAM)               # e.g. written by a run
+    wb.invalidate_cache(soft=True)                 # what a finished job does
+    r = wb.list_params()
+    assert r["stale"] and r["files"] == ["a.txt"]  # answered at once
+    deadline = time.time() + 5
+    while wb._BG and time.time() < deadline: time.sleep(0.01)
+    r = wb.list_params()
+    assert r["files"] == ["a.txt", "b.txt"] and not r["stale"]
+
+
+def test_soft_invalidation_of_the_index(ws):
+    (ws / "a.png").write_bytes(b"x")
+    assert [i["name"] for i in wb.index_for_request("")[0]] == ["a.png"]
+    (ws / "b.png").write_bytes(b"x")
+    wb.invalidate_cache(soft=True)
+    items, stale = wb.index_for_request("")
+    assert stale and [i["name"] for i in items] == ["a.png"]
+    deadline = time.time() + 5
+    while wb._BG and time.time() < deadline: time.sleep(0.01)
+    items, stale = wb.index_for_request("")
+    assert not stale and [i["name"] for i in items] == ["a.png", "b.png"]
+
+
+def test_scoped_walk_cut_from_the_full_walk_matches_its_own_walk(ws):
+    for d in ("a/x", "a/y", "b"):
+        (ws / d).mkdir(parents=True); (ws / d / "c.txt").write_text(PARAM)
+    (ws / "a" / "top.txt").write_text(PARAM)
+    wb.STATE["cfg"]["exclude"] = ["y"]
+    wb.invalidate_cache(); own = wb.list_param_files("a")
+    wb.invalidate_cache(); wb.list_param_files(""); cut = wb.list_param_files("a")
+    assert own == cut == ["a/top.txt", "a/x/c.txt"]
+
+
+def test_walk_skips_links_that_leave_the_workspace(ws, tmp_path_factory):
+    outside = tmp_path_factory.mktemp("outside")
+    (outside / "secret.txt").write_text(PARAM + 's:Sc/A/OutputFile = "x"\n')
+    os.symlink(outside / "secret.txt", ws / "link.txt")
+    (ws / "real.txt").write_text(PARAM)
+    os.symlink(ws / "real.txt", ws / "inner.txt")
+    wb.invalidate_cache()
+    assert wb.list_param_files() == ["inner.txt", "real.txt"]
+
+
+def test_index_classifies_maps_from_the_header_alone(ws):
+    (ws / "m").mkdir()
+    head = "# X in 2 bins of 1 cm\n# Y in 2 bins of 1 cm\n# Z in 2 bins  of 1 cm\n# DoseToMedium ( Gy ) : Sum\n"
+    (ws / "m" / "d3.csv").write_text(head + "rows of a 3D grid are not needed for the index\n")
+    item = wb.build_index()[0]
+    assert item["kind"] == "data" and item["mode"] == "2d" and item["quantity"] == "DoseToMedium ( Gy )"
+
+
+def test_ws_path_is_lexical_but_confined(ws):
+    assert wb.ws_path("a/b.txt") == os.path.join(os.path.realpath(ws), "a", "b.txt")
+    for bad in ("..", "../x", "a/../../x", "/etc/passwd"):
+        with pytest.raises(ValueError):
+            wb.ws_path(bad)
+
+
+def test_prewarm_fills_the_caches(ws):
+    (ws / "a.txt").write_text(PARAM); wb.invalidate_cache()
+    wb.prewarm()
+    assert wb._WALKS[""]["params"]["files"] == ["a.txt"] and wb.list_folders() == []
+
+
+def test_http_write_is_visible_in_the_next_answer(srv, ws):
+    (ws / "a.txt").write_text(PARAM)
+    assert call(srv + "/api/params")[1]["files"] == ["a.txt"]
+    assert call(srv + "/api/write", {"p": "b.txt", "text": PARAM})[0] == 200
+    r = call(srv + "/api/params")[1]
+    assert r["files"] == ["a.txt", "b.txt"] and not r["stale"]
+
+
+def test_http_jobs_history_window_and_dequeue_all(srv, ws):
+    wb.STATE["jobs"] = ([{"id": i, "file": "a.txt", "binary": "t", "status": "done"} for i in range(1, 51)] +
+                        [{"id": i, "file": "a.txt", "binary": "t", "status": "queued"} for i in range(51, 301)])
+    code, r = call(srv + "/api/jobs?hist=5")
+    assert code == 200 and len(r["jobs"]) == 255 and r["finished"] == 50
+    assert r["counts"] == {"done": 50, "queued": 250} and [j["id"] for j in r["jobs"][:6]] == [46, 47, 48, 49, 50, 51]
+    rev = r["rev"]
+    assert call(srv + "/api/dequeue", {"all": True})[1]["removed"] == 250
+    r = call(srv + "/api/jobs?hist=0")[1]
+    assert r["jobs"] == [] and r["counts"] == {"done": 50, "removed": 250} and r["rev"] > rev
+
+
+def test_http_outputs_of_a_case(srv, ws):
+    (ws / "c" / "out").mkdir(parents=True)
+    (ws / "c" / "case.txt").write_text(PARAM + 's:Sc/A/OutputFile = "IDD"\n')
+    for f in ("out/IDD.csv", "IDD.csv", "out/IDD.bin", "out/other.csv"): (ws / "c" / f).write_text("x")
+    r = call(srv + "/api/outputs", {"files": ["c/case.txt", "../x.txt"]})[1]["outputs"]
+    assert r == {"c/case.txt": ["c/IDD.csv", "c/out/IDD.csv"], "../x.txt": []}
+
+
+def test_http_file_cache_header(srv, ws):
+    (ws / "a.png").write_bytes(b"\x89PNG")
+    def cache_control(q):
+        with urllib.request.urlopen(srv + "/file?p=a.png&token=" + wb.TOKEN + q) as r: return r.headers["Cache-Control"]
+    assert cache_control("") == "no-store" and cache_control("&v=1730000000.5").startswith("private")

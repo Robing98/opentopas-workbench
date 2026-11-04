@@ -19,7 +19,7 @@ TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
 TEXT_EXT = {".txt", ".py", ".sh", ".bat", ".json", ".csv", ".md", ".log", ".in", ".mac", ".xml", ".header", ".binheader", ".mcc", ".asc", ".dat", ".tsv"}
 TRASH = "_trash"
 TOKEN = secrets.token_urlsafe(24)
-STATE = {"root": None, "cfg": {}, "lock": threading.Lock(), "jobs": [], "proc": None, "stop": False, "next_id": 1}
+STATE = {"root": None, "cfg": {}, "lock": threading.Lock(), "jobs": [], "proc": None, "stop": False, "next_id": 1, "rev": 0}
 
 # ------------------------------------------------------------------ config
 def wb_dir(): return os.path.join(STATE["root"], ".workbench")
@@ -40,6 +40,15 @@ def detect_binaries():
     if p and p not in [b["cmd"] for b in found]:
         found.append({"name": "topas (PATH)", "cmd": p, "env": {}, "subdir": ""})
     return found
+
+
+_DETECTED = {"t": 0.0, "found": []}
+
+
+def detected_binaries():
+    """detect_binaries() at most once a minute: shutil.which walks PATH, which under WSL includes many slow /mnt/c folders."""
+    if time.time() - _DETECTED["t"] > 60: _DETECTED.update(t=time.time(), found=detect_binaries())
+    return _DETECTED["found"]
 
 
 def load_cfg():
@@ -68,6 +77,7 @@ def load_jobs():
 
 
 def save_jobs():
+    STATE["rev"] += 1   # lets the page skip re-rendering the queue when nothing changed
     os.makedirs(wb_dir(), exist_ok=True)
     with open(os.path.join(wb_dir(), "jobs.json"), "w") as fh: json.dump(STATE["jobs"][-500:], fh, indent=0)
 
@@ -88,8 +98,26 @@ def root_real():
     return _ROOT_REAL[r]
 
 
+def ws_path(rel):
+    """Absolute path for a workspace path the workbench produced itself (walk results, job records checked at enqueue).
+    Only a lexical check: realpath stats every path component, about a millisecond each on WSL /mnt/c, which adds up
+    to seconds for a few hundred cases. Paths from requests always go through resolve()."""
+    root = root_real()
+    p = os.path.normpath(os.path.join(root, rel or ""))
+    if p != root and not p.startswith(root + os.sep): raise ValueError("path outside workspace")
+    return p
+
+
+def inside_ws(path):
+    """True if a symlink found during a walk points into the workspace."""
+    try: resolve(relp(path)); return True
+    except ValueError: return False
+
+
 def relp(p):
-    r = os.path.relpath(p, root_real()).replace(os.sep, "/")
+    root = root_real()
+    if p.startswith(root + os.sep): return p[len(root) + 1:].replace(os.sep, "/")   # the common case, no syscalls
+    r = os.path.relpath(p, root).replace(os.sep, "/")
     return "" if r == "." else r
 
 
@@ -170,19 +198,14 @@ def total_histories(text):
 
 
 ENERGY_TOTAL_RE = re.compile(r"^\s*d:So/[^/]+/BeamEnergy\s*=\s*([\d.eE+\-]+)\s*(\w+)", re.M)
-_SIZE_CACHE = {}
+UNIT_MEV = {"eV": 1e-6, "keV": 1e-3, "MeV": 1, "GeV": 1e3}
 
 
-def job_size(path):
-    """(histories, total beam energy in MeV) of a parameter file, cached by modification time."""
-    try: key = (path, os.path.getmtime(path))
-    except OSError: return None, None
-    if key not in _SIZE_CACHE:
-        with open(path, errors="replace") as fh: text = fh.read()
-        m = ENERGY_TOTAL_RE.search(text)
-        e = float(m.group(1)) * {"eV": 1e-6, "keV": 1e-3, "MeV": 1, "GeV": 1e3}.get(m.group(2), 1) if m else None
-        _SIZE_CACHE[key] = (total_histories(text), e)
-    return _SIZE_CACHE[key]
+def job_size(path, max_age=10.0):
+    """(histories, total beam energy in MeV) of a parameter file. The queue estimate asks for every waiting job on each
+    poll, so a file checked within max_age seconds is not stat'ed again."""
+    info = file_info(path, max_age=max_age)
+    return (info["hist"], info["etot"]) if info else (None, None)
 
 
 LIVE = {}   # job id -> {"samples": [(time, histories)], "cpu": (time, ticks)}
@@ -224,7 +247,7 @@ def log_state(path):
 def live_info(job):
     """Live status of the running job: phase, histories per second, CPU cores in use, memory, last log line."""
     now = time.time(); L = LIVE.setdefault(job["id"], {"samples": [], "cpu": None})
-    phase, last = log_state(resolve(job["log"])) if job.get("log") else ("init", "")
+    phase, last = log_state(ws_path(job["log"])) if job.get("log") else ("init", "")
     info = {"phase": phase, "last": last, "elapsed": round(now - job.get("t0", now))}
     done = job.get("done")
     if done is not None and (not L["samples"] or L["samples"][-1][1] != done): L["samples"].append((now, done))
@@ -256,7 +279,7 @@ def queue_estimate(jobs):
         if not done: continue
         for j in done:  # jobs from before this version have no energy recorded
             if "energy" not in j:
-                try: j["energy"] = job_size(resolve(j["file"]))[1]
+                try: j["energy"] = job_size(ws_path(j["file"]))[1]
                 except ValueError: j["energy"] = None
         pe = sorted(j["seconds"] / (j["total"] * j["energy"]) for j in done if j.get("energy"))
         ph = sorted(j["seconds"] / j["total"] for j in done)
@@ -268,7 +291,7 @@ def queue_estimate(jobs):
             continue
         if j["status"] == "running" and j.get("eta") is not None:
             total += j["eta"]; continue
-        try: n, e = job_size(resolve(j["file"]))
+        try: n, e = job_size(ws_path(j["file"]))
         except ValueError: n, e = None, None
         if not n: unknown += 1; continue
         rate_e, rate_h = est[j["binary"]]
@@ -319,13 +342,15 @@ def scorer_outputs(text):
 
 # ------------------------------------------------------------------ job queue
 class KeepAwake:
-    """Blocks system sleep while jobs are queued or running (not the display).
+    """Blocks system sleep while jobs are queued or running, optionally also display power-off.
 
-    WSL: a hidden PowerShell calls SetThreadExecutionState and exits once a heartbeat file in .workbench gets stale.
-    macOS: caffeinate -i bound to this process. Linux: systemd-inhibit bound to this process."""
+    WSL: a hidden PowerShell holds power requests (system and execution required, display required on request) plus
+    SetThreadExecutionState, and exits once a heartbeat file in .workbench gets stale. On laptops with Modern Standby,
+    Windows may still enter standby once the display is off or the session is locked; keeping the display on avoids that.
+    macOS: caffeinate bound to this process. Linux: systemd-inhibit bound to this process."""
 
     def __init__(self):
-        self.proc, self.flag, self.method, self.error, self.last = None, None, None, None, 0
+        self.proc, self.flag, self.method, self.error, self.last, self.display = None, None, None, None, 0, False
 
     @staticmethod
     def platform():
@@ -348,34 +373,56 @@ class KeepAwake:
             except OSError:
                 pass
 
-    def start(self):
+    def start(self, display=False):
+        if self.active() and bool(display) != self.display: self.stop()   # option changed: restart with the new requests
         if self.active(): self.touch(); return
-        plat = self.platform(); pid = str(os.getpid()); self.error = None
+        if self.proc is not None:   # it was running and has ended: keep the reason visible, retry at most once a minute
+            rc = self.proc.poll(); self.proc = None
+            self.error = f"helper exited with code {rc}, see .workbench/keepawake.log"
+            self.retry_at = time.time() + 60
+        if time.time() < getattr(self, "retry_at", 0): self.touch(); return
+        plat = self.platform(); pid = str(os.getpid())
         try:
             if plat == "wsl":
                 os.makedirs(wb_dir(), exist_ok=True)
                 self.flag = os.path.join(wb_dir(), "keepawake.flag"); self.last = 0; self.touch()
                 win = subprocess.run(["wslpath", "-w", self.flag], capture_output=True, text=True, timeout=10).stdout.strip()
-                ps = ("Add-Type -Name P -Namespace W -MemberDefinition '[DllImport(\"kernel32.dll\")] public static extern uint SetThreadExecutionState(uint f);';"
-                      "[void][W.P]::SetThreadExecutionState(0x80000001);"
-                      f"$f='{win}';while((Test-Path $f) -and (((Get-Date)-(Get-Item $f).LastWriteTime).TotalSeconds -lt 120)){{Start-Sleep 15}}")
+                # power request types: 0 display, 1 system, 3 execution required; ES flags 0x80000001 or 0x80000003 with display
+                types, es = ("0,1,3", "0x80000003") if display else ("1,3", "0x80000001")
+                ps = ("$ErrorActionPreference='Stop';$ProgressPreference='SilentlyContinue';"   # no CLIXML progress noise in the log
+                      "Add-Type -Name P -Namespace W -MemberDefinition '"
+                      "[StructLayout(LayoutKind.Sequential,CharSet=CharSet.Unicode)] public struct RC{public uint V;public uint F;public string S;}"
+                      "[DllImport(\"kernel32.dll\",SetLastError=true)] public static extern IntPtr PowerCreateRequest(ref RC c);"
+                      "[DllImport(\"kernel32.dll\",SetLastError=true)] public static extern bool PowerSetRequest(IntPtr h,int t);"
+                      "[DllImport(\"kernel32.dll\")] public static extern uint SetThreadExecutionState(int f);';"
+                      "$c=New-Object W.P+RC;$c.V=0;$c.F=1;$c.S='OpenTOPAS Workbench: TOPAS runs queued';"
+                      "$h=[W.P]::PowerCreateRequest([ref]$c);"
+                      f"$ok=foreach($t in {types}){{[W.P]::PowerSetRequest($h,$t)}};"
+                      f"$r=[W.P]::SetThreadExecutionState({es});"  # PowerShell reads 0x8000000x as Int32, hence the int parameter
+                      f"$f='{win}';\"$(Get-Date -f s) started pid $PID, PowerSetRequest({types})=$($ok -join '/'), SetThreadExecutionState=$r, flag=$f\";"
+                      "while((Test-Path $f) -and (((Get-Date)-(Get-Item $f).LastWriteTime).TotalSeconds -lt 120)){Start-Sleep 15};"
+                      "\"$(Get-Date -f s) stopped: flag missing or older than 120 s\"")
                 enc = base64.b64encode(ps.encode("utf-16-le")).decode()  # avoids quoting problems across the WSL boundary
+                log = open(os.path.join(wb_dir(), "keepawake.log"), "ab")
                 self.proc = subprocess.Popen(["powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand", enc],
-                                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd="/mnt/c")
-                self.method = "Windows (SetThreadExecutionState)"
+                                             stdin=subprocess.DEVNULL, stdout=log, stderr=log, cwd="/mnt/c")
+                log.close()
+                self.method = "Windows power request" + (", display on" if display else ""); self.error = None
             elif plat == "macos":
-                self.proc = subprocess.Popen(["caffeinate", "-i", "-w", pid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                self.method = "caffeinate"
+                self.proc = subprocess.Popen(["caffeinate", "-di" if display else "-i", "-w", pid], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                self.method = "caffeinate" + (", display on" if display else "")
             elif plat == "linux" and shutil.which("systemd-inhibit"):
                 self.proc = subprocess.Popen(["systemd-inhibit", "--what=sleep:idle", "--who=OpenTOPAS Workbench", "--why=TOPAS run",
                                               "tail", f"--pid={pid}", "-f", "/dev/null"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 self.method = "systemd-inhibit"
             else:
                 self.error = "not supported on this system"
+            self.display = bool(display)
         except (OSError, subprocess.SubprocessError) as e:
             self.proc = None; self.error = str(e)
 
     def stop(self):
+        self.retry_at = 0
         if self.flag:
             try: os.remove(self.flag)
             except OSError: pass
@@ -422,7 +469,7 @@ def job_worker():
     while True:
         time.sleep(0.5)
         busy = STATE["proc"] is not None or any(j["status"] == "queued" for j in STATE["jobs"])
-        if busy and STATE["cfg"].get("keep_awake", True): AWAKE.start()
+        if busy and STATE["cfg"].get("keep_awake", True): AWAKE.start(STATE["cfg"].get("keep_display", False))
         elif AWAKE.active() or AWAKE.flag: AWAKE.stop()
         with STATE["lock"]:
             if STATE["proc"] is not None: continue
@@ -450,7 +497,7 @@ def run_job(job):
         def snapshot():
             return {f: os.path.getmtime(os.path.join(out, f)) for f in os.listdir(out) if os.path.isfile(os.path.join(out, f))}
         before = snapshot()
-        job["total"], job["energy"] = job_size(param)
+        job["total"], job["energy"] = job_size(param, max_age=0)   # the file may have been edited right before the start
         t0 = time.time(); job["t0"] = t0
         with open(resolve(job["log"]), "w") as log:
             log.write(f"# {job['start']}  {binary['cmd']} {param}\n# cwd: {out}\n"); log.flush()
@@ -472,7 +519,7 @@ def run_job(job):
     finally:
         with STATE["lock"]:
             STATE["proc"] = None; STATE["stop"] = False; job["end"] = time.strftime("%Y-%m-%d %H:%M:%S"); save_jobs()
-        invalidate_cache()
+        invalidate_cache(soft=True)
         notify_job(job)
 
 
@@ -482,9 +529,10 @@ def enqueue(files, binary, subdir, skip_existing):
         p = resolve(f)
         if not os.path.isfile(p): raise ValueError(f"not a file: {f}")
         if skip_existing:
-            with open(p, errors="replace") as fh: outs = scorer_outputs(fh.read())
+            info = file_info(p)
+            outs = info["outs"] if info else []
             od = resolve(os.path.join(os.path.dirname(f), subdir or ""))
-            if outs and os.path.isdir(od) and all(has_output(os.listdir(od), o) for o in outs):
+            if outs and os.path.isdir(od) and all(has_output(dir_names(od), o) for o in outs):
                 skipped.append(f); continue
         with STATE["lock"]:
             STATE["jobs"].append({"id": STATE["next_id"], "file": f, "binary": binary, "subdir": subdir, "status": "queued",
@@ -503,17 +551,32 @@ def stop_current():
             os.killpg(os.getpgid(p.pid), signal.SIGTERM)
 
 # ------------------------------------------------------------------ TOPAS CSV reader
-def read_topas_csv(path, stat=0, collapse=None, slice_index=None):
+BIN_RE = re.compile(r"#\s*(\w+)\s+in\s+(\d+)\s+bins?\s+of\s+([\d.eE+\-]+)\s*(\w+)")
+
+
+def topas_header(lines):
+    """(dims, quantity, statistics) from the '#' header lines of a TOPAS CSV; stops at the first data line."""
     dims, quantity, stats = [], "", []
-    with open(path, errors="replace") as fh:
-        lines = fh.readlines()
     for l in lines:
         if not l.startswith("#"): break
-        m = re.match(r"#\s*(\w+)\s+in\s+(\d+)\s+bins?\s+of\s+([\d.eE+\-]+)\s*(\w+)", l)
+        m = BIN_RE.match(l)
         if m: dims.append({"name": m.group(1), "n": int(m.group(2)), "width": float(m.group(3)), "unit": m.group(4)})
         m = re.match(r"#\s*(.+?)\s*:\s*(.+)$", l)
         if m and "bins" not in l and ("(" in m.group(1) or "Sum" in m.group(2) or "Mean" in m.group(2)):
             quantity, stats = m.group(1).strip(), m.group(2).split()
+    return dims, quantity, stats
+
+
+def read_topas_header(path, max_lines=300):
+    """Header only, without reading the data rows (a 3D dose file can have millions of them)."""
+    with open(path, errors="replace") as fh:
+        return topas_header(fh.readline() for _ in range(max_lines))
+
+
+def read_topas_csv(path, stat=0, collapse=None, slice_index=None):
+    with open(path, errors="replace") as fh:
+        lines = fh.readlines()
+    dims, quantity, stats = topas_header(lines)
     if len(dims) != 3: raise ValueError("no TOPAS 3D binning header found")
     shape = [d["n"] for d in dims]
     import array
@@ -711,67 +774,90 @@ def producer_of(rel):
     base = os.path.splitext(os.path.basename(rel))[0]
     folder = os.path.dirname(rel)
     for d in (folder, os.path.dirname(folder)) if folder else ("",):
-        try: names = sorted(os.listdir(resolve(d)))
-        except (OSError, ValueError): continue
-        for n in names:
+        try: dp = ws_path(d)   # rel comes from resolve(); its parent folders are inside the workspace too
+        except ValueError: continue
+        # parsed facts are cached per file, so plotting ten curves from a folder with 100 cases reads each case once
+        for n in sorted(dir_names(dp)):
             if not n.endswith(".txt"): continue
-            fp = resolve(os.path.join(d, n))
-            if not is_param_file(fp): continue
-            with open(fp, errors="replace") as fh: text = fh.read()
-            if base in scorer_outputs(text):
-                part, energy = beam_info(text)
-                e = ENERGY_RE.search(text)
-                return {"param": relp(fp), "particle": part, "energy": energy,
-                        "total": f"{e.group(1)} {e.group(2)}" if e else None}
+            info = file_info(os.path.join(dp, n), max_age=5.0)
+            if info and info["param"] and base in info["outs"]:
+                return {"param": f"{d}/{n}" if d else n, "particle": info["part"], "energy": info["energy"],
+                        "total": info["total"]}
     return None
+
+
+INDEX_READ_MAX = 64_000_000   # larger data files are listed without metrics instead of being parsed
+
+
+def index_entry(fp, size):
+    """Kind, mode, quantity and depth-curve metrics of one data file for the Overview tab."""
+    extra = {}
+    try:
+        dims, quantity, _ = read_topas_header(fp)
+        if len(dims) == 3 and sum(d["n"] > 1 for d in dims) >= 2:
+            # maps get no metrics, so the data rows (millions for a 3D dose grid) are not needed for the index
+            return {"kind": "data", "mode": "2d", "quantity": quantity}
+        if size > INDEX_READ_MAX:
+            return {"kind": "data" if len(dims) == 3 else "other"}
+        d = read_any(fp)
+        extra["kind"] = "measured" if d.get("measured") else "data"
+        extra["mode"] = d["mode"]
+        extra["quantity"] = d.get("quantity", "")
+        if d["mode"] == "1d":
+            f = {"cm": 10, "m": 1000}.get(d["dims"][d["axis"]]["unit"], 1)
+            extra.update(metrics_1d([v * f for v in d["x"]], d["y"]))
+    except (ValueError, OSError, IndexError, KeyError):
+        extra["kind"] = "other"
+    return extra
+
+
+_INDEX = {}                     # scope -> {"t", "root", "gen", "items"}
+_INDEX_LOCK = threading.Lock()
 
 
 def build_index(scope=""):
     """All result files in the workspace with beam info (from the parameter file that wrote them) and depth-curve metrics.
-    Cached in .workbench/index.json by path, size and modification time."""
-    root = resolve(scope) if scope else root_real()
-    cache_path = os.path.join(wb_dir(), "index.json")
-    try:
-        with open(cache_path) as fh: cache = json.load(fh)
-    except (OSError, ValueError):
-        cache = {}
-    # scorer output name -> parameter file, keyed by the parameter file's folder
-    producers, files = {}, []
-    new_cache = dict(cache) if scope else {}   # keep entries of other folders when only a sub folder is indexed
-    for dp, dns, fns in os.walk(root):  # one walk; parameter files are parsed only when they changed
-        rel_dp = relp(dp)
-        dns[:] = sorted(d for d in dns if scan_allowed(rel_dp, d))
-        if not rel_dp and not scan_root_files_allowed(): fns = []
-        if scope and rel_dp != scope and not rel_dp.startswith(scope + "/"): fns = []
-        for fn in fns:
-            fp = os.path.join(dp, fn); rel = relp(fp)
-            low = fn.lower()
-            if low.endswith(".txt"):
-                try: st = os.stat(fp)
-                except OSError: continue
-                pkey = f"P|{rel}|{st.st_size}|{int(st.st_mtime)}"
-                info = cache.get(pkey)
-                if info is None:
-                    info = {}
-                    if is_param_file(fp):
-                        try:
-                            with open(fp, errors="replace") as fh: text = fh.read()
-                            part, energy = beam_info(text)
-                            info = {"part": part, "energy": energy, "outs": scorer_outputs(text)}
-                        except OSError:
-                            pass
-                new_cache[pkey] = info
-                for o in info.get("outs", []):
-                    producers[(os.path.dirname(rel), o)] = (rel, info["part"], info["energy"])
-            elif low.endswith(DATA_EXT + IMG_EXT):
-                files.append((fp, rel, fn, low))
-            if len(files) > 20000: break
-    items = []
-    for fp, rel, fn, low in files:
+    Metrics are cached in .workbench/index.json by path, size and modification time; the item list is kept in memory
+    for WALK_TTL seconds or until something is written."""
+    return _index_refresh(scope)
+
+
+def index_for_request(scope=""):
+    """(items, stale) for the Overview tab: an expired index is answered at once and rebuilt in the background."""
+    c = _INDEX.get(scope)
+    if c is not None and c["root"] == root_real() and c["gen"] == _GEN[0]:
+        if time.time() - c["t"] < WALK_TTL: return c["items"], False
+        _background(("index", scope), lambda: _index_refresh(scope))
+        return c["items"], True
+    return _index_refresh(scope), False
+
+
+def _index_refresh(scope):
+    with _INDEX_LOCK:
+        root = root_real()
+        c = _INDEX.get(scope)
+        if _fresh(c, root): return c["items"]   # built by another request while this one waited
+        gen = _GEN[0]
+        items = _index_items(scope)
+        if gen == _GEN[0]: _INDEX[scope] = {"t": time.time(), "root": root, "gen": gen, "items": items}
+        return items
+
+
+def _index_items(scope):
+    w = _walk(scope, sync=True)
+    producers = {}   # (folder of the parameter file, scorer output name) -> (parameter file, particle, energy)
+    for fp, st in w["txt"]:
+        info = file_info(fp, st)
+        if info and info["param"]:
+            rel = relp(fp)
+            for o in info["outs"]:
+                producers[(os.path.dirname(rel), o)] = (rel, info["part"], info["energy"])
+    pc = _pcache(); dcache = pc["data"]
+    items, seen = [], set()
+    for fp in w["data"]:
         try: st = os.stat(fp)
         except OSError: continue
-        key = f"v3|{rel}|{st.st_size}|{int(st.st_mtime)}"
-        folder = os.path.dirname(rel)
+        rel = relp(fp); fn = os.path.basename(fp); low = fn.lower(); folder = os.path.dirname(rel)
         item = {"path": rel, "name": fn, "folder": folder, "mtime": st.st_mtime, "size": st.st_size,
                 "kind": "image" if low.endswith(IMG_EXT) else "data", "tags": file_tags(rel)}
         base = os.path.splitext(fn)[0]
@@ -779,31 +865,38 @@ def build_index(scope=""):
         if prod:
             item.update(param=prod[0], particle=prod[1], energy=prod[2])
         if item["kind"] == "data":
-            if key in cache:
-                item.update(cache[key])
+            seen.add(rel)
+            c = dcache.get(rel)
+            if c is not None and c[0] == st.st_mtime_ns and c[1] == st.st_size:
+                extra = c[2]
             else:
-                extra = {}
-                try:
-                    d = read_any(fp)
-                    extra["kind"] = "measured" if d.get("measured") else "data"
-                    extra["mode"] = d["mode"]
-                    extra["quantity"] = d.get("quantity", "")
-                    if d["mode"] == "1d":
-                        f = {"cm": 10, "m": 1000}.get(d["dims"][d["axis"]]["unit"], 1)
-                        extra.update(metrics_1d([v * f for v in d["x"]], d["y"]))
-                except (ValueError, OSError, IndexError, KeyError):
-                    extra["kind"] = "other"
-                item.update(extra)
-                cache[key] = extra
-            new_cache[key] = {k: item[k] for k in ("kind", "mode", "quantity", "peak", "r80", "bpw80", "dfo", "tail") if k in item}
+                extra = index_entry(fp, st.st_size)
+                dcache[rel] = [st.st_mtime_ns, st.st_size, extra]; pc["dirty"] = True
+            item.update(extra)
         items.append(item)
-    try:
-        os.makedirs(wb_dir(), exist_ok=True)
-        with open(cache_path, "w") as fh: json.dump(new_cache, fh)
-    except OSError:
-        pass
+    if not scope:   # a full walk knows every data file, so entries of deleted files can go
+        for rel in [r for r in dcache if r not in seen]:
+            del dcache[rel]; pc["dirty"] = True
+    _pcache_save()
     items.sort(key=lambda i: natkey(i["path"]))
     return items
+
+
+def case_outputs(rel):
+    """Plottable scorer outputs of a parameter file, in its folder and in result sub folders."""
+    fp = resolve(rel)
+    info = file_info(fp)
+    if not info or not info["outs"]: return []
+    d = os.path.dirname(fp)
+    here, subs = _case_folder(d, {})
+    out = []
+    for sub, names in [("", here)] + subs:
+        for o in info["outs"]:
+            for n in sorted(names, key=natkey):
+                if n.startswith(o + ".") and n.lower().endswith(DATA_EXT):
+                    out.append(relp(os.path.join(d, sub, n) if sub else os.path.join(d, n)))
+    return out
+
 
 # ------------------------------------------------------------------ generator plugins
 def load_generators():
@@ -847,15 +940,25 @@ def fm_target(src, dst):
     return s, d
 
 
-_FILE_INFO = {}    # path -> (mtime_ns, size, {"param": bool, "outs": [...], "names": [...]})
-_DIR_NAMES = {}    # folder -> (mtime_ns, [names])
-_WALKS = {}         # scope -> {"t", "root", "txt", "res"}
-WALK_TTL = 15.0    # seconds; writes through the UI and finished jobs invalidate earlier
+WALK_TTL = 15.0      # seconds; writes through the UI and finished jobs invalidate earlier
+WALK_LIMIT = 20000   # files per kind; protects against a workspace pointed at a home folder
+TXT_HEAD = 65536     # characters read to tell a parameter file from other text
+TXT_MAX = 8_000_000  # parameter files with long value lists stay far below this
 NAME_RE = re.compile(r"^\s*((?:d|u|i|b|s|dv|uv|iv|bv|sv):[A-Za-z0-9_/\.\-]+)\s*=", re.M)
 PARAM_HINT_RE = re.compile(r"^\s*(d|u|i|b|s|dv|sv|iv|uv|bv):(Ge|So|Sc|Ph|Ts|Gr|Ma|El|Tf|Vr)/", re.M)
 
+_WALKS = {}          # scope -> {"t", "root", "gen", "txt": [(path, stat)], "data": [path], "memo": {}, "params": dict or None}
+_DIRS = {}           # folder -> (mtime_ns, names, sub folder names)
+_FOLDERS = {}        # (root, depth, limit, exclude) -> (time, generation, folders)
+_TXT_CHECKED = {}    # path -> time of the last stat, for callers that accept a slightly older answer
+_GEN = [0]           # bumped by invalidate_cache(); a walk that started before a write is not stored
+_WALK_LOCK = threading.Lock()
+_BG = set()          # keys of background refreshes in progress
+_PC = {"root": None, "txt": {}, "data": {}, "dirty": False}   # parsed .txt facts and data metrics, kept in index.json
+_PC_LOCK = threading.Lock()
 
-DEFAULT_EXCLUDE = ["__pycache__", "node_modules", "venv", ".venv", "build", "dist", "*.egg-info"]
+
+DEFAULT_EXCLUDE = ["__pycache__", "node_modules", "venv", ".venv", "build", "dist", "*.egg-info", "_to_delete"]
 
 
 def scan_allowed(rel_dir, name):
@@ -869,13 +972,46 @@ def scan_allowed(rel_dir, name):
     return True
 
 
+def list_folders(depth=3, limit=300):
+    """Workspace sub folders up to `depth` levels for the folder pickers (Runs, Overview), honoring the exclude list.
+    Cached like the walks: every page load asks for it, and deep trees take hundreds of directory reads."""
+    pats = STATE["cfg"].get("exclude", DEFAULT_EXCLUDE)
+    key = (root_real(), depth, limit, tuple(pats))
+    c = _FOLDERS.get(key)
+    if c is not None and c[1] == _GEN[0] and time.time() - c[0] < WALK_TTL: return c[2]
+    gen, out = _GEN[0], []
+    def walk(d, rel, level):
+        try:
+            with os.scandir(d) as it: entries = sorted(it, key=lambda e: e.name.lower())
+        except OSError: return
+        for e in entries:
+            if len(out) >= limit: return
+            if not e.is_dir(follow_symlinks=False) or e.name.startswith(".") or e.name == TRASH: continue
+            r = f"{rel}/{e.name}" if rel else e.name
+            if any(fnmatch.fnmatch(e.name, p) or fnmatch.fnmatch(r, p) for p in pats): continue
+            out.append(r)
+            if level < depth: walk(e.path, r, level + 1)
+    walk(root_real(), "", 1)
+    _FOLDERS[key] = (time.time(), gen, out)
+    return out
+
+
 def scan_root_files_allowed():
     """Files directly in the workspace root are skipped when only certain folders are included."""
     return not [i for i in STATE["cfg"].get("include", []) if i.strip("/")]
 
 
-def invalidate_cache():
-    _WALKS.clear()
+def invalidate_cache(soft=False):
+    """Drop the cached walks, indexes and folder lists. soft: only mark them expired, so the next request is answered
+    at once from the old state while a background walk picks up the change (used when a job finishes: rewalking a big
+    workspace synchronously after every run is what made the page wait). Writes through the UI use the hard form, so a
+    new file shows up in the very next answer."""
+    if soft:
+        for c in list(_WALKS.values()) + list(_INDEX.values()): c["t"] = 0.0
+        _FOLDERS.clear()
+        return
+    _GEN[0] += 1
+    _WALKS.clear(); _INDEX.clear(); _FOLDERS.clear(); _TXT_CHECKED.clear()
 
 
 def scope_dir(scope):
@@ -885,54 +1021,197 @@ def scope_dir(scope):
     return scope
 
 
-def file_info(fp, st=None):
-    """Parsed facts about a .txt file, re-read only when it changed."""
+# ------------------------------------------------------------------ persistent cache (.workbench/index.json)
+def _pcache():
+    """Parsed .txt facts (by absolute path) and data metrics (by relative path), loaded once per workspace.
+    After a restart the Runs and Overview tabs then only stat files instead of reading them again."""
+    root = root_real()
+    if _PC["root"] != root:
+        txt, data = {}, {}
+        try:
+            with open(os.path.join(wb_dir(), "index.json")) as fh: raw = json.load(fh)
+            if isinstance(raw, dict) and raw.get("v") == 4:   # older formats are rebuilt once
+                data = dict(raw.get("data") or {})
+                txt = {os.path.join(root, *rel.split("/")): v for rel, v in (raw.get("txt") or {}).items()}
+        except (OSError, ValueError, TypeError, AttributeError):
+            pass
+        _PC.update(root=root, txt=txt, data=data, dirty=False)
+    return _PC
+
+
+def _pcache_save():
+    pc = _pcache()
+    if not pc["dirty"]: return
+    with _PC_LOCK:
+        if not pc["dirty"]: return
+        pc["dirty"] = False
+        pre = pc["root"] + os.sep
+        out = {"v": 4, "txt": {k[len(pre):].replace(os.sep, "/"): v for k, v in list(pc["txt"].items()) if k.startswith(pre)},
+               "data": dict(pc["data"])}
+        try:
+            os.makedirs(wb_dir(), exist_ok=True)
+            tmp = os.path.join(wb_dir(), "index.json.tmp")
+            with open(tmp, "w") as fh: json.dump(out, fh, separators=(",", ":"))
+            os.replace(tmp, os.path.join(wb_dir(), "index.json"))   # a crash mid-write must not leave broken JSON
+        except OSError:
+            pass
+
+
+def _num(s):
+    try: return float(s)
+    except (TypeError, ValueError): return None
+
+
+def file_info(fp, st=None, max_age=0.0):
+    """Parsed facts about a .txt file, re-read only when it changed. Of other text files only the start is read, so a
+    large export lying in the workspace costs one small read. With max_age, a file stat'ed less than max_age seconds
+    ago is not stat'ed again."""
+    pc = _pcache(); cache = pc["txt"]
+    c = cache.get(fp)
+    now = time.time()
+    if c is not None and st is None and max_age and now - _TXT_CHECKED.get(fp, 0) < max_age: return c[2]
     try: st = st or os.stat(fp)
     except OSError: return None
-    c = _FILE_INFO.get(fp)
-    if c and c[0] == st.st_mtime_ns and c[1] == st.st_size: return c[2]
+    if c is not None and c[0] == st.st_mtime_ns and c[1] == st.st_size:
+        _TXT_CHECKED[fp] = now
+        return c[2]
     try:
-        with open(fp, errors="replace") as fh: text = fh.read()
+        with open(fp, errors="replace") as fh:
+            text = fh.read(TXT_HEAD)
+            head = text[:6000]
+            is_param = bool(PARAM_HINT_RE.search(head)) or "includeFile" in head
+            if is_param and len(text) == TXT_HEAD: text += fh.read(TXT_MAX)
     except OSError:
         return None
-    is_param = bool(PARAM_HINT_RE.search(text[:6000])) or "includeFile" in text[:6000]
+    try: part, energy = beam_info(text) if is_param else (None, None)
+    except ValueError: part, energy = None, None
+    e = ENERGY_TOTAL_RE.search(text)
+    etot = _num(e.group(1)) if e else None
     info = {"param": is_param, "outs": scorer_outputs(text) if is_param else [],
-            "names": sorted(set(NAME_RE.findall(text))) if is_param else []}
-    _FILE_INFO[fp] = (st.st_mtime_ns, st.st_size, info)
+            "names": sorted(set(NAME_RE.findall(text))) if is_param else [],
+            "part": part, "energy": energy, "total": f"{e.group(1)} {e.group(2)}" if (e and is_param) else None,
+            "hist": total_histories(text), "etot": etot * UNIT_MEV.get(e.group(2), 1) if etot is not None else None}
+    cache[fp] = [st.st_mtime_ns, st.st_size, info]; _TXT_CHECKED[fp] = now; pc["dirty"] = True
     return info
 
 
-def dir_names(folder):
-    """Directory listing, cached by the folder's modification time."""
+def dir_listing(folder):
+    """(names, sub folder names) of a folder, cached by the folder's modification time."""
     try: m = os.stat(folder).st_mtime_ns
-    except OSError: return []
-    c = _DIR_NAMES.get(folder)
-    if c and c[0] == m: return c[1]
-    try: names = os.listdir(folder)
-    except OSError: names = []
-    _DIR_NAMES[folder] = (m, names)
-    return names
+    except OSError: return [], []
+    c = _DIRS.get(folder)
+    if c is not None and c[0] == m: return c[1], c[2]
+    names, subs = [], []
+    try:
+        with os.scandir(folder) as it:
+            for e in it:
+                names.append(e.name)
+                try:
+                    if e.is_dir(): subs.append(e.name)   # d_type, no extra syscall except for links
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    _DIRS[folder] = (m, names, subs)
+    return names, subs
 
 
-def _walk(scope=""):
+def dir_names(folder):
+    return dir_listing(folder)[0]
+
+
+# ------------------------------------------------------------------ cached walks
+def _fresh(c, root):
+    return c is not None and c["root"] == root and c["gen"] == _GEN[0] and time.time() - c["t"] < WALK_TTL
+
+
+def _background(key, fn):
+    """Runs fn in a daemon thread unless the same refresh is already running."""
+    if key in _BG: return
+    _BG.add(key)
+    def run():
+        try: fn()
+        except Exception as e:  # a failed refresh must not kill the server; the next request tries again
+            print(f"background refresh {key} failed: {e}", file=sys.stderr)
+        finally: _BG.discard(key)
+    threading.Thread(target=run, daemon=True).start()
+
+
+def _scope_reachable(scope):
+    """True if a full walk descends into scope, so a scoped walk can be cut out of it with the same result."""
+    rel = ""
+    for name in scope.split("/"):
+        if not scan_allowed(rel, name): return False
+        rel = f"{rel}/{name}" if rel else name
+    return True
+
+
+def _scan(scope):
+    """One pass over a folder scope: .txt files with their stat, data and image files by path (stat'ed later, only
+    when the Overview needs them). Big binaries such as .mat or DICOM are never opened."""
+    root = root_real()
+    txt, data = [], []
+    def scan(d, rel):
+        try:
+            with os.scandir(d) as it: entries = sorted(it, key=lambda e: natkey(e.name))
+        except OSError: return
+        files_ok = bool(rel) or scan_root_files_allowed()
+        for e in entries:
+            if len(txt) > WALK_LIMIT or len(data) > WALK_LIMIT: return
+            try: is_dir = e.is_dir(follow_symlinks=False)
+            except OSError: continue
+            if is_dir:
+                if scan_allowed(rel, e.name): scan(e.path, f"{rel}/{e.name}" if rel else e.name)
+                continue
+            if not files_ok: continue
+            is_txt = e.name.endswith(".txt")
+            if not is_txt and not e.name.lower().endswith(DATA_EXT + IMG_EXT): continue
+            if e.is_symlink() and not inside_ws(e.path): continue   # never read through a link that leaves the workspace
+            if is_txt:
+                try: txt.append((e.path, e.stat()))
+                except OSError: pass
+            else:
+                data.append(e.path)
+    scan(os.path.join(root, *scope.split("/")) if scope else root, scope)
+    return txt, data
+
+
+def _build_walk(scope):
+    """Called with _WALK_LOCK held."""
+    root, gen = root_real(), _GEN[0]
+    full = _WALKS.get("")
+    if scope and _fresh(full, root) and _scope_reachable(scope):
+        pre = os.path.join(root, *scope.split("/")) + os.sep
+        w = {"t": full["t"], "root": root, "gen": gen, "txt": [x for x in full["txt"] if x[0].startswith(pre)],
+             "data": [p for p in full["data"] if p.startswith(pre)], "memo": full["memo"], "params": None}
+    else:
+        txt, data = _scan(scope)
+        w = {"t": time.time(), "root": root, "gen": gen, "txt": txt, "data": data, "memo": {}, "params": None}
+    if gen == _GEN[0]: _WALKS[scope] = w
+    return w
+
+
+def _walk(scope="", sync=False):
+    """Cached walk of a folder scope. Younger than WALK_TTL: returned as is. Older: returned at once while a background
+    thread walks again (the page asks once more when the answer says it was stale), unless sync is set.
+    Writes through the UI and finished jobs drop the cache, so their effect is visible right away."""
     root = root_real()
     w = _WALKS.get(scope)
-    if w and w["root"] == root and time.time() - w["t"] < WALK_TTL: return w
-    out = []
-    def scan(d, rel):
-        try: it = sorted(os.scandir(d), key=lambda e: natkey(e.name))
-        except OSError: return
-        for e in it:
-            if e.is_dir(follow_symlinks=False):
-                if scan_allowed(rel, e.name): scan(e.path, f"{rel}/{e.name}" if rel else e.name)
-            elif e.name.endswith(".txt") and (rel or scan_root_files_allowed()):
-                try: out.append((e.path, e.stat()))
-                except OSError: pass
-            if len(out) > 20000: return
-    if scope: scan(resolve(scope), scope)
-    else: scan(root, "")
-    w = _WALKS[scope] = {"t": time.time(), "root": root, "txt": out, "res": {}}
-    return w
+    if w is not None and w["root"] == root and w["gen"] == _GEN[0]:
+        if time.time() - w["t"] < WALK_TTL: return w
+        if not sync:
+            _background(("walk", scope), lambda: _refresh_walk(scope))
+            return w
+    with _WALK_LOCK:
+        w = _WALKS.get(scope)
+        if _fresh(w, root): return w   # built by another request while this one waited
+        return _build_walk(scope)
+
+
+def _refresh_walk(scope):
+    with _WALK_LOCK:
+        if not _fresh(_WALKS.get(scope), root_real()): _build_walk(scope)
+    list_params(scope)   # parse new files and look for results now, so the next request is answered from memory
 
 
 def _walk_txt(scope=""):
@@ -948,17 +1227,23 @@ def list_param_files(scope=""):
     return out
 
 
-def existing_results(rel, outs):
+def _case_folder(d, memo):
+    """Names in a case folder and in its sub folders that may hold results. Computed once per folder and walk, not
+    once per case: plan folders hold a hundred cases next to each other."""
+    r = memo.get(d)
+    if r is None:
+        names, subs = dir_listing(d)
+        cands = sorted(x for x in subs if not x.startswith((".", TRASH)) and "." not in x)
+        r = memo[d] = (names, [(x, dir_names(os.path.join(d, x))) for x in cands])
+    return r
+
+
+def existing_results(rel, outs, memo=None):
     """Subfolders (relative to the parameter file, "" = same folder) that hold all scorer outputs of the file."""
     if not outs: return []
-    d = os.path.dirname(resolve(rel))
-    here = dir_names(d)
-    cands = [""] + sorted(x for x in here if not x.startswith((".", TRASH)) and "." not in x and os.path.isdir(os.path.join(d, x)))
-    found = []
-    for sub in cands:
-        have = dir_names(os.path.join(d, sub)) if sub else here
-        if all(has_output(have, o) for o in outs): found.append(sub)
-    return found
+    here, subs = _case_folder(os.path.dirname(ws_path(rel)), {} if memo is None else memo)
+    found = [""] if all(has_output(here, o) for o in outs) else []
+    return found + [sub for sub, names in subs if all(has_output(names, o) for o in outs)]
 
 
 def workspace_names(limit=4000):
@@ -972,19 +1257,39 @@ def workspace_names(limit=4000):
 
 
 def list_params(scope=""):
-    out = list_param_files(scope)
-    results = {}
-    memo = _walk(scope)["res"]   # valid for one walk cycle (TTL or until a write / finished job)
-    for f in out:
-        if f not in memo:
-            info = file_info(resolve(f))
-            memo[f] = existing_results(f, info["outs"]) if info else []
-        r = memo[f]
-        if r: results[f] = r
+    w = _walk(scope)
+    stale = time.time() - w["t"] >= WALK_TTL
+    p = w["params"]
+    if p is None:   # once per walk; afterwards only the job states below are recomputed
+        files, results = [], {}
+        for fp, st in w["txt"]:
+            info = file_info(fp, st)
+            if not info or not info["param"]: continue
+            rel = relp(fp)
+            files.append(rel)
+            r = existing_results(rel, info["outs"], w["memo"])
+            if r: results[rel] = r
+            if len(files) > 5000: break
+        p = w["params"] = {"files": files, "results": results}
+        if not scope:   # a full walk knows every .txt file, so facts about deleted files can go
+            pc = _pcache(); seen = {fp for fp, _ in w["txt"]}
+            for k in [k for k in pc["txt"] if k not in seen]:
+                del pc["txt"][k]; pc["dirty"] = True
+        _pcache_save()
     last = {}
     for j in STATE["jobs"]:
         last[(j["file"], j["binary"])] = {"status": j["status"], "end": j.get("end", "")}
-    return {"files": out, "results": results, "last": {f"{k[0]}|{k[1]}": v for k, v in last.items()}}
+    return {"files": p["files"], "results": p["results"], "last": {f"{k[0]}|{k[1]}": v for k, v in last.items()}, "stale": stale}
+
+
+def prewarm():
+    """Fills the caches right after start, so the first page load does not wait for a full walk."""
+    try:
+        list_folders(); list_params("")
+        if _pcache()["data"]: build_index("")   # only with an earlier index: revalidating it means stat calls, no parsing
+    except Exception as e:  # the page builds the caches on demand anyway
+        print(f"prewarm failed: {e}", file=sys.stderr)
+
 
 # ------------------------------------------------------------------ HTTP
 class H(BaseHTTPRequestHandler):
@@ -1017,9 +1322,9 @@ class H(BaseHTTPRequestHandler):
         if not self.guard(): return
         try:
             if u.path == "/api/info":
-                return self.send(200, {"root": STATE["root"], "cfg": STATE["cfg"], "version": VERSION, "detected": detect_binaries(),
+                return self.send(200, {"root": STATE["root"], "cfg": STATE["cfg"], "version": VERSION, "detected": detected_binaries(),
                                        "default_exclude": DEFAULT_EXCLUDE,
-                                       "folders": sorted(e.name for e in os.scandir(root_real()) if e.is_dir() and not e.name.startswith("."))})
+                                       "folders": list_folders()})
             if u.path == "/api/ls": return self.send(200, fm_ls(q.get("p", "")))
             if u.path == "/api/read":
                 p = resolve(q.get("p", ""))
@@ -1031,7 +1336,9 @@ class H(BaseHTTPRequestHandler):
                                        "includes": includes(txt, base) if p.endswith(".txt") else []})
             if u.path == "/api/params": return self.send(200, list_params(scope_dir(q.get("scope", ""))))
             if u.path == "/api/names": return self.send(200, {"names": workspace_names()})
-            if u.path == "/api/index": return self.send(200, {"items": build_index(scope_dir(q.get("scope", "")))})
+            if u.path == "/api/index":
+                items, stale = index_for_request(scope_dir(q.get("scope", "")))
+                return self.send(200, {"items": items, "stale": stale})
             if u.path == "/api/views":
                 try:
                     with open(os.path.join(wb_dir(), "views.json")) as fh: return self.send(200, {"views": json.load(fh)})
@@ -1039,10 +1346,20 @@ class H(BaseHTTPRequestHandler):
                     return self.send(200, {"views": []})
             if u.path == "/api/jobs":
                 STATE["last_poll"] = time.time()
-                with STATE["lock"]: jobs = [dict(j) for j in STATE["jobs"][-200:]]; running = STATE["proc"] is not None
+                try: hist = max(0, min(int(q.get("hist", 200)), 5000))
+                except ValueError: hist = 200
+                with STATE["lock"]:
+                    alljobs = list(STATE["jobs"]); running = STATE["proc"] is not None; rev = STATE["rev"]
+                # every waiting job is sent (a long queue must stay complete for "remove waiting"), history only up to hist
+                active = [j for j in alljobs if j["status"] in ("queued", "running")]
+                finished = [j for j in alljobs if j["status"] not in ("queued", "running")]
+                keep = {id(j) for j in active} | {id(j) for j in finished[max(0, len(finished) - hist):]}
+                jobs = [dict(j) for j in alljobs if id(j) in keep]
+                counts = {}
+                for j in alljobs: counts[j["status"]] = counts.get(j["status"], 0) + 1
                 for j in jobs:
                     if j["status"] == "running" and j.get("log"):
-                        done = log_progress(resolve(j["log"]))
+                        done = log_progress(ws_path(j["log"]))
                         j["done"] = done
                         j["live"] = live_info(j)
                         lv = j["live"]
@@ -1053,7 +1370,9 @@ class H(BaseHTTPRequestHandler):
                             el = time.time() - j.get("t0", time.time())
                             j["progress"] = min(1.0, done / j["total"])
                             j["eta"] = round(el * (j["total"] - done) / done) if done < j["total"] else 0
-                return self.send(200, {"jobs": jobs, "running": running, "awake": AWAKE.status(), "queue_eta": queue_estimate(jobs)})
+                est = [dict(j) for j in finished[-200:]] + [j for j in jobs if j["status"] in ("queued", "running")]
+                return self.send(200, {"jobs": jobs, "running": running, "awake": AWAKE.status(), "queue_eta": queue_estimate(est),
+                                       "counts": counts, "finished": len(finished), "rev": rev})
             if u.path == "/api/log":
                 p = resolve(q.get("p", ""))
                 with open(p, errors="replace") as fh: fh.seek(0, 2); size = fh.tell(); fh.seek(max(0, size - 12000)); return self.send(200, {"text": fh.read()})
@@ -1073,7 +1392,9 @@ class H(BaseHTTPRequestHandler):
                 with open(p, "rb") as fh: data = fh.read()
                 self.send_response(200); self.send_header("Content-Type", types[ext]); self.send_header("Content-Length", str(len(data)))
                 if q.get("dl"): self.send_header("Content-Disposition", f'attachment; filename="{os.path.basename(p)}"')
-                self.send_header("Cache-Control", "no-store")
+                # with a version (the file's mtime) the URL changes when the file does, so the browser may keep it;
+                # the token in the URL ties the cached copy to this session
+                self.send_header("Cache-Control", "private, max-age=86400" if q.get("v") else "no-store")
                 try:
                     self.end_headers(); self.wfile.write(data)
                 except (BrokenPipeError, ConnectionResetError):
@@ -1086,8 +1407,8 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.guard(): return
         u = urlparse(self.path)
-        if u.path in ("/api/write", "/api/mkdir", "/api/newfile", "/api/move", "/api/copy", "/api/trash", "/api/generate", "/api/variants"):
-            invalidate_cache()
+        writes = u.path in ("/api/write", "/api/mkdir", "/api/newfile", "/api/move", "/api/copy", "/api/trash", "/api/generate", "/api/variants")
+        if writes: invalidate_cache()
         try:
             b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or 0) or b"{}")
             if u.path == "/api/write":
@@ -1149,11 +1470,18 @@ class H(BaseHTTPRequestHandler):
                         z.write(path, rel)
                 return self.send(200, buf.getvalue(), "application/zip")
             if u.path == "/api/dequeue":
+                ids, n = set(b.get("ids", [])), 0
                 with STATE["lock"]:
                     for j in STATE["jobs"]:
-                        if j["id"] in b.get("ids", []) and j["status"] == "queued": j["status"] = "removed"
+                        if j["status"] == "queued" and (b.get("all") or j["id"] in ids): j["status"] = "removed"; n += 1
                     save_jobs()
-                return self.send(200, {"ok": True})
+                return self.send(200, {"ok": True, "removed": n})
+            if u.path == "/api/outputs":
+                out = {}
+                for f in b.get("files", [])[:2000]:
+                    try: out[f] = case_outputs(f)
+                    except (OSError, ValueError): out[f] = []
+                return self.send(200, {"outputs": out})
             if u.path == "/api/clearhistory":
                 with STATE["lock"]:
                     STATE["jobs"] = [j for j in STATE["jobs"] if j["status"] in ("queued", "running")]; save_jobs()
@@ -1162,6 +1490,7 @@ class H(BaseHTTPRequestHandler):
                 cfg = STATE["cfg"]
                 if "lang" in b: cfg["lang"] = b["lang"] if b["lang"] in ("de", "en") else "en"
                 if "keep_awake" in b: cfg["keep_awake"] = bool(b["keep_awake"])
+                if "keep_display" in b: cfg["keep_display"] = bool(b["keep_display"])
                 if "toast" in b: cfg["toast"] = bool(b["toast"])
                 for k in ("exclude", "include"):
                     if k in b: cfg[k] = [str(x).strip() for x in b[k] if str(x).strip()][:200]; invalidate_cache()
@@ -1193,6 +1522,8 @@ class H(BaseHTTPRequestHandler):
             self.send(404, {"error": "not found"})
         except (OSError, ValueError, KeyError, RuntimeError, TypeError) as e:
             self.send(400, {"error": str(e)})
+        finally:
+            if writes: invalidate_cache()   # again after the change: a background walk that ran meanwhile must not stay
 
 
 PAGE = open(os.path.join(TOOL_DIR, "ui.html"), encoding="utf-8").read() if os.path.exists(os.path.join(TOOL_DIR, "ui.html")) else "<p>ui.html missing</p>"
@@ -1223,6 +1554,7 @@ def main(argv=None):
     if not os.path.isdir(STATE["root"]): sys.exit(f"workspace not found: {STATE['root']}")
     load_cfg(); load_jobs(); save_cfg()
     threading.Thread(target=job_worker, daemon=True).start()
+    threading.Thread(target=prewarm, daemon=True).start()
     srv = None
     for port in range(a.port, a.port + 20):  # the default port may be taken by an earlier instance
         try:

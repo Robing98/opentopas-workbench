@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- Speed: the Runs tab no longer resolves every case path with realpath and lists result sub folders once per folder instead of once per case. For 300 cases this drops from about 4,600 file system calls to about 360 after a change (seconds on WSL /mnt/c before), and to none while cached.
+- Speed: parsed parameter files and result metrics are kept in `.workbench/index.json`, so after a restart the Runs and Overview tabs only check modification times. Large text files that are not parameter files are no longer read completely; 2D and 3D scorer files are indexed from their header alone.
+- Speed: caches are filled in the background right after start. An expired cache answers at once and refreshes in the background; the page asks again when an answer was stale. A finished run refreshes the lists the same way instead of forcing a full walk.
+- Speed: the queue sends every waiting job but only the latest history and renders running, waiting, and finished jobs as separate sections that are rewritten only when they change. The Runs filter and the Overview search wait for a pause in typing, the Overview renders rows on demand, the Results filter no longer reloads the plotted curves, plotted curves and thumbnails are reused instead of downloaded again.
+- Navigation: tabs follow the workflow (Files, Generators, Runs, Overview, Results, Settings), the Runs tab shows the number of active jobs, and the run badge opens it.
+- Navigation: the address keeps the tab, the open file, and the plotted curves (`#results?f=...`), so Back and Forward switch tabs, a reload keeps the plot, and plots can be bookmarked. Keyboard shortcuts: 1 to 6 or Alt+1 to Alt+6 switch tabs, / focuses the filter, ? lists the shortcuts.
+- Runs: plot the results of the selected cases or of one case, open a case in the editor, run a finished or failed job again, remove a single waiting job, show only failures; history and long queues are paged. Filters and options are remembered.
+- Generators: after creating files, one click selects the new cases in Runs. Overview: open the parameter file that wrote a result.
+- Connection: a banner on every tab when the workbench cannot be reached, with a retry button; after the workbench was restarted the page says so and offers a reload. Errors that only went to the browser console now show as a short message.
+- Safety: Move to trash, Stop current run, Remove waiting, Clear history, and removing a saved view ask for a second click (no browser dialogs). The editor warns before unsaved changes are discarded.
+- Loading indicators and empty states in Runs, Overview, Results, and the queue; a compact header in narrow windows.
+- Fixes: "Remove waiting" also removes waiting jobs beyond the 200 most recent jobs; the live run box no longer shows as an empty bar when nothing runs; the Last run column follows the selected program; English UI text uses US spelling.
+- Keep awake on Windows: the helper now also holds power requests (PowerSetRequest, system and execution required), visible in `powercfg /requests`. New option in Settings to keep the display on as well, for laptops with Modern Standby, where Windows can enter standby once the display is off or the computer is locked.
+- Tools: `rifi_kernel_fit.py` fits the ripple filter kernel (mean water equivalent thickness and its spread) from depth dose curves with and without the filter, as Gaussian, uniform, pyramid, and free-form kernel, and reports the best shape. The true kernel comes from the TOPAS parameter file (TsRidgeFilter, crossed filters as convolution, TsCAD STL by ray casting through the mesh) or from `--pin`, `--stl`, `--heightmap`; `--show-kernel` only analyses a filter geometry. Pairs are found automatically (every `*rifi0*` curve with all variants, also from the parent folder), PTW .mcc and two-column files are read. `rifi_shapes_figure.py` draws filter shape against thickness distribution and the convolution of a depth dose. `topas2matrad.py`: `--min-spacing` together with `--spacing-bpw` sets the lower limit of the peak distance.
+- Ripple filter generator: 2D straight pyramids (`pyr3`, `pyr4`, `pyr6`, STL) and 1D ridges with the same thickness distribution as the 2D pins (`pin4e`, `pyr4e`), to check that only the distribution matters for the depth dose.
+- API, all additions optional (existing endpoints unchanged): `/api/jobs?hist=N` returns all active jobs plus the last N finished ones, with `counts`, `finished`, and `rev`; `/api/dequeue` accepts `{"all": true}`; `/api/outputs` lists the plottable outputs of parameter files; `/api/params` and `/api/index` carry a `stale` flag; `/file?...&v=MTIME` may be cached by the browser.
+
 ## 0.4.0
 
 - Export: plot as PNG (1x to 3x) and SVG in a light print style, plotted data as CSV, plot to the clipboard; selected results and filtered images as ZIP; download button in the image viewer.
