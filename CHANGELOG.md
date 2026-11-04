@@ -8,6 +8,7 @@
 - Runs tab: TOPAS processes started outside the queue that work in the workspace show as "external" (Linux and WSL), without a stop button, and count in the tab badge. `/api/jobs` has a new field `external`.
 - Fix: `--port 0` printed and stored port 0 instead of the port the system chose.
 - A workbench now also ends cleanly, stopping the running job and removing `server.json`, when its terminal is closed (SIGHUP).
+- Fixes: `rifi_kernel_fit.py` also runs with numpy older than 2.0. It called `np.trapezoid`, which exists only from numpy 2.0 on.
 
 ## 0.5.0
 
