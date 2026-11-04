@@ -287,13 +287,64 @@ def test_external_runs_listed_read_only(srv, ws, tmp_path_factory, monkeypatch):
         (100, "TOPAS 3.9", "cases/a.txt", "cases"), (500, "topas4", "cases/a.txt", str(other))]
     assert runs[0]["elapsed"] == pytest.approx(1000 - 500 / os.sysconf("SC_CLK_TCK"), abs=5)
     # end to end: the HTTP answer and the MCP tool carry them
-    c = Client(ws, "--no-start"); c.init()
-    _, q = c.tool("queue_status")
-    assert [x["pid"] for x in q["external"]] == [100, 500] and q["running"] == []
-    c.close()
-    wb.STATE["proc"] = None
+    try:
+        c = Client(ws, "--no-start"); c.init()
+        _, q = c.tool("queue_status")
+        assert [x["pid"] for x in q["external"]] == [100, 500] and q["running"] == []
+        c.close()
+    finally:
+        wb.STATE["proc"] = None
 
 
 def test_external_runs_empty_without_proc(ws, monkeypatch):
     monkeypatch.setattr(wb, "PROC_DIR", str(ws / "no-proc"))
     assert wb.external_runs(max_age=0) == []
+
+
+def test_no_second_workbench_beside_one_without_server_file(ws, tmp_path_factory, monkeypatch):
+    """A workbench before 0.6.0 writes no server.json; starting another would run a second queue on the same files."""
+    proc = tmp_path_factory.mktemp("proc"); other = tmp_path_factory.mktemp("other")
+    monkeypatch.setattr(wb, "PROC_DIR", str(proc))
+    real = os.path.realpath(str(ws))
+    assert mcp.workbench_without_file(real) is None   # empty /proc
+    fake_proc(proc, 10, ["python3", "-m", "opentopas_workbench", "mcp", "--workspace", str(ws)], ws)   # an adapter
+    fake_proc(proc, 11, ["python3", "-m", "opentopas_workbench", "--workspace", str(other)], ws)     # other workspace
+    fake_proc(proc, 12, ["/home/u/.local/bin/opentopas-workbench", "jobs"], ws)                      # a subcommand
+    assert mcp.workbench_without_file(real) is None
+    fake_proc(proc, 13, ["python3", "-m", "opentopas_workbench", "--workspace", "."], ws, pgid=13)   # relative to its cwd
+    assert mcp.workbench_without_file(real) == 13
+    with pytest.raises(mcp.ApiError, match="pid 13"):
+        mcp.Workbench(str(ws)).connect()
+    assert not (ws / ".workbench" / "server.log").exists()   # nothing was started
+
+
+def test_malformed_messages_get_errors_and_the_server_lives_on(client):
+    for params in ([1], "abc", {"name": ["x"]}, {"name": "info", "arguments": [1]}):
+        method = "tools/call" if isinstance(params, dict) else "ping"
+        assert client.send(method, params)["error"]["code"] == -32602
+    assert client.send("ping")["result"] == {}
+
+
+def test_no_writes_into_the_workbench_folder_and_no_token(client, ws):
+    """Settings name the programs that runs execute and generators are Python, so writing there would run any code."""
+    for path in (".workbench/config.json", "./.workbench/generators/x.py", "a/../.workbench/x.json"):
+        r, msg = client.tool("write_file", path=path, text="{}")
+        assert r["isError"] and ".workbench" in msg
+    assert not (ws / ".workbench" / "generators" / "x.py").exists()
+    r, msg = client.tool("generate", generator="pencil_beam", folder=".workbench/generators")
+    assert r["isError"]
+    r, msg = client.tool("read_file", path=".workbench/server.json")
+    assert r["isError"] and "token" in msg and wb.TOKEN not in msg
+    r, res = client.tool("write_file", path="workbench.txt", text="ok")   # a name alike, outside the folder, is fine
+    assert not r["isError"]
+
+
+def test_default_workspace_skips_a_home_workbench_folder(tmp_path, monkeypatch):
+    home = tmp_path / "home"; (home / ".workbench").mkdir(parents=True); (home / "cases" / "sub").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(home / "cases" / "sub")
+    assert mcp.default_workspace() == os.getcwd()
+    (home / "cases" / ".workbench").mkdir()
+    assert mcp.default_workspace() == os.path.realpath(home / "cases")
+    monkeypatch.chdir(home)
+    assert mcp.default_workspace() == os.path.realpath(home)

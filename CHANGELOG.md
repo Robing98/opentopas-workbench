@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- MCP server: `opentopas-workbench mcp` is a stdio MCP server over the HTTP API of a running workbench, for Claude Code, Claude Desktop, and other MCP clients. Tools read cases, results, curves, the queue, and logs, and write files, generate cases, queue, remove, and stop runs; `--read-only` offers only the reading tools. Files in `.workbench` (settings, generator plugins, the token) cannot be written or read through it. It speaks protocol versions 2024-11-05 to 2025-11-25 with `initialize` and 2026-07-28 with `server/discover`. See [MCP server](README.md#mcp-server).
+- Discovery: a running workbench writes `.workbench/server.json` (address, token, process id; readable only by the owner) and removes it on exit. The MCP server and the new commands find the workbench through it and start one in the background when none runs (`--no-start` turns that off).
+- Commands: `opentopas-workbench enqueue FILES...` queues parameter files and `opentopas-workbench jobs` prints the queue, both without the browser.
+- Runs tab: TOPAS processes started outside the queue that work in the workspace show as "external" (Linux and WSL), without a stop button, and count in the tab badge. `/api/jobs` has a new field `external`.
+- Fix: `--port 0` printed and stored port 0 instead of the port the system chose.
+- A workbench now also ends cleanly, stopping the running job and removing `server.json`, when its terminal is closed (SIGHUP).
+
 ## 0.5.0
 
 - Speed: the Runs tab no longer resolves every case path with realpath and lists result sub folders once per folder instead of once per case. For 300 cases this drops from about 4,600 file system calls to about 360 after a change (seconds on WSL /mnt/c before), and to none while cached.

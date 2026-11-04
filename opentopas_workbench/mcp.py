@@ -7,7 +7,8 @@ It speaks both protocol eras: the "initialize" handshake of the revisions up to 
 "_meta" with "server/discover" of 2026-07-28. Standard library only.
 
 Finding the workbench: every workbench writes its address and token to <workspace>/.workbench/server.json. With
---workspace (default: the current folder) the adapter reads that file. When no workbench runs for the workspace,
+--workspace (default: the nearest folder upward with a .workbench folder, else the current folder) the adapter reads
+that file. When no workbench runs for the workspace,
 it starts one in the background (no browser, output in .workbench/server.log), because queued runs have to outlive
 the MCP client; --no-start reports an error instead. With --url the token comes from --token or the environment
 variable OPENTOPAS_WORKBENCH_TOKEN.
@@ -17,6 +18,10 @@ Paths are relative to the workspace; the HTTP API refuses anything outside it. T
 import argparse, fnmatch, json, math, os, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
 
 from . import __version__ as VERSION
+
+# cwd of a started workbench: "python -m" puts the cwd first on sys.path, so a folder opentopas_workbench in the
+# workspace would be imported instead of this package
+PACKAGE_PARENT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 MODERN_VERSIONS = ["2026-07-28"]                                           # per-request _meta, server/discover
 LEGACY_VERSIONS = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"]   # initialize handshake
@@ -64,6 +69,36 @@ def read_server_file(workspace):
     return url, token, pid
 
 
+def workbench_without_file(workspace):
+    """Pid of a running workbench server for this workspace (Linux and WSL, via /proc), else None. Subcommands
+    (mcp, enqueue, jobs) do not count. Only called when server.json gave no live workbench."""
+    from .server import PROC_DIR
+    if not os.path.isdir(PROC_DIR): return None
+    for d in os.listdir(PROC_DIR):
+        if not d.isdigit() or int(d) == os.getpid(): continue
+        try:
+            with open(os.path.join(PROC_DIR, d, "cmdline"), "rb") as fh:
+                argv = [a.decode("utf-8", "replace") for a in fh.read().split(b"\0") if a]
+            cwd = os.readlink(os.path.join(PROC_DIR, d, "cwd"))
+        except OSError:
+            continue   # gone meanwhile, or another user's process
+        if "opentopas_workbench" in argv:
+            rest = argv[argv.index("opentopas_workbench") + 1:]
+        elif argv and os.path.basename(argv[0]) == "opentopas-workbench":
+            rest = argv[1:]
+        elif len(argv) > 1 and os.path.basename(argv[1]) == "opentopas-workbench":   # python3 .../bin/opentopas-workbench
+            rest = argv[2:]
+        else:
+            continue
+        if rest[:1] in (["mcp"], ["enqueue"], ["jobs"]): continue
+        ws = cwd
+        for i, a in enumerate(rest):
+            if a == "--workspace" and i + 1 < len(rest): ws = os.path.join(cwd, rest[i + 1])
+            elif a.startswith("--workspace="): ws = os.path.join(cwd, a.split("=", 1)[1])
+        if os.path.realpath(ws) == workspace: return int(d)
+    return None
+
+
 class Workbench:
     def __init__(self, workspace=None, url=None, token=None, start=True):
         self.workspace = os.path.realpath(workspace) if workspace else None
@@ -95,11 +130,16 @@ class Workbench:
         return None
 
     def _spawn(self):
+        other = workbench_without_file(self.workspace)
+        if other:
+            # a second workbench would run a second queue on the same files; a version before 0.6.0 writes no server.json
+            raise ApiError(f"a workbench (pid {other}) already runs for {self.workspace} but wrote no .workbench/server.json, "
+                           f"probably an older version. Restart it with this version, or pass --url and --token.")
         wb = os.path.join(self.workspace, ".workbench"); os.makedirs(wb, exist_ok=True)
         log = os.path.join(wb, "server.log")
         with open(log, "w") as fh:
             proc = subprocess.Popen([sys.executable, "-m", "opentopas_workbench", "--workspace", self.workspace, "--no-browser"],
-                                    stdin=subprocess.DEVNULL, stdout=fh, stderr=subprocess.STDOUT, cwd=self.workspace,
+                                    stdin=subprocess.DEVNULL, stdout=fh, stderr=subprocess.STDOUT, cwd=PACKAGE_PARENT,
                                     start_new_session=True)   # keeps running, with its queue, after the MCP client exits
         t_end = time.time() + START_TIMEOUT
         while time.time() < t_end:
@@ -231,7 +271,15 @@ def t_list_cases(wb, a):
     return {"total": len(out), "cases": out[:limit], "truncated": len(out) > limit}
 
 
+def inside_wb_dir(path):
+    """True for paths in the workbench's own folder: settings (program commands), generator plugins (Python), the token."""
+    parts = [x for x in os.path.normpath(str(path).replace("\\", "/")).split(os.sep) if x not in ("", ".")]
+    return bool(parts) and parts[0] == ".workbench"
+
+
 def t_read_file(wb, a):
+    if os.path.normpath(str(a["path"])).lstrip(os.sep) == os.path.join(".workbench", "server.json"):
+        raise ApiError("the server file holds the API token and is not readable through MCP")
     r = wb.get("/api/read", p=a["path"])
     return {"path": a["path"], "text": r["text"], "lint": lint_items(r["lint"]),
             "includes": [{"line": n, "name": name, "path": p} for n, name, p in r["includes"]]}
@@ -328,6 +376,8 @@ def t_case_outputs(wb, a):
 
 
 def t_write_file(wb, a):
+    # the settings name the programs that runs execute, and generators are Python: writing there would run any code
+    if inside_wb_dir(a["path"]): raise ApiError("files in .workbench (settings, generator plugins) cannot be written through MCP")
     r = wb.post("/api/write", {"p": a["path"], "text": a["text"]})
     return {"ok": True, "path": a["path"], "lint": lint_items(r["lint"])}
 
@@ -340,6 +390,7 @@ def t_generate(wb, a):
     values.update(a.get("values") or {})
     unknown = sorted(set(a.get("values") or {}) - {f["key"] for f in g["fields"]})
     if unknown: raise ApiError(f"unknown fields for {a['generator']}: {', '.join(unknown)}")
+    if inside_wb_dir(a.get("folder", "")): raise ApiError("cannot generate into .workbench")
     r = wb.post("/api/generate", {"id": a["generator"], "values": values, "folder": a.get("folder", ""),
                                   "overwrite": bool(a.get("overwrite")), "preview": bool(a.get("preview"))})
     folder = a.get("folder", "").strip("/")
@@ -467,6 +518,7 @@ class Server:
 
     def call_tool(self, params):
         name, args = params.get("name"), params.get("arguments") or {}
+        if not isinstance(name, str) or not isinstance(args, dict): raise RpcError(-32602, "tools/call needs a name and an arguments object")
         if name not in TOOLS: raise RpcError(-32602, f"Unknown tool: {name}")
         fn, writes, _, schema = TOOLS[name]
         if writes and self.read_only:
@@ -492,13 +544,17 @@ class Server:
             return {"jsonrpc": "2.0", "id": msg.get("id") if isinstance(msg, dict) else None,
                     "error": {"code": -32600, "message": "Invalid Request"}}
         if "id" not in msg: return None   # notifications: initialized, cancelled; nothing to answer
+        params = msg.get("params") or {}
         try:
-            result = self.dispatch(msg["method"], msg.get("params") or {})
+            if not isinstance(params, dict): raise RpcError(-32602, "params must be an object")
+            result = self.dispatch(msg["method"], params)
             return {"jsonrpc": "2.0", "id": msg["id"], "result": result}
         except RpcError as e:
             err = {"code": e.code, "message": e.message}
             if e.data is not None: err["data"] = e.data
             return {"jsonrpc": "2.0", "id": msg["id"], "error": err}
+        except Exception as e:   # one bad message must not end the server for the client
+            return {"jsonrpc": "2.0", "id": msg["id"], "error": {"code": -32603, "message": f"Internal error: {e!r}"}}
 
     def dispatch(self, method, params):
         if method == "initialize":   # legacy handshake: answer the requested version if known, else the newest legacy one
@@ -540,8 +596,11 @@ class Server:
 def default_workspace():
     """The nearest folder upward from the current one that holds a .workbench folder, else the current folder."""
     d = os.path.realpath(os.getcwd())
+    home = os.path.realpath(os.path.expanduser("~"))
     while True:
-        if os.path.isdir(os.path.join(d, ".workbench")): return d
+        # the home folder only when it is the current one: before 0.6.0 the default workspace was the current folder,
+        # so a ~/.workbench from one start in ~ would otherwise make every folder below it that workspace
+        if os.path.isdir(os.path.join(d, ".workbench")) and (d != home or d == os.path.realpath(os.getcwd())): return d
         up = os.path.dirname(d)
         if up == d: return os.getcwd()
         d = up

@@ -1607,10 +1607,13 @@ def write_server_file(url):
     The MCP adapter (mcp.py) finds a running workbench through it; the token in it grants the same access as the page."""
     os.makedirs(wb_dir(), exist_ok=True)
     path = os.path.join(wb_dir(), SERVER_FILE)
-    fd = os.open(path + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    tmp = f"{path}.{os.getpid()}.tmp"   # own name per process: two starting at once must not replace each other's file
+    try: os.unlink(tmp)
+    except OSError: pass
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)   # O_EXCL: a leftover file would keep its wider mode
     with os.fdopen(fd, "w") as fh:
         json.dump({"url": url, "token": TOKEN, "pid": os.getpid(), "version": VERSION}, fh)
-    os.replace(path + ".tmp", path)
+    os.replace(tmp, path)
     return path
 
 
@@ -1652,11 +1655,12 @@ def main(argv=None):
     url = f"http://localhost:{port}/"
     print(f"OpenTOPAS Workbench {VERSION}\n  workspace: {STATE['root']}\n  open:      {url}\n  stop:      Ctrl+C", flush=True)
     write_server_file(url)
-    # SIGTERM (kill, a closing terminal) ends like Ctrl+C, so the running job is stopped and server.json goes away
+    # SIGTERM (kill) and SIGHUP (a closing terminal) end like Ctrl+C, so the running job is stopped and server.json goes away
     def on_term(*_): raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, on_term)
-    if not a.no_browser: open_browser(url)
+    if hasattr(signal, "SIGHUP"): signal.signal(signal.SIGHUP, on_term)
     try:
+        if not a.no_browser: open_browser(url)
         srv.serve_forever()
     except KeyboardInterrupt:
         stop_current()
