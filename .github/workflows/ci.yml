@@ -6,12 +6,16 @@ jobs:
   test:
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
-        python: ["3.9", "3.12"]
-        exclude:
-          - os: macos-latest
+        include:
+          # oldest supported Python: ubuntu-latest (26.04) only offers 3.10 and later
+          - os: ubuntu-24.04
             python: "3.9"
+          - os: ubuntu-latest
+            python: "3.12"
+          - os: macos-latest
+            python: "3.12"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
