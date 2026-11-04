@@ -216,13 +216,14 @@ def wait_for(cond, timeout=30.0):
 def test_server_file_written_and_removed(tmp_path):
     log = open(tmp_path / "server.out", "w")
     p = subprocess.Popen([sys.executable, "-m", "opentopas_workbench", "--workspace", str(tmp_path), "--no-browser", "--port", "0"],
-                         stdout=log, stderr=subprocess.STDOUT)
+                         stdout=log, stderr=subprocess.STDOUT, env={**os.environ, "PYTHONFAULTHANDLER": "1"})
     try:
         f = tmp_path / ".workbench" / "server.json"
         try:
             s = wait_for(lambda: f.exists() and json.loads(f.read_text()))
-        except AssertionError:   # say why the workbench did not come up
-            raise AssertionError(f"no server.json; workbench exit {p.poll()}, output: {(tmp_path / 'server.out').read_text()[-2000:]}")
+        except AssertionError:   # say why the workbench did not come up; SIGABRT makes the fault handler print every stack
+            if p.poll() is None: p.send_signal(signal.SIGABRT); p.wait(timeout=10)
+            raise AssertionError(f"no server.json; workbench exit {p.poll()}, output: {(tmp_path / 'server.out').read_text()[-6000:]}")
         assert s["pid"] == p.pid and stat.S_IMODE(f.stat().st_mode) == 0o600
         req = urllib.request.Request(s["url"].replace("localhost", "127.0.0.1") + "api/info", headers={"X-Token": s["token"]})
         with urllib.request.urlopen(req) as r: assert os.path.realpath(json.loads(r.read())["root"]) == os.path.realpath(tmp_path)
