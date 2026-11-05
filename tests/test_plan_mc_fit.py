@@ -95,7 +95,9 @@ def test_topas_csv_and_binary(tmp_path):
     assert h["bins"]["X"][:2] == (2, 5.0) and h["bins"]["Z"][:2] == (3, 1.0) and h["reports"] == ["Sum", "Standard_Deviation"]
     assert d["Sum"].shape == (2, 1, 3) and d["Sum"][1, 0, 2] == 12 and d["Standard_Deviation"][1, 0, 2] == pytest.approx(1.2)
     (tmp_path / "d.binheader").write_text(HEADER)
-    np.array([v for _, v in sorted(vals.items())], "<f8").ravel().tofile(str(tmp_path / "d.bin"))
+    # TOPAS 4.3 binary layout, seen in a real run (checks/ct_range.py): reports of one bin together, X fastest
+    order = sorted(vals, key=lambda b: (b[2], b[1], b[0]))
+    np.array([vals[b] for b in order], "<f8").ravel().tofile(str(tmp_path / "d.bin"))
     hb, db = topas_io.read(str(tmp_path / "d"))
     assert np.array_equal(db["Sum"], d["Sum"]) and np.allclose(db["Standard_Deviation"], d["Standard_Deviation"])
     z, c = topas_io.depth_curve(str(csv))

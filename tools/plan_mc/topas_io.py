@@ -41,9 +41,10 @@ def read(path):
         raw = np.fromfile(base + ".bin", dtype="<f8")
         n, k = int(np.prod(shape(h))), max(1, len(h["reports"]))
         if raw.size != n * k: raise ValueError(f"{base}.bin: {raw.size} values, header says {n} bins x {k} reports")
-        # TOPAS binary: all reports of one bin together, bins in the csv order (k fastest)
+        # TOPAS binary: all reports of one bin together, bins with X (or R) fastest, Z slowest. Verified against the
+        # csv of the same scorer in TOPAS 4.3 (checks/ct_range.py, 50 x 320 x 40 bins, Sum and Standard_Deviation).
         data = raw.reshape(n, k)
-        return h, {r: data[:, i].reshape(shape(h)) for i, r in enumerate(h["reports"] or ["Sum"])}
+        return h, {r: data[:, i].reshape(shape(h), order="F") for i, r in enumerate(h["reports"] or ["Sum"])}
     with open(path) as fh: lines = fh.readlines()
     h = parse_header(lines)
     rows = np.array([[float(v) for v in l.split(",")] for l in lines if l.strip() and not l.startswith("#")])

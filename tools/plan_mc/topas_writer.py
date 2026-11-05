@@ -191,6 +191,10 @@ s:Ge/Patient/Type = "TsDicomPatient"
 s:Ge/Patient/Parent = "PatientIso"
 s:Ge/Patient/DicomDirectory = "{dicom_dir}"
 # DicomOrigin is where the component centre sits in DICOM coordinates, so this places DICOM (0, 0, 0) at PatientIso.
+# TOPAS overwrites these placeholders when it reads the CT; without them the Trans lines name an unknown parameter.
+dc:Ge/Patient/DicomOriginX = 0.0 mm
+dc:Ge/Patient/DicomOriginY = 0.0 mm
+dc:Ge/Patient/DicomOriginZ = 0.0 mm
 d:Ge/Patient/TransX = 1.0 * Ge/Patient/DicomOriginX mm
 d:Ge/Patient/TransY = 1.0 * Ge/Patient/DicomOriginY mm
 d:Ge/Patient/TransZ = 1.0 * Ge/Patient/DicomOriginZ mm
