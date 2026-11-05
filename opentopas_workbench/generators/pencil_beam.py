@@ -2,7 +2,17 @@
 
 Plugin interface (see README): NAME, DESCRIPTION, FIELDS, generate(values) -> [(relative path, text or bytes)].
 """
-import math
+import importlib.util, math, os
+
+
+def _monitor_helper():
+    """The shared monitor option in _monitors.py, loaded by path like the generators themselves."""
+    spec = importlib.util.spec_from_file_location("wbgen__monitors", os.path.join(os.path.dirname(os.path.abspath(__file__)), "_monitors.py"))
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    return mod
+
+
+MON = _monitor_helper()
 
 NAME = {"en": "Pencil beam in a phantom", "de": "Pencil Beam im Phantom"}
 DESCRIPTION = {
@@ -42,7 +52,7 @@ FIELDS = [
     {"key": "spread", "type": "number", "label": {"en": "Energy spread [%]", "de": "Energiebreite [%]"}, "default": 0.2},
     {"key": "sigma", "type": "number", "label": {"en": "Spot sigma [mm]", "de": "Spot-Sigma [mm]"}, "default": 3.0},
     {"key": "prefix", "type": "text", "label": {"en": "File name prefix", "de": "Präfix Dateiname"}, "default": "pb"},
-]
+] + MON.FIELDS
 
 
 def csda_cm(nucleons, charge, e_u):
@@ -143,6 +153,8 @@ s:Sc/Map/OutputType = "csv"
 s:Sc/Map/IfOutputFileAlreadyExists = "Overwrite"
 s:Sc/Map/OutputFile = "{name}_map"
 """
+            # monitors: just after the source and at the phantom surface
+            t += MON.block(v, name, [gap - 0.5, 0] if gap > 1 else [0], total, (side / 2 + 5) * 10, (hlz_world + depth / 2) * 10)
             if total > 500 and not part.startswith("GenericIon"):
                 t += "\n# Total kinetic energy above the default EM table range for this particle (500 MeV in TOPAS 3.9, 600 MeV in OpenTOPAS).\nd:Ph/Default/EMRangeMax = " + num(max(1000, math.ceil(total * 1.2 / 100) * 100)) + " MeV\n"
             files.append((name + ".txt", t))
