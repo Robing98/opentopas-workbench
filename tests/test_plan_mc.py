@@ -152,3 +152,27 @@ def test_beamline_places_range_shifter_and_ripple_filter():
     disp = re.search(r"dv:Ge/RiFi1/Displacement = (\d+) ", text)
     assert int(disp.group(1)) == int(200 / 1.5) + 1
     with pytest.raises(ValueError): tw.beamline_block({"ripple_filter": {"variant": "pin4", "iso_distance_mm": 1080}})
+
+
+def oblique_dose(p, u, centres, lo, hi, shift=(0.0, 0.0, 0.0)):
+    """Toy pencil-beam dose in a box: depth counted from the box face along the beam, so an oblique entry tilts the
+    peak region like in TOPAS. shift moves the true beam away from the predicted ray."""
+    P = np.stack(np.meshgrid(*centres, indexing="ij"), -1) - np.asarray(shift)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        tb = np.min(np.stack([np.where(u[k] > 0, (P[..., k] - lo[k]) / u[k], np.where(u[k] < 0, (P[..., k] - hi[k]) / u[k], np.inf))
+                              for k in range(3)]), 0)
+    r = P - p; t = r @ u; lat = np.linalg.norm(r - t[..., None] * u, axis=-1)
+    dd = np.where(tb < 77, 0.25 + 0.75 * np.exp((tb - 77) / 10), np.exp(-0.5 * ((tb - 77) / 1.5) ** 2))
+    return dd * np.exp(-0.5 * (lat / 3.5) ** 2)
+
+
+def test_alignment_slab_axis_tolerates_oblique_entry_and_sees_a_shift():
+    from plan_mc.checks import alignment as A
+    centres = np.asarray(A.ISO)[:, None] + (np.arange(80) + 0.5) * 2 - 80
+    lo, hi = np.asarray(A.ISO) - 80, np.asarray(A.ISO) + 80
+    p, u = iec.spot_ray(*A.SPOT, 120, 20, A.ISO, position="HFP")
+    d, dist, n = A.slab_axis(oblique_dose(p, u, centres, lo, hi), centres, p, u)
+    assert n >= 10 and dist < 0.5 and 1000 * np.arccos(min(1.0, d @ u)) < 5.0
+    off = np.cross(u, [0, 0, 1.0]); off = 1.5 * off / np.linalg.norm(off)
+    _, dist, _ = A.slab_axis(oblique_dose(p, u, centres, lo, hi, shift=off), centres, p, u)
+    assert dist == pytest.approx(1.5, abs=0.3)

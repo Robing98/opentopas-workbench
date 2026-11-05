@@ -1,0 +1,75 @@
+{
+ "source": "Geant4 11.4.2 as built in /home/robin/opentopas/geant4-install, printed by g4el.cc (G4NistManager elements; I from the elementary NIST materials, used by G4IonisParamMat for Bragg additivity of mixtures)",
+ "read_on": "2026-11-05",
+ "elements": {
+  "H": {
+   "Z": 1,
+   "A_g_per_mol": 1.007941,
+   "I_eV": 19.2
+  },
+  "C": {
+   "Z": 6,
+   "A_g_per_mol": 12.010736,
+   "I_eV": 81.0
+  },
+  "N": {
+   "Z": 7,
+   "A_g_per_mol": 14.006769,
+   "I_eV": 82.0
+  },
+  "O": {
+   "Z": 8,
+   "A_g_per_mol": 15.99939,
+   "I_eV": 95.0
+  },
+  "Mg": {
+   "Z": 12,
+   "A_g_per_mol": 24.305016,
+   "I_eV": 156.0
+  },
+  "P": {
+   "Z": 15,
+   "A_g_per_mol": 30.9738,
+   "I_eV": 173.0
+  },
+  "S": {
+   "Z": 16,
+   "A_g_per_mol": 32.066114,
+   "I_eV": 180.0
+  },
+  "Cl": {
+   "Z": 17,
+   "A_g_per_mol": 35.452573,
+   "I_eV": 174.0
+  },
+  "Ar": {
+   "Z": 18,
+   "A_g_per_mol": 39.947693,
+   "I_eV": 188.0
+  },
+  "Ca": {
+   "Z": 20,
+   "A_g_per_mol": 40.078032,
+   "I_eV": 191.0
+  },
+  "Na": {
+   "Z": 11,
+   "A_g_per_mol": 22.9898,
+   "I_eV": 149.0
+  },
+  "K": {
+   "Z": 19,
+   "A_g_per_mol": 39.098293,
+   "I_eV": 190.0
+  },
+  "Ti": {
+   "Z": 22,
+   "A_g_per_mol": 47.866717,
+   "I_eV": 233.0
+  }
+ },
+ "G4_WATER": {
+  "I_eV": 78.0,
+  "density": 1.0
+ }
+}
