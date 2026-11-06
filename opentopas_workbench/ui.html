@@ -151,6 +151,7 @@ kbd{font:12.5px ui-monospace,Consolas,monospace;padding:1px 6px;border:1px solid
     <span class="sep" aria-hidden="true"></span>
     <button role="tab" data-tab="explorer"><span data-i18n="tab_explorer"></span></button>
     <button role="tab" data-tab="results"><span data-i18n="tab_results"></span></button>
+    <button role="tab" data-tab="beam"><span data-i18n="tab_beam"></span></button>
     <span class="sep" aria-hidden="true"></span>
     <button role="tab" data-tab="settings"><span data-i18n="tab_settings"></span></button>
   </nav>
@@ -305,6 +306,39 @@ kbd{font:12.5px ui-monospace,Consolas,monospace;padding:1px 6px;border:1px solid
   </div>
 </section>
 
+<!-- BEAM PROFILE -->
+<section id="beam" class="tab">
+  <div class="split">
+    <div class="card">
+      <h2 data-i18n="bp_cases"></h2>
+      <div class="row"><label><span data-i18n="scope"></span> <select id="bpFolder" class="scopeSel" data-k="scope_beam"></select></label><button id="bpReload" data-i18n-title="reload_tip">↻</button></div>
+      <div class="row"><input id="bpFilter" style="flex:1" data-i18n-ph="filter_ph"><button id="bpAll" data-i18n="select_all"></button><button id="bpNone" data-i18n="select_none"></button></div>
+      <div class="scroll"><table><thead><tr><th></th><th data-i18n="bp_case"></th><th data-i18n="bp_planes"></th><th data-i18n="bp_dose"></th></tr></thead><tbody id="bpBody"></tbody></table></div>
+      <p class="mute" data-i18n="bp_hint"></p>
+    </div>
+    <div class="card">
+      <h2 data-i18n="tab_beam"></h2>
+      <div class="row">
+        <label><span data-i18n="view"></span> <select id="bpView"><option value="profiles" data-i18n="bp_v_profiles"></option><option value="map" data-i18n="bp_v_map"></option><option value="envelope" data-i18n="bp_v_envelope"></option><option value="spectrum" data-i18n="bp_v_spectrum"></option><option value="dose" data-i18n="bp_v_dose"></option><option value="sigmaz" data-i18n="bp_v_sigmaz"></option></select></label>
+        <label id="bpPosL"><span data-i18n="bp_plane"></span> <select id="bpPos"></select></label>
+        <label id="bpKindL"><span data-i18n="bp_kind"></span> <select id="bpKind"><option value="p" data-i18n="bp_k_p"></option><option value="e" data-i18n="bp_k_e"></option><option value="o" data-i18n="bp_k_o"></option><option value="all" data-i18n="bp_k_all"></option></select></label>
+        <label id="bpModeL"><span data-i18n="bp_mode"></span> <select id="bpMode"><option value="int" data-i18n="bp_m_int"></option><option value="cut" data-i18n="bp_m_cut"></option></select></label>
+        <label id="bpAxisL"><span data-i18n="bp_axis"></span> <select id="bpAxis"><option value="xy">x + y</option><option value="x">x</option><option value="y">y</option></select></label>
+        <label id="bpQtyL"><span data-i18n="bp_qty"></span> <select id="bpQty"><option value="sigma" data-i18n="bp_q_sigma"></option><option value="fwhm">FWHM</option><option value="centroid" data-i18n="bp_q_centroid"></option><option value="halo3s" data-i18n="bp_q_halo3s"></option><option value="halo_dg" data-i18n="bp_q_halo_dg"></option></select></label>
+        <label id="bpLogL"><input type="checkbox" id="bpLog"> <span data-i18n="log_y"></span></label>
+      </div>
+      <div class="row" id="bpDepthRow" hidden><label style="flex:1;display:flex;gap:8px;align-items:center"><span data-i18n="bp_depth"></span> <input type="range" id="bpK" min="0" max="0" value="0" style="flex:1"></label><span id="bpDepth" class="mute" style="min-width:90px"></span></div>
+      <div class="row">
+        <span class="spacer"></span>
+        <span class="mute" data-i18n="export"></span><button id="bpPng">PNG</button><select id="bpScale" aria-label="scale"><option value="1">1×</option><option value="2" selected>2×</option><option value="3">3×</option></select><button id="bpSvg">SVG</button><button id="bpCsv" data-i18n="exp_data"></button>
+        <label><input type="checkbox" id="bpLight" checked> <span data-i18n="exp_light"></span></label>
+      </div>
+      <div class="plotwrap"><canvas id="bpPlot" width="1200" height="560" aria-label="beam profile plot"></canvas><div id="bpEmpty" class="plholder"></div></div>
+      <div id="bpMetrics"></div>
+    </div>
+  </div>
+</section>
+
 <!-- GENERATORS -->
 <section id="gen" class="tab">
   <div class="card">
@@ -398,6 +432,25 @@ const I18N={
   plot_short:"Plot",plot_outputs:"Plot outputs",open_editor:"Open in editor",rf_plot:"Plot results",no_outputs:"No plottable results found for the selection.",gen_to_runs:"Open {n} files in Runs",pl_empty:"Tick files on the left or select them in the Overview to plot them.",reload_tip:"Reload",
   unsaved_q:"Unsaved changes. Click again to discard them, Ctrl+S saves.",
   error:"Error"}};
+/* Beam profile view */
+Object.assign(I18N.de,{tab_beam:"Strahlprofil",bp_cases:"Fälle mit Monitoren",bp_case:"Fall",bp_planes:"Ebenen",bp_dose:"Dosis",
+ bp_hint:"Fälle aus mon_<Position>_<Fall>_<p|e|o|all> in einem Ordner; Dosis aus 3D-Gittern mit dem Fallnamen. Mehrere Fälle ankreuzen, um sie zu überlagern.",
+ bp_none:"Keine Monitor-Ausgaben in diesem Ordner. Monitore im Generator einschalten (Ripple-Filter, Pencil Beam) und die Fälle rechnen.",
+ bp_v_profiles:"Profile",bp_v_map:"2D-Karte",bp_v_envelope:"Einhüllende",bp_v_spectrum:"Spektrum",bp_v_dose:"Dosisprofil",bp_v_sigmaz:"Sigma über Tiefe",
+ bp_plane:"Ebene",bp_kind:"Teilchen",bp_k_p:"Protonen",bp_k_e:"Elektronen",bp_k_o:"andere",bp_k_all:"alle",bp_mode:"Profil",bp_m_int:"integriert",bp_m_cut:"Schnitt durch das Zentrum",
+ bp_axis:"Achse",bp_qty:"Größe",bp_q_sigma:"Sigma (Gauß-Kern)",bp_q_centroid:"Schwerpunkt",bp_q_halo3s:"Halo-Anteil außerhalb 3σ",bp_q_halo_dg:"Halo-Anteil (Doppel-Gauß)",
+ bp_depth:"Tiefe",bp_pos:"Position vor dem Isozentrum [cm]",bp_lat:"lateral",bp_integrated:"integriert über",bp_per_bin:"pro Bin",bp_share:"Anteil [%]",
+ bp_pick:"Links Fälle ankreuzen.",bp_no_data:"Keine Daten für diese Auswahl.",bp_no_dose:"Kein 3D-Dosisgitter zu den gewählten Fällen.",bp_missing:"Fehlt bei",bp_map_one:"Die Karte zeigt den ersten gewählten Fall.",
+ bp_sigma1:"σ1 Kern",bp_sigma2:"σ2 Halo",bp_halo_dg:"Halo DG",bp_halo3s:"außerhalb 3σ",bp_peak:"Maximum",bp_mean:"Mittelwert",bp_under:"Unterlauf",bp_over:"Überlauf"});
+Object.assign(I18N.en,{tab_beam:"Beam profile",bp_cases:"Cases with monitors",bp_case:"Case",bp_planes:"Planes",bp_dose:"Dose",
+ bp_hint:"Cases come from mon_<position>_<case>_<p|e|o|all> in one folder; dose from 3D grids named after the case. Tick several cases to overlay them.",
+ bp_none:"No monitor outputs in this folder. Turn the monitors on in a generator (ripple filter, pencil beam) and run the cases.",
+ bp_v_profiles:"Profiles",bp_v_map:"2D map",bp_v_envelope:"Envelope",bp_v_spectrum:"Spectrum",bp_v_dose:"Dose profile",bp_v_sigmaz:"Sigma vs depth",
+ bp_plane:"Plane",bp_kind:"Particles",bp_k_p:"protons",bp_k_e:"electrons",bp_k_o:"other",bp_k_all:"all",bp_mode:"Profile",bp_m_int:"integrated",bp_m_cut:"cut through the center",
+ bp_axis:"Axis",bp_qty:"Quantity",bp_q_sigma:"sigma (Gaussian core)",bp_q_centroid:"centroid",bp_q_halo3s:"halo share outside 3σ",bp_q_halo_dg:"halo share (double Gaussian)",
+ bp_depth:"Depth",bp_pos:"Position before the isocenter [cm]",bp_lat:"lateral",bp_integrated:"integrated over",bp_per_bin:"per bin",bp_share:"share [%]",
+ bp_pick:"Tick cases on the left.",bp_no_data:"No data for this selection.",bp_no_dose:"No 3D dose grid for the selected cases.",bp_missing:"Missing for",bp_map_one:"The map shows the first selected case.",
+ bp_sigma1:"σ1 core",bp_sigma2:"σ2 halo",bp_halo_dg:"halo DG",bp_halo3s:"outside 3σ",bp_peak:"peak",bp_mean:"mean",bp_under:"underflow",bp_over:"overflow"});
 let LANG=document.documentElement.lang||"de";
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -447,34 +500,35 @@ function multiSelect(tbody,onChange){
  tbody.addEventListener("click",e=>{if(e.target.matches("input[type=checkbox]"))e.preventDefault()});   // state is handled on mousedown
  tbody.addEventListener("keydown",e=>{if(e.key===" "&&e.target.matches("input[type=checkbox]")){e.preventDefault();e.target.checked=!e.target.checked;e.target.closest("tr").classList.toggle("sel",e.target.checked);onChange()}});}
 /* ---------- navigation: tabs, address (deep links, back and forward), keyboard shortcuts */
-const TABS=["files","gen","run","explorer","results","settings"];
+const TABS=["files","gen","run","explorer","results","beam","settings"];
 let CUR=null,ROUTED="";
 const isTab=id=>CUR===id;
-function tabHash(id){const p=new URLSearchParams();if(id==="results")RS.pick.forEach(f=>p.append("f",f));if(id==="files"&&FM.file)p.set("p",FM.file);const q=p.toString();return "#"+id+(q?"?"+q:"")}
+function tabHash(id){const p=new URLSearchParams();if(id==="results")RS.pick.forEach(f=>p.append("f",f));if(id==="files"&&FM.file)p.set("p",FM.file);if(id==="beam"&&BP.scan){if(BP.folder)p.set("p",BP.folder);p.set("v",$("bpView").value);BP.sel.forEach(c=>p.append("c",c))}const q=p.toString();return "#"+id+(q?"?"+q:"")}
 function syncHash(push){if(!CUR)return;const h=tabHash(CUR);if(location.hash===h)return;ROUTED=h;try{history[push?"pushState":"replaceState"](null,"",h)}catch(e){}}
 function showTab(id,opt){opt=opt||{};if(!TABS.includes(id))id="files";const changed=CUR!==id;CUR=id;
  document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id===id));document.querySelectorAll("nav [role=tab]").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===id));store("tab",id);
  if(!opt.fromHash)syncHash(changed&&!opt.replace);
- if(id==="files"&&!opt.noload)fmLoad(FM.path);if(id==="run"){loadParams();renderQueue(true);showJob(true)}if(id==="results"){resLoad(RS.path);loadViews()}if(id==="explorer")exLoad(false);if(id==="gen")loadGens();if(id==="settings")loadSettings();
+ if(id==="files"&&!opt.noload)fmLoad(FM.path);if(id==="run"){loadParams();renderQueue(true);showJob(true)}if(id==="results"){resLoad(RS.path);loadViews()}if(id==="explorer")exLoad(false);if(id==="gen")loadGens();if(id==="beam")bpLoad(false);if(id==="settings")loadSettings();
  if(changed&&id==="run")poll();}
 /* #run, #results?f=a.csv&f=b.csv, #files?p=dir/case.txt */
 function routeFromHash(){const h=location.hash;if(!h||h===ROUTED)return !!h&&TABS.includes(h.slice(1).split("?")[0]);ROUTED=h;
  const s=h.slice(1),i=s.indexOf("?"),id=i<0?s:s.slice(0,i),p=new URLSearchParams(i<0?"":s.slice(i+1));if(!TABS.includes(id))return false;
  if(id==="results"){const f=p.getAll("f");if(f.length&&f.join("\n")!==RS.pick.join("\n")){RS.pick=f;RS.zoom=null;savePick()}}
+ if(id==="beam"&&(p.get("p")!=null||p.get("v")||p.getAll("c").length))BP.want={p:p.get("p"),v:p.get("v"),c:p.getAll("c")};
  if(id==="files"&&p.get("p")){showTab("files",{fromHash:true,noload:true});if(p.get("p")!==FM.file)openFile(p.get("p"));return true}
  showTab(id,{fromHash:true});return true}
 window.addEventListener("popstate",routeFromHash);window.addEventListener("hashchange",routeFromHash);
 document.querySelectorAll("nav [role=tab]").forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
 $("runBadge").onclick=()=>showTab("run");
-const FILTER_OF={files:"fmName",gen:"genSel",run:"rfFilter",explorer:"exQ",results:"resFilter",settings:"excBox"};
+const FILTER_OF={files:"fmName",gen:"genSel",run:"rfFilter",explorer:"exQ",results:"resFilter",beam:"bpFilter",settings:"excBox"};
 function helpOpen(){const k=a=>a.map(x=>`<kbd>${esc(x)}</kbd>`).join(" "),de=LANG==="de";
- $("helpBody").innerHTML=[[k(["1"])+" … "+k(["6"])+" "+(de?"oder":"or")+" "+k(["Alt+1"])+" … "+k(["Alt+6"]),t("k_tabs")],[k(["/"]),t("k_filter")],[k([(de?"Strg":"Ctrl")+"+S"]),t("k_save")],
+ $("helpBody").innerHTML=[[k(["1"])+" … "+k(["7"])+" "+(de?"oder":"or")+" "+k(["Alt+1"])+" … "+k(["Alt+7"]),t("k_tabs")],[k(["/"]),t("k_filter")],[k([(de?"Strg":"Ctrl")+"+S"]),t("k_save")],
   [k([(de?"Umschalt+Klick":"Shift+click")]),t("k_range")],[k(["?"]),t("k_help")],[k(["Esc"]),t("k_esc")]].map(([a,b])=>`<tr><td>${a}</td><td>${esc(b)}</td></tr>`).join("")+
   `<tr><td colspan="2" class="mute">${esc(t("k_back"))}</td></tr>`;$("help").hidden=false;$("helpClose").focus()}
 function helpClose(){$("help").hidden=true}
 $("helpBtn").onclick=helpOpen;$("helpClose").onclick=helpClose;$("help").onclick=e=>{if(e.target.id==="help")helpClose()};
 document.addEventListener("keydown",e=>{const typing=e.target&&e.target.closest&&e.target.closest("input,textarea,select,[contenteditable]");
- const m=/^Digit([1-6])$/.exec(e.code||"");
+ const m=/^Digit([1-7])$/.exec(e.code||"");
  if(m&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey&&(e.altKey||!typing)&&$("lightbox").hidden&&$("help").hidden){e.preventDefault();showTab(TABS[+m[1]-1]);return}
  if(e.key==="Escape"&&!$("help").hidden){helpClose();return}
  if(typing||e.ctrlKey||e.metaKey||e.altKey)return;
@@ -1000,6 +1054,138 @@ function drawMap(g,W,H,p,d,ink,mute){const G=d.grid,nu=G.length,nv=G[0].length;l
  g.save();g.translate(W-16,(Y0+Y1)/2);g.rotate(-Math.PI/2);g.textAlign="center";g.fillText(d.quantity,0,0);g.restore();
  g.fillStyle=mute;g.textAlign="left";g.fillText(p.split("/").pop()+(d.dims.every(x=>x.n>1)?`  (Σ ${d.dims[d.collapsed].name})`:""),X0,Y1-8);}
 
+/* ---------- beam profile: monitor planes, envelope along the beam line, spectra, lateral dose profiles */
+function viridis(v){const c=[[68,1,84],[59,82,139],[33,145,140],[94,201,98],[253,231,37]];v=Math.max(0,Math.min(1,v))*(c.length-1);const i=Math.min(c.length-2,Math.floor(v)),f=v-i;return c[i].map((a,k)=>Math.round(a+(c[i+1][k]-a)*f))}
+const BP={scan:null,folder:null,sel:new Set(),cache:new Map(),spec:null,seq:0,dseq:0,want:null};
+/* answers are cached per URL until the folder is reloaded; the server caches the grids by modification time */
+function bpGet(what,q){const u=`/api/beam/${what}?`+new URLSearchParams(q);if(!BP.cache.has(u))BP.cache.set(u,api(u,null,{timeout:120000}).catch(e=>{BP.cache.delete(u);throw e}));return BP.cache.get(u)}
+const bpSel=()=>(BP.scan?BP.scan.cases:[]).filter(c=>BP.sel.has(c.name));
+const bpDoseOf=c=>c.dose.length&&BP.scan?BP.scan.dose.find(d=>d.path===c.dose[0]):null;
+const bpF=(v,n=2)=>v==null||!isFinite(v)?"–":(Math.abs(v)<0.5*Math.pow(10,-n)?0:v).toFixed(n);
+const bpPct=v=>v==null||!isFinite(v)?"–":(100*v).toFixed(1);
+/* "Fluence ( /mm2 )" -> name and unit; an integrated profile carries one more mm */
+function bpUnit(q){const m=/^(.*?)\s*\(\s*(.*?)\s*\)\s*$/.exec(q||"");return m?{name:m[1],u:m[2]}:{name:q||"",u:""}}
+function bpIntUnit(u){return u==="/mm2"?"/mm":u?u+"·mm":"mm"}
+function bpYlab(q,mode,a){const {name,u}=bpUnit(q);return mode==="int"?`${name}, ${t("bp_integrated")} ${a==="x"?"y":a==="y"?"x":"y / x"} [${bpIntUnit(u)}]`:`${name}${u?` [${u}]`:""}`}
+function bpQtyLab(q){return q==="sigma"?"σ [mm]":q==="fwhm"?"FWHM [mm]":q==="centroid"?`${t("bp_q_centroid")} [mm]`:`${t("bp_q_"+q)} [%]`}
+const bpQtyVal=(f,q)=>f&&f[q]!=null?(q.startsWith("halo")?100*f[q]:f[q]):null;
+
+async function bpLoad(force,byUser){await loadInfo();const s=$("bpFolder"),st=recall("scope_beam");
+ /* a folder deeper than the folder list (a deep link, or a stored choice) stays selectable */
+ const pick=v=>{if(![...s.options].some(o=>o.value===v))s.add(new Option(v,v));s.value=v};
+ if(!byUser&&st&&!s.value)pick(st);
+ if(BP.want){const w=BP.want;BP.want=null;if(w.p!=null)pick(w.p);if(w.v&&[...$("bpView").options].some(o=>o.value===w.v))$("bpView").value=w.v;if(w.c.length)BP.sel=new Set(w.c)}
+ const f=s.value;store("scope_beam",f);if(force)BP.cache.clear();
+ if(!force&&BP.scan&&BP.folder===f){bpCases();bpControls();bpDraw();return}
+ const seq=++BP.seq;$("bpBody").innerHTML=`<tr><td colspan="4" class="empty"><span class="spin"></span>${esc(t("loading"))}</td></tr>`;
+ let j;try{j=await bpGet("scan",{p:f})}catch(e){if(seq===BP.seq)$("bpBody").innerHTML=`<tr><td colspan="4" class="empty">${esc(t("error")+": "+e.message)}</td></tr>`;return}
+ if(seq!==BP.seq)return;BP.scan=j;BP.folder=f;const names=j.cases.map(c=>c.name),keep=[...BP.sel].filter(n=>names.includes(n));
+ BP.sel=new Set(keep.length?keep:names.slice(0,1));syncHash(false);bpCases();bpControls();bpDraw()}
+function bpCases(){const all=BP.scan?BP.scan.cases:[],q=$("bpFilter").value.trim().toLowerCase(),cs=all.filter(c=>!q||c.name.toLowerCase().includes(q));
+ $("bpBody").innerHTML=cs.length?cs.map(c=>{const on=BP.sel.has(c.name);return `<tr class="${on?"sel":""}"><td><input type="checkbox" data-c="${esc(c.name)}" ${on?"checked":""}></td><td>${esc(c.name)}</td><td>${c.monitors.length} <span class="mute">${esc(c.kinds.join(" "))}</span></td><td>${c.dose.length||""}</td></tr>`}).join("")
+  :`<tr><td colspan="4" class="empty">${esc(t(all.length?"no_match":"bp_none"))}</td></tr>`;
+ multiSelect($("bpBody"),bpPicked)}
+function bpPicked(){for(const b of $("bpBody").querySelectorAll("input[data-c]"))b.checked?BP.sel.add(b.dataset.c):BP.sel.delete(b.dataset.c);syncHash(false);bpControls();bpDraw()}
+function bpControls(){const v=$("bpView").value,cs=bpSel(),show=(id,on)=>{$(id).hidden=!on};
+ show("bpPosL",["profiles","map","spectrum"].includes(v));show("bpKindL",!["dose","sigmaz"].includes(v));show("bpModeL",v!=="spectrum"&&v!=="map");
+ show("bpAxisL",["profiles","envelope","dose","sigmaz"].includes(v));show("bpQtyL",v==="envelope"||v==="sigmaz");show("bpLogL",["profiles","map","spectrum","dose"].includes(v));$("bpDepthRow").hidden=v!=="dose";
+ const ps=[...new Set(cs.flatMap(c=>c.monitors.map(m=>m.pos)))].sort((a,b)=>b-a),cur=$("bpPos").value||recall("bp_pos");
+ $("bpPos").innerHTML=ps.map(p=>`<option value="${p}">${p} cm</option>`).join("");if(ps.map(String).includes(cur))$("bpPos").value=cur;
+ const d=cs.map(bpDoseOf).find(Boolean),k=$("bpK");if(d){const was=k.max==="0";k.max=d.nz-1;if(was||+k.value>d.nz-1)k.value=Math.floor((d.nz-1)/2)}bpDepthLabel()}
+function bpDepthLabel(){const d=bpSel().map(bpDoseOf).find(Boolean);$("bpDepth").textContent=d?`${bpF((+$("bpK").value+0.5)*d.dz,1)} mm`:""}
+
+/* builds BP.spec ({type:"lines"|"map", ...}) and the fit table from the server answers, then paints */
+async function bpDraw(){const seq=++BP.dseq,v=$("bpView").value,cs=bpSel(),mode=$("bpMode").value,kind=$("bpKind").value,ax=$("bpAxis").value,qty=$("bpQty").value,logy=$("bpLog").checked;
+ const axes=ax==="xy"?["x","y"]:[ax],miss=[],notes=[];let spec=null,table="";
+ const col=i=>PAL[i%PAL.length],dash=a=>ax==="xy"&&a==="y"?[9,6]:[];
+ const fitHead=`<th>${t("bp_case")}</th><th>${t("bp_axis")}</th><th>${t("bp_q_centroid")} [mm]</th><th>σ [mm]</th><th>FWHM [mm]</th><th>rms [mm]</th><th>${t("bp_halo3s")} [%]</th><th>${t("bp_sigma1")} [mm]</th><th>${t("bp_sigma2")} [mm]</th><th>${t("bp_halo_dg")} [%]</th>`;
+ const fitRow=(c,i,a,f)=>`<tr><td><span style="color:${col(i)}">■</span> ${esc(c)}</td><td>${a}</td><td>${bpF(f.centroid)}</td><td>${bpF(f.sigma)}</td><td>${bpF(f.fwhm)}</td><td>${bpF(f.rms)}</td><td>${bpPct(f.halo3s)}</td><td>${bpF(f.sigma1)}</td><td>${bpF(f.sigma2)}</td><td>${bpPct(f.halo_dg)}</td></tr>`;
+ const tbl=(head,rows)=>rows.length?`<div style="overflow-x:auto"><table class="metrics" style="margin-top:8px"><thead><tr>${head}</tr></thead><tbody>${rows.join("")}</tbody></table></div>`:"";
+ try{
+  if(!cs.length){spec={empty:t("bp_pick")}}
+  else if(v==="profiles"||v==="map"){const pos=+$("bpPos").value;store("bp_pos",pos);
+   const got=await Promise.all(cs.map(c=>{const m=c.monitors.find(m=>m.pos===pos),p=m&&m.maps[kind];if(!p){miss.push(c.name);return null}return bpGet("monitor",{p,mode}).then(r=>({c,r}))}));
+   const ok=got.filter(Boolean);
+   if(v==="map"){const o=ok[0];if(o){if(cs.length>1)notes.push(t("bp_map_one"));const u=bpUnit(o.r.quantity);spec={type:"map",map:o.r.map,x:o.r.x,y:o.r.y,logz:logy,zlab:`${u.name}${u.u?` [${u.u}]`:""}`,title:`${o.c.name}  ·  ${pos} cm  ·  ${t("bp_k_"+kind)}`,
+     csv:{head:["y \\ x [mm]",...o.r.x],rows:o.r.map.map((r,j)=>[o.r.y[j],...r])}}}}
+   else if(ok.length){const series=[],rows=[];ok.forEach(({c,r},i)=>{const k=cs.indexOf(c);for(const a of axes){series.push({name:`${c.name}  ${a}`,x:a==="x"?r.x:r.y,y:a==="x"?r.px:r.py,col:col(k),dash:dash(a)});rows.push(fitRow(c.name,k,a,(a==="x"?r.fx:r.fy)||{}))}});
+    spec={type:"lines",series,logy,xlab:`${axes.join(", ")} [mm]`,ylab:bpYlab(ok[0].r.quantity,mode,ax),title:`${pos} cm  ·  ${t("bp_k_"+kind)}  ·  ${t("bp_m_"+mode)}`};table=tbl(fitHead,rows)}}
+  else if(v==="envelope"){const got=await Promise.all(cs.map(c=>c.kinds.includes(kind)?bpGet("envelope",{p:BP.folder,case:c.name,kind,mode}).then(r=>({c,r})):(miss.push(c.name),null)));
+   const series=[],rows=[];got.filter(Boolean).forEach(({c,r})=>{const k=cs.indexOf(c);for(const a of axes)series.push({name:`${c.name}  ${a}`,x:r.rows.map(w=>w.pos),y:r.rows.map(w=>bpQtyVal(a==="x"?w.fx:w.fy,qty)),col:col(k),dash:dash(a),pts:true});
+    for(const w of r.rows)rows.push(`<tr><td><span style="color:${col(k)}">■</span> ${esc(c.name)}</td><td>${w.pos}</td><td>${bpF(w.fx.sigma)}</td><td>${bpF(w.fy.sigma)}</td><td>${bpF(w.fx.centroid)}</td><td>${bpF(w.fy.centroid)}</td><td>${bpF(w.fx.fwhm)}</td><td>${bpF(w.fy.fwhm)}</td><td>${bpPct(w.fx.halo3s)}</td><td>${bpPct(w.fx.halo_dg)}</td></tr>`)});
+   if(series.length){spec={type:"lines",series,rev:true,xlab:t("bp_pos"),ylab:bpQtyLab(qty),title:`${t("bp_k_"+kind)}  ·  ${t("bp_m_"+mode)}  ·  ${t("bp_v_envelope")}`};
+    table=tbl(`<th>${t("bp_case")}</th><th>cm</th><th>σx</th><th>σy</th><th>${t("bp_q_centroid")} x</th><th>${t("bp_q_centroid")} y</th><th>FWHM x</th><th>FWHM y</th><th>${t("bp_halo3s")} x [%]</th><th>${t("bp_halo_dg")} x [%]</th>`,rows)}}
+  else if(v==="spectrum"){const pos=+$("bpPos").value,key={e:"espec",o:"ospec"}[kind]||"spec";
+   const got=await Promise.all(cs.map(c=>{const m=c.monitors.find(m=>m.pos===pos),p=m&&m.spectra[key];if(!p){miss.push(c.name);return null}return bpGet("spectrum",{p}).then(r=>({c,r}))}));
+   const ok=got.filter(Boolean);if(ok.length){const u=bpUnit(ok[0].r.quantity);
+    spec={type:"lines",series:ok.map(({c,r})=>({name:c.name,x:r.e,y:r.y,col:col(cs.indexOf(c))})),logy,xlab:"E [MeV]",ylab:`${u.name} ${t("bp_per_bin")} (${bpF(ok[0].r.width,3)} MeV)${u.u?` [${u.u}]`:""}`,title:`${pos} cm  ·  ${t("bp_k_"+kind)}`};
+    table=tbl(`<th>${t("bp_case")}</th><th>${t("bp_peak")} [MeV]</th><th>${t("bp_mean")} [MeV]</th><th>FWHM [MeV]</th><th>${t("bp_under")}</th><th>${t("bp_over")}</th>`,
+     ok.map(({c,r})=>`<tr><td><span style="color:${col(cs.indexOf(c))}">■</span> ${esc(c.name)}</td><td>${bpF(r.peak)}</td><td>${bpF(r.mean)}</td><td>${bpF(r.fwhm)}</td><td>${r.under!=null?(+r.under).toPrecision(3):"–"}</td><td>${r.over!=null?(+r.over).toPrecision(3):"–"}</td></tr>`))}}
+  else{const k=+$("bpK").value;bpDepthLabel();
+   const got=await Promise.all(cs.map(c=>c.dose.length?bpGet("dose",{p:c.dose[0],k,mode}).then(r=>({c,r})):(miss.push(c.name),null)));const ok=got.filter(Boolean);
+   if(!ok.length)spec={empty:t("bp_no_dose")};
+   else if(v==="dose"){const series=[],rows=[];ok.forEach(({c,r})=>{const i=cs.indexOf(c);for(const a of axes){series.push({name:`${c.name}  ${a}`,x:a==="x"?r.x:r.y,y:a==="x"?r.px:r.py,col:col(i),dash:dash(a)});rows.push(fitRow(c.name,i,a,(a==="x"?r.fx:r.fy)||{}))}});
+    spec={type:"lines",series,logy,xlab:`${axes.join(", ")} [mm]`,ylab:bpYlab(ok[0].r.quantity,mode,ax),title:`${t("bp_depth")} ${bpF(ok[0].r.depth,1)} mm  ·  ${t("bp_m_"+mode)}`};table=tbl(fitHead,rows)}
+   else{const series=[];ok.forEach(({c,r})=>{const i=cs.indexOf(c);for(const a of axes)series.push({name:`${c.name}  ${a}`,x:r.sigma_z.map(w=>w.depth),y:r.sigma_z.map(w=>bpQtyVal(a==="x"?w.fx:w.fy,qty)),col:col(i),dash:dash(a)})});
+    spec={type:"lines",series,xlab:`${t("bp_depth")} [mm]`,ylab:bpQtyLab(qty),title:`${t("bp_v_sigmaz")}  ·  ${t("bp_m_"+mode)}`}}}
+ }catch(e){spec={empty:t("error")+": "+e.message}}
+ if(seq!==BP.dseq)return;
+ if(!spec)spec={empty:t("bp_no_data")};
+ if(miss.length&&cs.length)notes.push(`${t("bp_missing")}: ${miss.join(", ")}`);
+ BP.spec=spec;bpPaint();$("bpMetrics").innerHTML=notes.map(n=>`<div class="mute">${esc(n)}</div>`).join("")+table}
+
+/* opt: {g, W, H, light} for exports, like drawPlot */
+function bpPaint(opt){opt=opt||{};const c=$("bpPlot"),g=opt.g||c.getContext("2d"),W=opt.W||c.width,H=opt.H||c.height,C=v=>opt.light?LIGHT[v]:css(v),s=BP.spec;
+ if(!opt.g)g.clearRect(0,0,W,H);$("bpEmpty").hidden=!(s&&s.empty);if(s&&s.empty)$("bpEmpty").textContent=s.empty;
+ if(!s||s.empty)return;g.fillStyle=C("--card");g.fillRect(0,0,W,H);
+ if(s.type==="map")bpMap(g,W,H,C,s);else bpLines(g,W,H,C,s)}
+function bpLines(g,W,H,C,s){const ink=C("--ink"),mute=C("--mute"),line=C("--line"),X0=100,X1=W-24,Y0=H-62,Y1=34;g.font="20px system-ui";
+ let xmin=Infinity,xmax=-Infinity,ymax=-Infinity;for(const r of s.series)r.x.forEach((x,i)=>{const y=r.y[i];if(x==null||y==null||!isFinite(y))return;xmin=Math.min(xmin,x);xmax=Math.max(xmax,x);ymax=Math.max(ymax,y)});
+ if(!isFinite(xmin)){g.fillStyle=mute;g.textAlign="center";g.fillText(t("bp_no_data"),W/2,H/2);return}
+ let ymin=Infinity;for(const r of s.series)r.y.forEach(y=>{if(y!=null&&isFinite(y)&&(!s.logy||y>0))ymin=Math.min(ymin,y)});
+ if(s.logy){if(!(ymax>0)){ymax=1;ymin=1e-6}ymin=Math.max(ymin,ymax*1e-6)}else ymin=Math.min(0,ymin);if(!isFinite(ymin))ymin=0;
+ const ty=v=>s.logy?Math.log10(v):v,a=ty(ymin),b=ty(ymax)+((ty(ymax)-ty(ymin))*0.06||0.06);
+ const sx=v=>{const f=(v-xmin)/(xmax-xmin||1);return X0+(s.rev?1-f:f)*(X1-X0)},sy=v=>Y0-(ty(v)-a)/(b-a||1)*(Y0-Y1);
+ g.strokeStyle=line;g.fillStyle=mute;g.lineWidth=1;g.textAlign="center";
+ for(const v of niceTicks(xmin,xmax)){const px=sx(v);g.beginPath();g.moveTo(px,Y1);g.lineTo(px,Y0);g.stroke();g.fillText(v,px,Y0+24)}
+ g.textAlign="right";const yt=s.logy?Array.from({length:Math.max(0,Math.floor(b)-Math.ceil(a)+1)},(_,i)=>Math.pow(10,Math.ceil(a)+i)):niceTicks(a,b);
+ for(const v of yt){const py=sy(v);if(py<Y1-1||py>Y0+1)continue;g.beginPath();g.moveTo(X0,py);g.lineTo(X1,py);g.stroke();g.fillText(Math.abs(v)>=1e4||(Math.abs(v)<1e-2&&v!==0)?v.toExponential(1):+v.toPrecision(3),X0-8,py+6)}
+ g.strokeStyle=ink;g.beginPath();g.moveTo(X0,Y1);g.lineTo(X0,Y0);g.lineTo(X1,Y0);g.stroke();
+ g.fillStyle=ink;g.textAlign="center";g.fillText(s.xlab,(X0+X1)/2,H-14);g.save();g.translate(24,(Y0+Y1)/2);g.rotate(-Math.PI/2);g.font="18px system-ui";g.fillText(s.ylab,0,0);g.restore();
+ g.font="17px system-ui";g.fillStyle=mute;g.textAlign="right";g.fillText(s.title||"",X1,Y1-12);
+ g.save();g.beginPath();g.rect(X0,Y1-2,X1-X0,Y0-Y1+4);g.clip();
+ for(const r of s.series){g.strokeStyle=r.col;g.fillStyle=r.col;g.lineWidth=2.5;g.setLineDash(r.dash||[]);g.beginPath();let pen=false;
+  r.x.forEach((x,i)=>{const y=r.y[i];if(y==null||!isFinite(y)||(s.logy&&y<=0)){pen=false;return}const px=sx(x),py=sy(y);pen?g.lineTo(px,py):g.moveTo(px,py);pen=true});g.stroke();g.setLineDash([]);
+  if(r.pts)r.x.forEach((x,i)=>{const y=r.y[i];if(y==null||!isFinite(y)||(s.logy&&y<=0))return;g.beginPath();g.arc(sx(x),sy(y),4,0,7);g.fill()})}
+ g.restore();
+ g.textAlign="left";g.font="17px system-ui";const lx=s.rev?X1-430:X0+14;s.series.slice(0,14).forEach((r,k)=>{g.strokeStyle=r.col;g.lineWidth=3;g.setLineDash(r.dash||[]);g.beginPath();g.moveTo(lx,Y1+14+k*24);g.lineTo(lx+26,Y1+14+k*24);g.stroke();g.setLineDash([]);g.fillStyle=ink;g.fillText(r.name,lx+34,Y1+20+k*24)})}
+function bpMap(g,W,H,C,s){const ink=C("--ink"),mute=C("--mute"),G=s.map,ny=G.length,nx=ny?G[0].length:0;if(!nx)return;let mx=0;for(const r of G)for(const v of r)mx=Math.max(mx,v);
+ const side=Math.min(H-110,W-360),X0=Math.round((W-side)/2)-40,X1=X0+side,Y1=40,Y0=Y1+side,dec=4;
+ const f=v=>!mx?0:s.logz?(v>0?Math.max(0,1+Math.log10(v/mx)/dec):0):v/mx;
+ const img=g.createImageData(nx,ny);for(let j=0;j<ny;j++)for(let i=0;i<nx;i++){const [r,gg,b]=viridis(f(G[j][i])),o=4*((ny-1-j)*nx+i);img.data[o]=r;img.data[o+1]=gg;img.data[o+2]=b;img.data[o+3]=255}
+ const off=document.createElement("canvas");off.width=nx;off.height=ny;off.getContext("2d").putImageData(img,0,0);g.imageSmoothingEnabled=false;g.drawImage(off,X0,Y1,X1-X0,Y0-Y1);
+ const dx=s.x.length>1?s.x[1]-s.x[0]:1,dy=s.y.length>1?s.y[1]-s.y[0]:1,xa=s.x[0]-dx/2,xb=s.x[nx-1]+dx/2,ya=s.y[0]-dy/2,yb=s.y[ny-1]+dy/2;
+ g.font="18px system-ui";g.fillStyle=mute;g.strokeStyle=mute;g.lineWidth=1;g.textAlign="center";
+ for(const v of niceTicks(xa,xb)){const px=X0+(v-xa)/(xb-xa)*(X1-X0);g.beginPath();g.moveTo(px,Y0);g.lineTo(px,Y0+6);g.stroke();g.fillText(v,px,Y0+26)}
+ g.textAlign="right";for(const v of niceTicks(ya,yb)){const py=Y0-(v-ya)/(yb-ya)*(Y0-Y1);g.beginPath();g.moveTo(X0-6,py);g.lineTo(X0,py);g.stroke();g.fillText(v,X0-10,py+6)}
+ g.fillStyle=ink;g.textAlign="center";g.fillText("x [mm]",(X0+X1)/2,H-12);g.save();g.translate(X0-62,(Y0+Y1)/2);g.rotate(-Math.PI/2);g.fillText("y [mm]",0,0);g.restore();
+ const grd=g.createLinearGradient(0,Y0,0,Y1);for(let k=0;k<=10;k++){const [r,gg,b]=viridis(k/10);grd.addColorStop(k/10,`rgb(${r},${gg},${b})`)}
+ g.fillStyle=grd;g.fillRect(X1+30,Y1,22,Y0-Y1);g.fillStyle=ink;g.textAlign="left";g.fillText(mx.toPrecision(3),X1+60,Y1+14);g.fillText(s.logz?(mx*Math.pow(10,-dec)).toPrecision(2):"0",X1+60,Y0);
+ g.save();g.translate(W-20,(Y0+Y1)/2);g.rotate(-Math.PI/2);g.textAlign="center";g.fillText(s.zlab+(s.logz?"  (log)":""),0,0);g.restore();
+ g.fillStyle=mute;g.textAlign="left";g.font="17px system-ui";g.fillText(s.title||"",X0,Y1-12)}
+function bpName(ext){const c=bpSel()[0];return `beam_${$("bpView").value}${c?"_"+c.name:""}${bpSel().length>1?`_+${bpSel().length-1}`:""}.${ext}`}
+$("bpPng").onclick=()=>{if(!BP.spec||BP.spec.empty)return;const sc=+$("bpScale").value,off=document.createElement("canvas");off.width=1200*sc;off.height=560*sc;const g=off.getContext("2d");g.scale(sc,sc);bpPaint({g,W:1200,H:560,light:$("bpLight").checked});off.toBlob(b=>download(b,bpName("png")),"image/png")};
+$("bpSvg").onclick=()=>{if(!BP.spec||BP.spec.empty)return;const g=new SvgCtx(1200,560);bpPaint({g,W:1200,H:560,light:$("bpLight").checked});download(new Blob([g.toString()],{type:"image/svg+xml"}),bpName("svg"))};
+$("bpCsv").onclick=()=>{const s=BP.spec;if(!s||s.empty)return;const dec=LANG==="de",f=v=>v!=null&&isFinite(v)?String(+(+v).toPrecision(7)).replace(".",dec?",":"."):"";let lines;
+ if(s.type==="map")lines=[`# ${s.title}; ${s.zlab}`,s.csv.head.map(h=>typeof h==="number"?f(h):h).join(";"),...s.csv.rows.map(r=>r.map(f).join(";"))];
+ else{lines=[`# ${s.title}; ${s.ylab}`,["series",s.xlab,"y"].join(";")];for(const r of s.series)r.x.forEach((x,i)=>lines.push([r.name.replace(/\s+/g," "),f(x),f(r.y[i])].join(";")))}
+ download(new Blob(["﻿"+lines.join("\r\n")],{type:"text/csv"}),bpName("csv"))};
+$("bpFolder").onchange=()=>bpLoad(false,true);$("bpReload").onclick=()=>bpLoad(true);$("bpFilter").oninput=debounce(bpCases,150);
+$("bpAll").onclick=()=>{for(const b of $("bpBody").querySelectorAll("input[data-c]"))BP.sel.add(b.dataset.c);bpCases();bpPicked()};
+$("bpNone").onclick=()=>{BP.sel.clear();bpCases();bpPicked()};
+for(const id of ["bpView","bpPos","bpKind","bpMode","bpAxis","bpQty","bpLog"])$(id).onchange=()=>{if(id==="bpView"){store("bp_view",$(id).value);syncHash(false)}bpControls();bpDraw()};
+$("bpK").oninput=()=>{bpDepthLabel();bpDrawSoon()};const bpDrawSoon=debounce(bpDraw,120);
+if(recall("bp_view"))$("bpView").value=recall("bp_view");
 
 /* ---------- generators */
 let GENS=[];
