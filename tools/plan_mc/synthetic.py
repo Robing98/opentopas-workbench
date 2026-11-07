@@ -87,6 +87,10 @@ def read_rtdose(path):
     off = np.atleast_1d(np.asarray(ds.GridFrameOffsetVector, float)).tolist()   # one frame: a single value
     dz = off[1] - off[0] if len(off) > 1 else float(getattr(ds, "SliceThickness", 0) or 0)
     if len(off) > 2 and np.ptp(np.diff(off)) > 1e-3: raise ValueError(f"{path}: uneven frame spacing")
+    # TOPAS clones the grid as axial, ascending z: refuse layouts that would put the voxels elsewhere
+    iop = np.asarray(getattr(ds, "ImageOrientationPatient", [1, 0, 0, 0, 1, 0]), float)
+    if not np.allclose(iop, [1, 0, 0, 0, 1, 0], atol=1e-4): raise ValueError(f"{path}: orientation {iop.tolist()} not supported")
+    if dz < 0: raise ValueError(f"{path}: descending GridFrameOffsetVector not supported")
     x0, y0, z0 = (float(v) for v in ds.ImagePositionPatient)
     return d, (x0, y0, z0 + off[0]), (float(ds.PixelSpacing[1]), float(ds.PixelSpacing[0]), dz)
 

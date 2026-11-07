@@ -30,7 +30,8 @@ from plan_mc import beam_model, evaluate, hlut, plan as pl, synthetic, topas_io,
 
 
 def folder(ws, name):
-    if not name or "/" in name or "\\" in name or name.startswith("."): raise SystemExit(f"bad run name {name!r}")
+    # ":" too: on Windows Python a drive-relative name such as "D:x" would leave the patient folder
+    if not name or any(c in name for c in "/\\:") or name.startswith("."): raise SystemExit(f"bad run name {name!r}")
     return os.path.join(os.path.abspath(ws), "patient", "plan_mc", name)
 
 
@@ -48,11 +49,20 @@ def beamline(field, a):
     return line
 
 
+def one_range_shifter(plan):
+    """--rs-thickness gives one physical slab: refuse a plan whose fields use different shifters."""
+    kinds = {(f.range_shifter.rs_id, round(f.range_shifter.wet, 3)) for f in plan.fields if f.range_shifter}
+    if len(kinds) > 1:
+        raise SystemExit("fields use different range shifters (" + ", ".join(f"{i} {w:g} mm WET" for i, w in sorted(kinds))
+                         + "); one --rs-thickness cannot stand for all: run the fields of each shifter as their own run")
+
+
 def write(a):
     out = folder(a.workspace, a.name); os.makedirs(out, exist_ok=True)
     rep = hlut.run(a.hlut, a.template, os.path.join(out, "schneider.txt"), i_water=a.i_water)
     json.dump(rep, open(os.path.join(out, "schneider_report.json"), "w"), indent=1)
     plan = pl.read_rtplan(a.rtplan)
+    one_range_shifter(plan)
     model = beam_model.BeamModel.load(a.beam_model)
     model.save(os.path.join(out, "beam_model.json"))
     pat = os.path.join(out, "patient.txt")
@@ -113,8 +123,10 @@ def evaluate_run(a):
     if run["rtdose"]:
         import pydicom
         ref, origin, spacing = synthetic.read_rtdose(run["rtdose"])
-        if str(getattr(pydicom.dcmread(run["rtdose"], stop_before_pixels=True), "DoseSummationType", "")).upper() == "PLAN":
-            ref = ref / max(1, run["fractions"])
+        kind = str(getattr(pydicom.dcmread(run["rtdose"], stop_before_pixels=True), "DoseSummationType", "")).upper()
+        if kind not in ("PLAN", "FRACTION"):
+            raise SystemExit(f"RT Dose with DoseSummationType {kind or 'missing'}: give the dose of the whole plan")
+        if kind == "PLAN": ref = ref / max(1, run["fractions"])
         if ref.shape != dose.shape: raise SystemExit(f"TPS dose grid {ref.shape} differs from the TOPAS grid {dose.shape}")
         synthetic.write_rtdose(os.path.join(out, "topas_dose.dcm"), dose, origin, spacing)
         cmp_ = evaluate.compare(ref, dose, origin, spacing)

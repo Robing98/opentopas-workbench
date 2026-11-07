@@ -44,7 +44,8 @@ class BeamModel:
         if e < self.e[0] - tol or e > self.e[-1] + tol:
             raise ValueError(f"energy {e:g} MeV outside the beam model ({self.e[0]:g} to {self.e[-1]:g} MeV)")
         i = bisect.bisect_left(self.e, e)
-        if i < len(self.e) and abs(self.e[i] - e) <= tol: return {k: float(self.rows[i][k]) for k in KEYS}
+        for j in (i, i - 1):   # within tol of a row, also just above the top energy where bisect gives len
+            if 0 <= j < len(self.e) and abs(self.e[j] - e) <= tol: return {k: float(self.rows[j][k]) for k in KEYS}
         lo, hi = self.rows[i - 1], self.rows[i]
         t = (e - lo["nominal"]) / (hi["nominal"] - lo["nominal"])
         return {k: float(lo[k]) + t * (float(hi[k]) - float(lo[k])) for k in KEYS}

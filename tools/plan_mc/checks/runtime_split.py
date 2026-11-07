@@ -33,6 +33,7 @@ def write(out, chain, spots, histories, factor):
     os.makedirs(out, exist_ok=True)
     c = json.load(open(os.path.join(chain, "chain.json")))
     r = matrad.read(c["mat"])
+    if r["plan"].fields[0].range_shifter: raise SystemExit("field 1 uses a range shifter, which this check cannot model")
     model = beam_model.generic()
     pat = os.path.join(chain, "patient.txt")
     runs = []

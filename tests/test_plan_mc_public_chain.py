@@ -87,3 +87,10 @@ def test_split_recovers_start_spot_and_history_cost(runs):
     rs = [{"spots": s, "histories": h, "seconds": start + per_spot * s + per_hist * h}
           for s, h in [(100, 2e4), (100, 4e5), (300, 2e4), (500, 1e6), (50, 1e5)][:runs]]
     assert runtime_split.split(rs) == pytest.approx((start, per_spot, per_hist), rel=1e-6)
+
+
+def test_write_refuses_a_matrad_field_with_a_range_shifter(tmp_path):
+    hu = np.zeros((4, 5, 6), np.int16)
+    mat = _mat(str(tmp_path / "plan.mat"), hu, [1.0], [((0, 0, 0), [80.0])], rs=40.0)
+    with pytest.raises(SystemExit, match="range shifter"):
+        public_chain.write(str(tmp_path / "out"), mat, str(tmp_path / "schneider.txt"), 1000)

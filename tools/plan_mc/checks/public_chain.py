@@ -31,6 +31,8 @@ def write(out, mat, schneider, histories):
     model.save(os.path.join(out, "beam_model.json"))
     metas, files = [], []
     for f in r["plan"].fields:
+        # no physical shifter data for a matRad plan: dropping its range shifter would put every spot too deep
+        if f.range_shifter: raise SystemExit(f"field {f.number} uses a range shifter, which this check cannot model")
         name = f"field{f.number}"
         text, meta = tw.field_file(r["plan"], f, model, {}, pat, histories, out_name=name)
         p = os.path.join(out, f"{name}.txt")

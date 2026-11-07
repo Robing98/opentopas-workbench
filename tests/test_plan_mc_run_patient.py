@@ -65,7 +65,7 @@ def test_range_shifter_needs_its_physical_thickness(tmp_path):
     assert 's:Ge/RangeShifter/Material = "Lexan"' in t and "d:Ge/RangeShifter/TransZ   = 213 mm" in t
 
 
-@pytest.mark.parametrize("name", ["", "../x", "a/b", ".hidden"])
+@pytest.mark.parametrize("name", ["", "../x", "a/b", ".hidden", "D:x"])
 def test_run_name_cannot_leave_the_patient_folder(tmp_path, name):
     with pytest.raises(SystemExit):
         run_patient.folder(str(tmp_path), name)
@@ -116,3 +116,54 @@ def test_abs_dose_reference_gives_dose_scale(tmp_path):
     assert abs_dose.check(str(out), None) == pytest.approx(2.0)
     assert abs_dose.check(str(out), 1.0, update=str(bm)) == pytest.approx(0.5)
     assert json.loads(bm.read_text())["dose_scale"] == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize("wets,refused", [((30.0,), False), ((30.0, 30.0, 30.0), False), ((30.0, 57.0, 30.0), True)])
+def test_one_physical_range_shifter_for_fields_with_different_shifters_is_refused(tmp_path, wets, refused):
+    ws = tmp_path / "ws"; ws.mkdir()
+    inp = make_inputs(tmp_path, 1)
+    fields = [pl.Field(f"F{i}", i, 0.0, 0.0, (0.0, 0.0, 0.0), [pl.Layer(120.0, [0.0], [0.0], [1.0])], "MU", None,
+                       pl.RangeShifter("RS", w, 200.0)) for i, w in enumerate(wets, 1)]
+    inp["rtplan"] = pl.write_rtplan(pl.Plan("synth", "HFS", fields, fractions=30), str(tmp_path / "rp2.dcm"),
+                                    mu_per_field={i: 10.0 for i in range(1, len(wets) + 1)})
+    a = args(ws, inp, "--rs-material", "Lexan", "--rs-thickness", "26")
+    if refused:
+        with pytest.raises(SystemExit, match="different range shifters"): run_patient.main(a)
+    else:
+        run_patient.main(a)
+
+
+def test_rt_dose_of_one_beam_is_refused(tmp_path):
+    import pydicom
+    ws = tmp_path / "ws"; ws.mkdir()
+    inp = make_inputs(tmp_path, 1)
+    rd = str(tmp_path / "rd.dcm")
+    synthetic.write_rtdose(rd, np.ones(SHAPE), ORIGIN, SPACING)
+    ds = pydicom.dcmread(rd); ds.DoseSummationType = "BEAM"; ds.save_as(rd)
+    run_patient.main(args(ws, inp, rtdose=rd))
+    out = ws / "patient" / "plan_mc" / "run1"
+    run = json.loads((out / "run.json").read_text())
+    for m in run["fields"]:
+        (out / f"field{m['number']}_dose.binheader").write_text(HEADER.format(nx=SHAPE[2], ny=SHAPE[1], nz=SHAPE[0]))
+        np.ones((int(np.prod(SHAPE)), 2)).astype("<f8").ravel().tofile(str(out / f"field{m['number']}_dose.bin"))
+    with pytest.raises(SystemExit, match="BEAM"):
+        run_patient.main(["evaluate", "--workspace", str(ws), "--name", "run1"])
+
+
+@pytest.mark.parametrize("change", ["orientation", "descending"])
+def test_rt_dose_layouts_that_do_not_match_the_topas_grid_are_refused(tmp_path, change):
+    import pydicom
+    rd = str(tmp_path / "rd.dcm")
+    synthetic.write_rtdose(rd, np.ones(SHAPE), ORIGIN, SPACING)
+    ds = pydicom.dcmread(rd)
+    if change == "orientation": ds.ImageOrientationPatient = [-1, 0, 0, 0, -1, 0]
+    else: ds.GridFrameOffsetVector = [-2.0 * k for k in range(SHAPE[0])]
+    ds.save_as(rd)
+    with pytest.raises(ValueError, match="orientation" if change == "orientation" else "descending"):
+        synthetic.read_rtdose(rd)
+
+
+def test_beam_model_takes_an_energy_just_above_its_top_row():
+    m = beam_model.generic()
+    assert m.at(220.0 + 5e-7)["mean"] == pytest.approx(220.0)
+    with pytest.raises(ValueError): m.at(220.1)
