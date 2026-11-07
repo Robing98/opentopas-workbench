@@ -48,26 +48,15 @@ def field_dose(out, meta, shape_zyx):
     h, a = topas_io.read(os.path.join(out, f"field{meta['number']}_dose.bin"))
     k = meta["particles"] / meta["histories"]
     s = np.asarray(a["Sum"], float).transpose(2, 1, 0) * k            # topas_io gives [x, y, z]
-    sd = np.asarray(a["Standard_Deviation"], float).transpose(2, 1, 0) * k
+    sd = topas_io.sum_sd(a["Standard_Deviation"], meta["histories"]).transpose(2, 1, 0) * k
     if s.shape != tuple(shape_zyx): raise ValueError(f"field {meta['number']}: TOPAS grid {s.shape}, CT {shape_zyx}")
     return s, sd
 
 
 def runtime(ws, out, meta):
-    """Wall time of the newest workbench run of a field [s] from its log, or None."""
-    rel = os.path.relpath(os.path.join(out, f"field{meta['number']}.txt"), ws).replace(os.sep, "/")
-    if rel.startswith("..") or rel.startswith("patient/"): return None
-    try:
-        jobs = json.load(open(os.path.join(ws, ".workbench", "jobs.json")))
-    except (OSError, ValueError):
-        return None
-    jobs = jobs.get("jobs", jobs) if isinstance(jobs, dict) else jobs
-    best = None
-    for j in jobs:
-        if j.get("file") == rel and j.get("status") == "done":
-            for a, b in (("started_at", "finished_at"), ("start", "end"), ("started", "ended")):
-                if isinstance(j.get(a), (int, float)) and isinstance(j.get(b), (int, float)): best = j[b] - j[a]
-    return best
+    """Wall time of the newest workbench run of a field [s], or None."""
+    from plan_mc.checks.runtime_split import seconds
+    return seconds(ws, os.path.join(out, f"field{meta['number']}.txt"))
 
 
 def check(out, ws=None):
@@ -93,22 +82,26 @@ def check(out, ws=None):
     iso = np.mean(np.argwhere(targets[0]), axis=0) if targets else np.array(shape) / 2   # [z, y, x] index
     point = [c["origin"][k] + c["spacing"][k] * iso[2 - k] for k in range(3)]
     res = evaluate.compare(ref, total, c["origin"], c["spacing"], cst, point=point)
-    # The absolute scale (w * 1e6 particles) is a hypothesis; the shape comparison removes it.
-    k = res.get("target_mean_ratio_eval_over_ref") or 1.0
+    # The absolute scale (w * 1e6 particles) is a hypothesis; the shape comparison removes it. The factor is the
+    # mean ratio where the matRad dose is >= 50 % of its maximum, not in the target: in the water phantom (E2)
+    # every spot stops before the target, which then has no dose at all.
+    k = res.get("high_dose_mean_ratio_eval_over_ref") or 1.0
     shape_only = evaluate.compare(ref, total / k, c["origin"], c["spacing"], cst)
     report = {"fields": rows, "rel_uncertainty_rms_above_50pct": unc, "absolute": res,
-              "normalised_to_target_mean": {"factor": k, "gamma": shape_only["gamma"],
-                                            "structures": shape_only["structures"]}}
+              "normalised_to_high_dose_mean": {"factor": k, "gamma": shape_only["gamma"],
+                                               "structures": shape_only["structures"]}}
     json.dump(report, open(os.path.join(out, "report.json"), "w"), indent=1)
     for r in rows:
         print(f"{r['field']}: {r['histories']} histories, max {r['max_gy']:.3g} Gy"
               + (f", {r['wall_s']:.0f} s, {r['ms_per_history']:.2f} ms per history" if r["wall_s"] else ""))
     print(f"rms relative uncertainty (1 sigma) above 50 % of the maximum: {100 * unc:.2f} %")
-    print(f"target mean TOPAS / matRad: {k:.4f}")
+    t_ratio = res.get("target_mean_ratio_eval_over_ref")
+    print(f"mean TOPAS / matRad where matRad >= 50 % of its maximum: {k:.4f}; in the target: "
+          + (f"{t_ratio:.4f}" if t_ratio is not None else "no matRad dose there"))
     for lab, g in (("absolute", res["gamma"]), ("normalised", shape_only["gamma"])):
         print(lab + ": " + ", ".join(f"gamma {c_} {v['pass_pct']:.1f} %" for c_, v in g.items()))
     for name, v in shape_only["structures"].items():
-        if v["ref"]: print(f"{name}: D95 {v['ref']['D95']:.2f} vs {v['eval']['D95']:.2f}, "
+        if v["ref"] and v["ref"]["mean"] > 0: print(f"{name}: D95 {v['ref']['D95']:.2f} vs {v['eval']['D95']:.2f}, "
                            f"D50 {v['ref']['D50']:.2f} vs {v['eval']['D50']:.2f}, mean {v['ref']['mean']:.2f} vs {v['eval']['mean']:.2f} (matRad vs TOPAS normalised)")
     return report
 

@@ -93,7 +93,7 @@ def summed_dose(out, run, model_scale):
         _, arr = topas_io.read(os.path.join(out, f"field{m['number']}_dose.bin"))
         k = m["particles"] / m["histories"] * model_scale
         s = np.asarray(arr["Sum"], float).transpose(2, 1, 0) * k     # [x, y, z] -> [z, y, x]
-        sd = np.asarray(arr["Standard_Deviation"], float).transpose(2, 1, 0) * k
+        sd = topas_io.sum_sd(arr["Standard_Deviation"], m["histories"]).transpose(2, 1, 0) * k
         total = s if total is None else total + s
         var = sd ** 2 if var is None else var + sd ** 2
     return total, np.sqrt(var)

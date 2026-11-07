@@ -87,7 +87,11 @@ def compare(ref, ev, origin, spacing, structures=(), criteria=((2.0, 2.0), (3.0,
                                    "eval": dvh_figures(ev, mask, prescription or ref.max())}
     if targets:
         t = targets[0]
-        res["target_mean_ratio_eval_over_ref"] = float(ev[t].mean() / ref[t].mean())
+        # A plan recomputed in a water phantom can leave the target without dose (E2): no ratio then.
+        r = float(ref[t].mean()) if t.any() else 0.0
+        res["target_mean_ratio_eval_over_ref"] = float(ev[t].mean()) / r if r > 0 else None
+    hi = ref >= 0.5 * ref.max()
+    res["high_dose_mean_ratio_eval_over_ref"] = float(ev[hi].mean() / ref[hi].mean()) if ref.max() > 0 else None
     if point is not None: res["profiles"] = profiles(ref, ev, origin, spacing, point)
     return res
 

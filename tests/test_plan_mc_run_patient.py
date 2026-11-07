@@ -96,7 +96,8 @@ def test_evaluate_sums_fields_and_compares_per_fraction(tmp_path, n_fields):
     res = json.loads((out / "result.json").read_text())
     assert res["topas_max_gy"] == pytest.approx(ref_fraction.max(), rel=1e-6)
     assert all(v["pass_pct"] == 100.0 for v in res["comparison"]["gamma"].values())
-    assert res["uncertainty_rms"] == pytest.approx(0.01 / np.sqrt(n_fields), rel=1e-3)
+    # Standard_Deviation is per history: the Sum of 1000 histories spreads by 0.01 * sqrt(1000) of its value
+    assert res["uncertainty_rms"] == pytest.approx(0.01 * np.sqrt(1000) / np.sqrt(n_fields), rel=1e-3)
     assert (out / "topas_dose.dcm").exists() and "Gamma 2%/2mm" in (out / "BERICHT.md").read_text()
 
 

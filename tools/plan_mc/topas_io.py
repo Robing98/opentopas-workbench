@@ -11,6 +11,16 @@ import numpy as np
 UNIT_MM = {"mm": 1.0, "cm": 10.0, "m": 1000.0, "um": 1e-3}
 
 
+def sum_sd(sd, histories):
+    """Standard deviation of the TOPAS Sum of `histories` histories from its Standard_Deviation report.
+
+    Standard_Deviation is the spread of the dose of one history, not of the Sum: the Sum of N histories spreads
+    by sd * sqrt(N). Taking sd as the spread of the Sum understates the uncertainty by sqrt(N); on the TG119 runs
+    (200k histories per field) the voxel noise was 10 %, sd / Sum gave 0.02 %, sd * sqrt(N) / Sum gave 10 %.
+    """
+    return np.asarray(sd, float) * np.sqrt(histories)
+
+
 def parse_header(lines):
     bins, reports, quantity, unit = {}, [], None, None
     for line in lines:
