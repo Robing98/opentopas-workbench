@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from . import __version__ as VERSION
+from . import beamprofile
 TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
 TEXT_EXT = {".txt", ".py", ".sh", ".bat", ".json", ".csv", ".md", ".log", ".in", ".mac", ".xml", ".header", ".binheader", ".mcc", ".asc", ".dat", ".tsv"}
 TRASH = "_trash"
@@ -953,6 +954,20 @@ def case_outputs(rel):
     return out
 
 
+# ------------------------------------------------------------------ beam profile view
+def beam_api(what, q):
+    """GET /api/beam/<what>: scan (a folder), monitor, spectrum, envelope (a folder and a case), dose (a 3D grid)."""
+    mode = "cut" if q.get("mode") == "cut" else "int"
+    p = resolve(q.get("p", ""))
+    if what == "scan":
+        if not os.path.isdir(p): raise ValueError("not a folder")
+        return beamprofile.scan(p, relp(p))
+    if what == "monitor": return beamprofile.monitor(p, mode)
+    if what == "spectrum": return beamprofile._clean(beamprofile.read_spectrum(p))
+    if what == "envelope": return beamprofile.envelope(p, relp(p), q.get("case", ""), q.get("kind", "p"), mode)
+    if what == "dose": return beamprofile.dose_depth(p, int(q.get("k", 0) or 0), mode)
+    raise ValueError("unknown beam request")
+
 # ------------------------------------------------------------------ generator plugins
 def load_generators():
     gens = {}
@@ -1446,6 +1461,7 @@ class H(BaseHTTPRequestHandler):
                                int(q.get("scan", 0) or 0))
                 if not res.get("measured"): res["beam"] = producer_of(relp(resolve(q.get("p", ""))))
                 return self.send(200, res)
+            if u.path.startswith("/api/beam/"): return self.send(200, beam_api(u.path[len("/api/beam/"):], q))
             if u.path == "/api/generators": return self.send(200, gen_schema())
             if u.path == "/file":
                 p = resolve(q.get("p", ""))
