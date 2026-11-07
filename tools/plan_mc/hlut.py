@@ -5,13 +5,15 @@ TOPAS builds one material per HU (TsImagingToMaterialSchneider.cc): density = (o
 * DensityCorrection[HU - MinImagingValue], composition from the material section of the HU. Without
 `SchneiderMaterialMeanExcitationEnergy` Geant4 gives each material the mean excitation energy of Bragg additivity,
 ln I = sum(n_i Z_i ln I_i) / sum(n_i Z_i) (G4IonisParamMat.cc, ComputeMeanParameters), with the element values of
-data/g4_elements.json. This script computes the SPR of every such material relative to the water of the beam model
-with the Bethe formula (no shell or density correction, both nearly cancel in the ratio) on an energy grid, and sets
-DensityCorrection = SPR_HLUT / mean over energies of the uncorrected SPR. What stays is the energy dependence of the
-SPR ratio, which no energy independent HLUT can follow: the report gives it per material section as a relative range
-error (mm per 100 mm of that tissue).
+data/g4_elements.json. This script computes the water equivalent ratio (WER: CSDA range in water over CSDA range in
+the material, Bethe formula without shell or density correction, both nearly cancel in the ratio) of every such
+material relative to the water of the beam model for initial energies 70 to 220 MeV, and sets
+DensityCorrection = SPR_HLUT / mean over energies of the uncorrected WER. What stays is the energy dependence of the
+WER, which no energy independent HLUT can follow: the report gives it per material section as a relative range error
+(mm per 100 mm of that tissue). `--match spr` matches the mean stopping power ratio instead (the older behaviour).
 
-    python3 hlut.py write HLUT TEMPLATE OUT.txt [--i-water 78] [--spr-scale 1.0] [--component Patient] [--report R.json]
+    python3 hlut.py write HLUT TEMPLATE OUT.txt [--i-water 78] [--spr-scale 1.0] [--component Patient] [--match range|spr]
+                                                                 [--report R.json]
     python3 hlut.py variants HLUT TEMPLATE OUTDIR [--i-water 78]   # SPR nominal, +2 %, -2 % and a report
 
 HLUT: two columns HU and SPR (matRad .hlut format, '#' comments; commas allowed). TEMPLATE: a TOPAS Schneider
@@ -66,6 +68,27 @@ def spr(density, w, i_water=78.0, t_mev=ENERGIES_MEV):
     w = normalise(w); ww = normalise(WATER)
     return (density * electrons_per_mass(w) / electrons_per_mass(ww)
             * stopping_number(bragg_i(w), t_mev) / stopping_number(i_water, t_mev))
+
+
+# The CSDA integral runs from here: below 0.5 MeV both residual ranges are under 0.01 mm, so their ratio does not matter.
+_GRID_MEV = np.geomspace(0.5, 250.0, 4000)
+
+
+def csda(i_ev, epm, e0_mev):
+    """CSDA range (in units proportional to g/cm2) for initial energies e0_mev, Bethe stopping power."""
+    gamma = 1.0 + _GRID_MEV / MP_C2_MEV
+    s = epm * stopping_number(i_ev, _GRID_MEV) / (1.0 - 1.0 / gamma ** 2)
+    r = np.concatenate([[0.0], np.cumsum(0.5 * (1 / s[1:] + 1 / s[:-1]) * np.diff(_GRID_MEV))])
+    return np.interp(e0_mev, _GRID_MEV, r)
+
+
+def wer(density, w, i_water=78.0, e0_mev=ENERGIES_MEV):
+    """Water equivalent ratio, CSDA range in water over CSDA range in the material, for each initial energy. This is
+    what sets the range in the patient: the stopping power ratio grows towards low energies when the material has a
+    lower I than water, and the range integral weighs those energies more than a mean over 70 to 220 MeV does
+    (soft tissue of I 66 eV against G4_WATER at 120 MeV: 0.18 % more, 0.18 mm per 100 mm)."""
+    w = normalise(w); ww = normalise(WATER)
+    return density * csda(i_water, electrons_per_mass(ww), e0_mev) / csda(bragg_i(w), electrons_per_mass(w), e0_mev)
 
 
 # ---------------------------------------------------------------- files
@@ -136,8 +159,14 @@ class Schneider:
         return self.section(self.mat_sections, hu)
 
 
-def tune(hlut_hu, hlut_spr, sch, i_water=78.0, spr_scale=1.0):
-    """DensityCorrection per HU of the template and the per-HU residual (max relative SPR error over energies)."""
+def tune(hlut_hu, hlut_spr, sch, i_water=78.0, spr_scale=1.0, match="range"):
+    """DensityCorrection per HU of the template and the per-HU residual (max relative error over energies).
+
+    match "range": the water equivalent ratio (wer) averaged over initial energies 70 to 220 MeV equals the HLUT value,
+    so ranges come out right. match "spr": the stopping power ratio averaged over the same energies equals it; this
+    left soft tissue ranges 0.37 mm short per 100 mm in TOPAS (checks/ct_range, 2026-11-06)."""
+    if match not in ("range", "spr"): raise ValueError(f"match must be range or spr, not {match}")
+    ratio = wer if match == "range" else spr
     target = np.interp(sch.hu, hlut_hu, hlut_spr) * spr_scale
     corr = np.empty(len(sch.hu)); resid = np.empty(len(sch.hu)); i_mat = np.empty(len(sch.hu))
     cache = {}
@@ -145,7 +174,7 @@ def tune(hlut_hu, hlut_spr, sch, i_water=78.0, spr_scale=1.0):
         k = sch.material(int(h))
         if k not in cache:
             w = sch.weights[k]
-            cache[k] = (spr(1.0, w, i_water), bragg_i(w))
+            cache[k] = (ratio(1.0, w, i_water), bragg_i(w))
         unit_spr, i_mat[j] = cache[k]
         nom = sch.nominal_density(int(h)) * unit_spr
         corr[j] = target[j] / nom.mean()
@@ -182,18 +211,19 @@ def write(sch, res, out, component="Patient", header=()):
         f.write("\n".join(body) + "\n")
 
 
-def run(hlut, template, out, i_water=78.0, spr_scale=1.0, component="Patient"):
+def run(hlut, template, out, i_water=78.0, spr_scale=1.0, component="Patient", match="range"):
     hu, s = read_hlut(hlut)
     sch = Schneider(template)
     if sch.min_hu != sch.hu_sections[0]:
         raise ValueError("MinImagingValue differs from the first HU section; DensityCorrection index would shift")
-    res = tune(hu, s, sch, i_water, spr_scale)
+    res = tune(hu, s, sch, i_water, spr_scale, match)
     rows = report(sch, res)
     write(sch, res, out, component, header=[
         f"Schneider conversion tuned to the HLUT {os.path.basename(hlut)} by tools/plan_mc/hlut.py",
-        f"I_water {i_water} eV, SPR scale {spr_scale}, energies {ENERGIES_MEV[0]:g} to {ENERGIES_MEV[-1]:g} MeV"])
+        f"I_water {i_water} eV, SPR scale {spr_scale}, matched to {match}, energies {ENERGIES_MEV[0]:g} to "
+        f"{ENERGIES_MEV[-1]:g} MeV"])
     return {"hlut": os.path.basename(hlut), "template": os.path.basename(template), "i_water_ev": i_water,
-            "spr_scale": spr_scale, "energies_mev": [float(ENERGIES_MEV[0]), float(ENERGIES_MEV[-1])],
+            "spr_scale": spr_scale, "match": match, "energies_mev": [float(ENERGIES_MEV[0]), float(ENERGIES_MEV[-1])],
             "sections": rows}
 
 
@@ -212,12 +242,13 @@ if __name__ == "__main__":
         a.add_argument("hlut"); a.add_argument("template"); a.add_argument("out")
         a.add_argument("--i-water", type=float, default=78.0)
         a.add_argument("--component", default="Patient")
+        a.add_argument("--match", choices=("range", "spr"), default="range")
         if name == "write":
             a.add_argument("--spr-scale", type=float, default=1.0)
             a.add_argument("--report")
     a = ap.parse_args()
     if a.cmd == "write":
-        rep = run(a.hlut, a.template, a.out, a.i_water, a.spr_scale, a.component)
+        rep = run(a.hlut, a.template, a.out, a.i_water, a.spr_scale, a.component, a.match)
         if a.report: json.dump(rep, open(a.report, "w"), indent=1)
         print_rows(rep["sections"])
     else:
@@ -225,6 +256,6 @@ if __name__ == "__main__":
         reps = {}
         for tag, scale in (("nominal", 1.0), ("spr_plus2", 1.02), ("spr_minus2", 0.98)):
             reps[tag] = run(a.hlut, a.template, os.path.join(a.out, f"schneider_{tag}.txt"), a.i_water, scale,
-                            a.component)
+                            a.component, a.match)
         json.dump(reps, open(os.path.join(a.out, "hlut_report.json"), "w"), indent=1)
         print_rows(reps["nominal"]["sections"])

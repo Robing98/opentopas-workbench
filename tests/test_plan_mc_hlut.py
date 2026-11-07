@@ -58,8 +58,10 @@ def test_read_hlut_sorts_and_skips_comments(files):
     assert list(hu) == [-1000, 0, 300, 1500] and list(s) == [0.001, 1.0, 1.15, 1.85]
 
 
-def reread_mean_spr(path, i_water):
-    """SPR per HU as TOPAS would build it from the written file, computed independently of hlut.tune."""
+def reread_mean_spr(path, i_water, quantity=None):
+    """SPR (or another ratio such as hlut.wer) per HU as TOPAS would build it from the written file, computed
+    independently of hlut.tune."""
+    quantity = quantity or hlut.spr
     params, _ = hlut.read_template(path)
     corr = np.array([float(v) for v in params["DensityCorrection"][1]])
     sec = [int(v) for v in params["SchneiderHounsfieldUnitSections"][1]]
@@ -73,18 +75,48 @@ def reread_mean_spr(path, i_water):
         dens = (off[k] + fac[k] * (fo[k] + hu)) * corr[hu - sec[0]]
         m = max(i for i in range(len(msec) - 1) if msec[i] <= hu)
         w = {hlut.TOPAS_ELEMENT[n]: float(f) for n, f in zip(names, params[f"SchneiderMaterialsWeight{m + 1}"][1])}
-        out[hu] = hlut.spr(dens, w, i_water).mean()
+        out[hu] = quantity(dens, w, i_water).mean()
     return out
 
 
 @pytest.mark.parametrize("i_water,scale", [(78.0, 1.0), (75.0, 1.0), (78.0, 1.02), (78.0, 0.98)])
 def test_written_file_gives_the_hlut_spr_at_every_hu(files, tmp_path, i_water, scale):
     out = tmp_path / "out.txt"
-    rep = hlut.run(files[0], files[1], str(out), i_water=i_water, spr_scale=scale)
+    rep = hlut.run(files[0], files[1], str(out), i_water=i_water, spr_scale=scale, match="spr")
     hu, s = hlut.read_hlut(files[0])
     for h, got in reread_mean_spr(str(out), i_water).items():
         assert got == pytest.approx(scale * np.interp(h, hu, s), rel=1e-5), h
     assert [r["hu_from"] for r in rep["sections"]] == [-1000, -500, 200]
+
+
+def test_range_match_gives_the_hlut_value_as_mean_water_equivalent_ratio(files, tmp_path):
+    out = tmp_path / "out.txt"
+    hlut.run(files[0], files[1], str(out))
+    hu, s = hlut.read_hlut(files[0])
+    for h, got in reread_mean_spr(str(out), 78.0, hlut.wer).items():
+        assert got == pytest.approx(np.interp(h, hu, s), rel=1e-5), h
+
+
+def numeric_csda(i_ev, w, e0):
+    """Range by a plain Riemann sum of 1/S from 0.5 MeV, written apart from hlut.csda."""
+    e = np.linspace(0.5, e0, 200001)
+    gamma = 1 + e / hlut.MP_C2_MEV
+    s = hlut.electrons_per_mass(hlut.normalise(w)) * hlut.stopping_number(i_ev, e) / (1 - 1 / gamma ** 2)
+    return float(np.sum(1 / s[:-1]) * (e[1] - e[0]))
+
+
+def test_wer_of_soft_tissue_exceeds_its_mean_spr_and_matches_the_range_integral():
+    # Lower I than water: SPR rises towards low energy, so the range ratio lies above the 70 to 220 MeV SPR mean.
+    tissue = {"H": 0.10, "C": 0.20, "N": 0.04, "O": 0.66}
+    w120 = float(hlut.wer(1.0, tissue, 78.0, np.array([120.0]))[0])
+    want = numeric_csda(78.0, WATER_W, 120.0) / numeric_csda(hlut.bragg_i(tissue), tissue, 120.0)
+    assert w120 == pytest.approx(want, rel=2e-4)
+    assert 0.0005 < w120 / hlut.spr(1.0, tissue, 78.0).mean() - 1 < 0.004
+
+
+def test_match_must_be_known(files, tmp_path):
+    with pytest.raises(ValueError):
+        hlut.run(files[0], files[1], str(tmp_path / "o.txt"), match="dose")
 
 
 def test_residual_is_small_for_soft_tissue_and_larger_for_bone(files, tmp_path):
