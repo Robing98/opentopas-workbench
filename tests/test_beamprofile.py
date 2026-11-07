@@ -121,6 +121,32 @@ def test_profile_stats_without_halo():
     assert st["rms"] == pytest.approx(4, rel=1e-2)
 
 
+# x profile of the 112 cm monitor plane of the OTPAS-1866 case A_p132p06_t4_d108 (protons, 0.5 mm bins over
+# +-40 mm): a Gaussian core without a visible halo, with single counts in the tails
+REAL_112CM_X = [
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.79847, 3.55068, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.46721, 0.0, 0.0,
+    0.0, 2.50981, 0.0, 2.62059, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 5.17063, 0.0, 0.0, 0.0, 2.33512, 2.28927,
+    2.4161, 0.0, 2.16651, 0.0, 0.0, 0.0, 0.0, 5.19269, 2.26521, 0.0, 0.0, 2.52784, 0.0, 2.23398, 4.76518, 0.0,
+    2.0, 0.0, 2.0, 10.0, 14.633, 22.9067, 49.0572, 114.655, 220.0, 320.0, 564.001, 878.002, 1346.0, 2074.62,
+    3082.0, 4406.01, 6164.01, 8434.92, 11398.5, 14654.1, 17817.6, 22259.1, 26171.6, 30534.1, 34003.5, 36548.4,
+    39334.9, 40113.0, 40247.2, 38746.9, 36999.9, 33535.1, 30390.3, 26180.7, 22458.2, 18004.7, 14246.0, 11172.7,
+    8416.77, 6128.04, 4418.01, 3006.0, 2104.3, 1395.71, 882.001, 470.001, 298.0, 178.433, 108.093, 66.6873,
+    32.0, 6.00001, 18.0, 2.0, 0.0, 0.0, 4.75247, 2.23402, 0.0, 0.0, 0.0, 4.46706, 0.0, 0.0, 2.32888, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 2.10243, 0.0, 0.0, 0.0,
+    5.74397, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+]
+
+
+def test_no_double_gaussian_on_a_real_plane_without_halo():
+    """On this plane the free fit split the one Gaussian into sigma1 1.88 mm and sigma2 2.97 mm with a "halo" of
+    99.9 % of the area. Such a split is no halo, so the double Gaussian is left out."""
+    xs = axis(160, 0.5)
+    st = bp.profile_stats(xs, REAL_112CM_X)
+    assert st["sigma"] == pytest.approx(2.97, abs=0.01)
+    assert "halo_dg" not in st and "sigma1" not in st
+    assert st["halo3s"] < 0.01
+
+
 def test_profile_stats_of_an_empty_profile():
     assert bp.profile_stats(axis(10, 1), [0.0] * 10) == {}
 

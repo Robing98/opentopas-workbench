@@ -233,7 +233,11 @@ def double_gauss(x, y, core):
     if s2 < s1: a1, s1, a2, s2 = a2, s2, a1, s1
     area1, area2 = a1 * s1, a2 * s2
     if not all(math.isfinite(v) for v in (a1, a2, s1, s2)) or area1 <= 0 or area2 < 0 or area1 + area2 <= 0: return None
-    return s1, s2, area2 / (area1 + area2)
+    halo = area2 / (area1 + area2)
+    # On a profile without a halo the fit splits the one Gaussian into two of similar width (seen on a real monitor
+    # plane: sigma1 1.88, sigma2 2.97, halo 99.9 %). Such a split says nothing about a halo, so report none.
+    if s2 < 1.2 * s1 or halo > 0.5: return None
+    return s1, s2, halo
 
 
 def fwhm(x, y):
