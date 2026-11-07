@@ -1139,17 +1139,22 @@ function bpPaint(opt){opt=opt||{};const c=$("bpPlot"),g=opt.g||c.getContext("2d"
  if(!opt.g)g.clearRect(0,0,W,H);$("bpEmpty").hidden=!(s&&s.empty);if(s&&s.empty)$("bpEmpty").textContent=s.empty;
  if(!s||s.empty)return;g.fillStyle=C("--card");g.fillRect(0,0,W,H);
  if(s.type==="map")bpMap(g,W,H,C,s);else bpLines(g,W,H,C,s)}
-function bpLines(g,W,H,C,s){const ink=C("--ink"),mute=C("--mute"),line=C("--line"),X0=100,X1=W-24,Y0=H-62,Y1=34;g.font="20px system-ui";
+function bpLines(g,W,H,C,s){const ink=C("--ink"),mute=C("--mute"),line=C("--line"),X1=W-24,Y0=H-62,Y1=34;g.font="20px system-ui";
  let xmin=Infinity,xmax=-Infinity,ymax=-Infinity;for(const r of s.series)r.x.forEach((x,i)=>{const y=r.y[i];if(x==null||y==null||!isFinite(y))return;xmin=Math.min(xmin,x);xmax=Math.max(xmax,x);ymax=Math.max(ymax,y)});
  if(!isFinite(xmin)){g.fillStyle=mute;g.textAlign="center";g.fillText(t("bp_no_data"),W/2,H/2);return}
  let ymin=Infinity;for(const r of s.series)r.y.forEach(y=>{if(y!=null&&isFinite(y)&&(!s.logy||y>0))ymin=Math.min(ymin,y)});
  if(s.logy){if(!(ymax>0)){ymax=1;ymin=1e-6}ymin=Math.max(ymin,ymax*1e-6)}else ymin=Math.min(0,ymin);if(!isFinite(ymin))ymin=0;
- const ty=v=>s.logy?Math.log10(v):v,a=ty(ymin),b=ty(ymax)+((ty(ymax)-ty(ymin))*0.06||0.06);
+ let X0=100;const ty=v=>s.logy?Math.log10(v):v,a=ty(ymin),b=ty(ymax)+((ty(ymax)-ty(ymin))*0.06||0.06);
  const sx=v=>{const f=(v-xmin)/(xmax-xmin||1);return X0+(s.rev?1-f:f)*(X1-X0)},sy=v=>Y0-(ty(v)-a)/(b-a||1)*(Y0-Y1);
+ const yt=s.logy?Array.from({length:Math.max(0,Math.floor(b)-Math.ceil(a)+1)},(_,i)=>Math.pow(10,Math.ceil(a)+i)):niceTicks(a,b);
+ const yl=v=>s.logy?(Math.abs(Math.log10(v))>=4?`1e${Math.round(Math.log10(v))}`:String(+v.toPrecision(3))):Math.abs(v)>=1e4||(Math.abs(v)<1e-2&&v!==0)?v.toExponential(1):String(+v.toPrecision(3));
+ // the left margin follows the longest tick label (about 11 px a character in the 20 px font, also in the SVG export),
+ // so labels such as 2.5e-3 do not run into the rotated axis title
+ X0=Math.max(84,11*Math.max(0,...yt.map(v=>yl(v).length))+50);
  g.strokeStyle=line;g.fillStyle=mute;g.lineWidth=1;g.textAlign="center";
  for(const v of niceTicks(xmin,xmax)){const px=sx(v);g.beginPath();g.moveTo(px,Y1);g.lineTo(px,Y0);g.stroke();g.fillText(v,px,Y0+24)}
- g.textAlign="right";const yt=s.logy?Array.from({length:Math.max(0,Math.floor(b)-Math.ceil(a)+1)},(_,i)=>Math.pow(10,Math.ceil(a)+i)):niceTicks(a,b);
- for(const v of yt){const py=sy(v);if(py<Y1-1||py>Y0+1)continue;g.beginPath();g.moveTo(X0,py);g.lineTo(X1,py);g.stroke();g.fillText(Math.abs(v)>=1e4||(Math.abs(v)<1e-2&&v!==0)?v.toExponential(1):+v.toPrecision(3),X0-8,py+6)}
+ g.textAlign="right";
+ for(const v of yt){const py=sy(v);if(py<Y1-1||py>Y0+1)continue;g.beginPath();g.moveTo(X0,py);g.lineTo(X1,py);g.stroke();g.fillText(yl(v),X0-8,py+6)}
  g.strokeStyle=ink;g.beginPath();g.moveTo(X0,Y1);g.lineTo(X0,Y0);g.lineTo(X1,Y0);g.stroke();
  g.fillStyle=ink;g.textAlign="center";g.fillText(s.xlab,(X0+X1)/2,H-14);g.save();g.translate(24,(Y0+Y1)/2);g.rotate(-Math.PI/2);g.font="18px system-ui";g.fillText(s.ylab,0,0);g.restore();
  g.font="17px system-ui";g.fillStyle=mute;g.textAlign="right";g.fillText(s.title||"",X1,Y1-12);
