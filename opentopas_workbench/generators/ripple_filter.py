@@ -6,7 +6,17 @@ Example plugin for OpenTOPAS Workbench. Geometry follows Grevillot et al. (2D 2 
 with the same thickness distribution as the 2D pins, to check that only the distribution matters for the depth dose.
 Phantom surface at the isocentre, filters 80 cm upstream.
 """
-import math, re, struct
+import importlib.util, math, os, re, struct
+
+
+def _monitor_helper():
+    """The shared monitor option in _monitors.py, loaded by path like the generators themselves."""
+    spec = importlib.util.spec_from_file_location("wbgen__monitors", os.path.join(os.path.dirname(os.path.abspath(__file__)), "_monitors.py"))
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    return mod
+
+
+MON = _monitor_helper()
 
 NAME = {"en": "Ripple filter study", "de": "Ripple-Filter-Studie"}
 DESCRIPTION = {
@@ -43,7 +53,11 @@ FIELDS = [
     {"key": "spread", "type": "number", "label": {"en": "Energy spread [%]", "de": "Energiebreite [%]"}, "default": 0.2},
     {"key": "period", "type": "number", "label": {"en": "Period of 1D/2D filters [mm]", "de": "Periode der 1D/2D-Filter [mm]"}, "default": 1.5},
     {"key": "prefix", "type": "text", "label": {"en": "File name prefix", "de": "Präfix Dateiname"}, "default": "mess"},
-]
+] + MON.FIELDS
+# monitor planes for "before and after every component": after the source (85 cm), before the filters (80 cm,
+# up to 6 mm thick), after them (the crossed one sits at 78.3 cm), and at the phantom surface. The same planes in every
+# variant, so cases with and without a filter compare plane by plane.
+AUTO_MONITORS = [84.5, 81.5, 77.0, 0.0]
 
 
 def range_mm(ion, e_u):
@@ -226,7 +240,8 @@ def generate(v):
     for ion in v.get("ions") or []:
         for e in energies:
             for var in v.get("variants") or []:
-                files.append(case(ion, e, var, v["histories"], float(v["spread"]), lam, v.get("prefix") or "mess"))
+                name, text = case(ion, e, var, v["histories"], float(v["spread"]), lam, v.get("prefix") or "mess")
+                files.append((name, text + MON.block(v, name[:-4], AUTO_MONITORS, ION[ion][1] * e, 300, 1400)))
     for var in sorted(v.get("variants") or []):
         m = PIN_RE.match(var)
         if m and not m.group(3):

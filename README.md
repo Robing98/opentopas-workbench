@@ -12,19 +12,25 @@ A local web UI for [OpenTOPAS](https://github.com/OpenTOPAS/OpenTOPAS) and TOPAS
 - **Runs**: queue parameter files for one or more TOPAS installations. Progress bar with remaining time, live log with highlighted errors, stop button, optional output subfolder. Existing results are detected, also when the cases were run outside the workbench.
 - **Overview**: every result in the workspace in one table, filtered by particle, energy, folder, or file-name tags. Beam data come from the parameter file that wrote the output. R80, BPW80, deviations to a reference (for example the case without filter), a Bragg-Kleeman range check, your own formula columns, CSV export, and an image gallery with full-screen view.
 - **Results**: plot TOPAS CSV scorer output and measured curves (PTW `.mcc`, IBA `.asc`, column files). Overlay curves with normalisation, log axis, drag zoom, hover read-out, and difference or ratio to a reference. Bragg peak metrics (R80, BPW80, D80-D20, ΔR80, filter BPW80). 2D and 3D binnings show as a heat map.
+- **Beam profile**: the monitor planes and 3D dose grids of a folder. x and y profiles (integrated or as a cut through the centroid, linear or logarithmic for the halo) and the 2D map per plane; the envelope, sigma, FWHM, centroid, or halo share along the beam line for several cases at once; energy spectra; lateral dose profiles at a depth picked with a slider, and sigma against depth. Every profile gets a Gaussian core fit (sigma, mean), FWHM, rms, the share outside 3 sigma, and a double Gaussian (core and halo sigma, halo share) where the profile has a halo.
 - **Export**: plots as PNG or SVG in a print style, plotted data as CSV, results and images as ZIP. Plot settings can be saved as named views.
 - **Variations**: copy a parameter file with one parameter set to a list of values; output names get a matching suffix.
 - **Notifications and keep-awake**: browser or Windows notification when runs fail or the queue is done; system sleep is blocked while runs are queued, optionally the display stays on as well (see [Long runs on Windows laptops](#long-runs-on-windows-laptops)).
 - **Generators**: plugins that write parameter sets from a form.
   - `pencil_beam`: any particle from protons to oxygen, an energy list, phantom material, depth dose, and an optional 2D map. Sets `EMRangeMax` for light ions above the default table range.
   - `ripple_filter`: depth-dose studies with 1D, crossed, and 2D ripple filters (pins and pyramids written as binary STL, plus 1D ridges with the same thickness distribution as a 2D filter).
-- **Navigation**: tabs follow the workflow from generating cases to comparing results; "plot results" links in Runs, the queue, and the Overview lead straight to the curves. The address keeps the tab, the open file, and the plotted curves, so Back, Forward, and bookmarks work. Press `?` for the keyboard shortcuts (`1` to `6` switch tabs, `/` focuses the filter).
+  - Both can add beam profile monitors: thin scoring planes in a parallel world, so they do not change the physics, at a list of positions (cm before the isocenter) or before and after every component. Each plane scores a 2D fluence map (default 0.5 mm bins over ±40 mm), optionally split into protons, electrons, and other particles, and an energy spectrum. Outputs are named `mon_<position>_<case>_<p|e|o|all>.bin` and `mon_<position>s_<case>_<spec|espec>.csv`, with `p` for the decimal point (`19p52`).
+- **Navigation**: tabs follow the workflow from generating cases to comparing results; "plot results" links in Runs, the queue, and the Overview lead straight to the curves. The address keeps the tab, the open file, and the plotted curves, so Back, Forward, and bookmarks work. Press `?` for the keyboard shortcuts (`1` to `7` switch tabs, `/` focuses the filter).
 - **Large workspaces**: hundreds of cases and big non-TOPAS files (matRad `.mat`, DICOM) are fine. Only parameter files and scorer output are read, parsed facts are cached, and the lists refresh in the background.
 - English and German UI, light and dark theme.
 
 | Files | Runs | Generators |
 |---|---|---|
 | ![](docs/files_light_en.png) | ![](docs/run_dark_en.png) | ![](docs/gen_dark_en.png) |
+
+| Beam profile: profiles (log) | Beam profile: envelope | Beam profile: sigma against depth |
+|---|---|---|
+| ![](docs/beam_profiles_dark_en.png) | ![](docs/beam_envelope_light_en.png) | ![](docs/beam_sigmaz_dark_en.png) |
 
 ## Requirements
 
@@ -125,7 +131,8 @@ The server listens on `127.0.0.1` only, rejects requests with a foreign `Host` h
 
 ## Known limits
 
-- Plotting reads TOPAS CSV output and measured curves. Binary and ROOT output are not plotted yet.
+- The Results tab plots TOPAS CSV output and measured curves. Binary output is read only by the Beam profile tab, ROOT output not at all.
+- The double Gaussian is left out when its two widths differ by less than a factor of 1.2 or the halo would carry more than half the area: such a fit only splits a profile without a halo in two. Just behind a ripple filter the profile carries the groove pattern, so read sigma there rather than the FWHM.
 - The syntax check is heuristic. It checks that `includeFile` targets exist but does not merge their parameters.
 - One job runs at a time. TOPAS itself uses all cores with `i:Ts/NumberOfThreads = 0`.
 
