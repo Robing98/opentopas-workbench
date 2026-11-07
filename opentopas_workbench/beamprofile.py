@@ -97,6 +97,8 @@ def _read_csv(path):
         p = l.replace(",", " ").split()
         if len(p) < 4: continue
         i, j, k = int(p[0]), int(p[1]), int(p[2])
+        # a bin outside the header would raise IndexError (no answer at all) or, when negative, land in another bin
+        if not (0 <= i < nx and 0 <= j < ny and 0 <= k < nz): raise ValueError(f"bin {i}, {j}, {k} lies outside the {nx} x {ny} x {nz} bins of the header")
         data[i + nx * (j + ny * k)] = float(p[3])
     return Grid(dims, quantity, data)
 
@@ -265,7 +267,8 @@ def profile_stats(x, y):
     c = sum(a * b for a, b in zip(x, y)) / tot
     out = {"centroid": c, "rms": math.sqrt(max(sum(b * (a - c) ** 2 for a, b in zip(x, y)) / tot, 0)), "fwhm": fwhm(x, y),
            "total": tot}
-    core = gauss_core(x, y)
+    try: core = gauss_core(x, y)
+    except (OverflowError, ValueError, ZeroDivisionError): core = None   # a diverging fit must not cost the answer
     if core:
         out["sigma"], out["mu"] = core[2], core[1]
         out["halo3s"] = sum(b for a, b in zip(x, y) if abs(a - core[1]) > 3 * core[2]) / tot

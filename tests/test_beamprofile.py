@@ -174,6 +174,24 @@ def test_binary_and_csv_grid_agree(tmp_path):
     assert gb.quantity.startswith("DoseToMedium")
 
 
+def test_csv_with_a_bin_outside_the_header(tmp_path):
+    """A row outside the header's bins is a 400 with a reason, not an IndexError that drops the connection."""
+    f = tmp_path / "g.csv"
+    f.write_text(header("g", [("X", 2, 0.1, "cm"), ("Y", 2, 0.1, "cm"), ("Z", 2, 0.1, "cm")]) + "0, 0, 5, 1.0\n")
+    with pytest.raises(ValueError, match="outside"):
+        bp.read_grid(str(f))
+    f.write_text(header("g", [("X", 2, 0.1, "cm"), ("Y", 2, 0.1, "cm"), ("Z", 2, 0.1, "cm")]) + "-1, 0, 0, 1.0\n")
+    with pytest.raises(ValueError, match="outside"):
+        bp.read_grid(str(f))
+
+
+def test_profile_stats_survive_a_diverging_core_fit(monkeypatch):
+    def boom(*a, **k): raise OverflowError("math range error")
+    monkeypatch.setattr(bp, "gauss_core", boom)
+    st = bp.profile_stats(axis(10, 1), [0, 0, 1, 5, 9, 5, 1, 0, 0, 0])
+    assert "sigma" not in st and st["rms"] > 0
+
+
 def test_binary_without_header_or_with_several_statistics(tmp_path):
     dims = [("X", 2, 1, "mm"), ("Y", 2, 1, "mm"), ("Z", 1, 1, "mm")]
     write_bin(tmp_path, "m", dims, [1.0] * 8)               # two statistics' worth of doubles
