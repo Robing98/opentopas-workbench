@@ -244,14 +244,17 @@ def fwhm(x, y):
     if not y: return None
     i = max(range(len(y)), key=y.__getitem__); h = y[i] / 2
     if h <= 0: return None
+    # Search from the ends inward: just behind a ripple filter the profile carries the groove pattern, and a walk
+    # from the peak outward stops in the first dip below half maximum (7.2 mm instead of 7.9 mm on the 10 cm plane
+    # 20 cm behind the filter). A single spike at the peak still raises the half maximum; the fitted sigma does not.
     def edge(step):
-        k = i
-        while 0 <= k + step < len(y):
-            if y[k] >= h > y[k + step]:
-                return x[k] + (x[k + step] - x[k]) * (y[k] - h) / (y[k] - y[k + step])
+        k = 0 if step > 0 else len(y) - 1
+        while k != i:
+            if y[k + step] >= h > y[k]:
+                return x[k] + (x[k + step] - x[k]) * (h - y[k]) / (y[k + step] - y[k])
             k += step
         return None
-    lo, hi = edge(-1), edge(1)
+    lo, hi = edge(1), edge(-1)
     return hi - lo if lo is not None and hi is not None else None
 
 

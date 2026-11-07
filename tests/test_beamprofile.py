@@ -95,6 +95,15 @@ def test_fwhm_of_a_gaussian():
     assert bp.fwhm(xs, ys) == pytest.approx(2 * math.sqrt(2 * math.log(2)) * 3, rel=2e-3)
 
 
+def test_fwhm_of_a_modulated_gaussian():
+    """Behind a ripple filter the profile dips below half maximum between grooves near the peak; the width is still
+    that of the envelope."""
+    xs = axis(400, 0.1)
+    ys = [math.exp(-0.5 * (x / 3) ** 2) * (0.75 + 0.25 * math.cos(2 * math.pi * x / 1.5)) for x in xs]
+    # the walk from the peak stopped in the first dip at 1.4 mm; the envelope's own FWHM is 7.06 mm
+    assert bp.fwhm(xs, ys) == pytest.approx(6.47, abs=0.05)
+
+
 def test_profile_stats_core_and_halo():
     """sigma1 3 mm, sigma2 10 mm, halo weight 0.1: the double Gaussian finds them, halo3s matches the analytic share."""
     xs = axis(160, 0.5)
