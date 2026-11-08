@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Private folders: jobs of parameter files below the top folder `lokal` keep their record and log in `lokal/.workbench/`, so the shared `.workbench` never names them; the page still shows all jobs. The MCP server refuses and hides the top folders `lokal` and `robin`.
+- `tools/zonen_umzug.py` sorts a workspace into the top folders `offen`, `robin`, and `lokal` by path and name, as a dry run unless `--apply` is given.
 - MCP server: `opentopas-workbench mcp` is a stdio MCP server over the HTTP API of a running workbench, for Claude Code, Claude Desktop, and other MCP clients. Tools read cases, results, curves, the queue, and logs, and write files, generate cases, queue, remove, and stop runs; `--read-only` offers only the reading tools. Files in `.workbench` (settings, generator plugins, the token) cannot be written or read through it. It speaks protocol versions 2024-11-05 to 2025-11-25 with `initialize` and 2026-07-28 with `server/discover`. See [MCP server](README.md#mcp-server).
 - Discovery: a running workbench writes `.workbench/server.json` (address, token, process id; readable only by the owner) and removes it on exit. The MCP server and the new commands find the workbench through it and start one in the background when none runs (`--no-start` turns that off).
 - Commands: `opentopas-workbench enqueue FILES...` queues parameter files and `opentopas-workbench jobs` prints the queue, both without the browser.
