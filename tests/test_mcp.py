@@ -355,3 +355,31 @@ def test_default_workspace_skips_a_home_workbench_folder(tmp_path, monkeypatch):
     assert mcp.default_workspace() == os.path.realpath(home / "cases")
     monkeypatch.chdir(home)
     assert mcp.default_workspace() == os.path.realpath(home)
+
+
+def test_private_folders_refused_and_hidden(client, ws):
+    """lokal and robin hold data an MCP client must never see; deny rules of the client do not cover MCP calls."""
+    for d in ("lokal/p", "robin", "offen"):
+        (ws / d).mkdir(parents=True, exist_ok=True)
+        (ws / d / "a.txt").write_text(PARAM)
+    os.symlink(ws / "lokal", ws / "offen/link")
+    for tool, args in (("read_file", {"path": "lokal/p/a.txt"}), ("read_file", {"path": "./robin/a.txt"}),
+                       ("list_files", {"path": "lokal"}), ("list_cases", {"folder": "lokal/p"}),
+                       ("write_file", {"path": "lokal/x.txt", "text": "x"}), ("enqueue", {"files": ["offen/a.txt", "lokal/p/a.txt"]}),
+                       ("get_curve", {"path": "offen/../lokal/p/a.txt"}), ("read_file", {"path": str(ws / "lokal/p/a.txt")}),
+                       ("read_file", {"path": "LOKAL/p/a.txt"}), ("read_file", {"path": "lokal./p/a.txt"}),
+                       ("read_file", {"path": "offen/link/p/a.txt"}), ("list_files", {"path": str(ws / "robin")})):
+        r, msg = client.tool(tool, **args)
+        assert r["isError"] and "private" in msg, (tool, args)
+    assert not (ws / "lokal/x.txt").exists() and not wb.STATE["jobs"]
+    _, out = client.tool("list_cases")
+    assert [c["file"] for c in out["cases"]] == ["offen/a.txt"]
+    wb.STATE["jobs"] = [{"id": 1, "file": "lokal/p/a.txt", "binary": "t", "status": "done", "log": "lokal/.workbench/logs/job00001.log"},
+                        {"id": 2, "file": "offen/a.txt", "binary": "t", "status": "queued"}]
+    _, out = client.tool("queue_status", history=5)
+    assert "lokal" not in json.dumps(out) and [j["file"] for j in out["waiting"]] == ["offen/a.txt"]
+    assert client.tool("job_log", job_id=1)[0]["isError"]
+    _, out = client.tool("info")
+    assert not any(f.startswith(("lokal", "robin")) for f in out["folders"])
+    _, out = client.tool("list_files", path="")
+    assert "lokal" not in json.dumps(out) and "robin" not in json.dumps(out)

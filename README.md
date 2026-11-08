@@ -52,6 +52,8 @@ On first start the workbench looks for TOPAS binaries in `~/.local/bin/topas4`, 
 
 Settings, job history, logs, and a cache of parsed files (`index.json`, safe to delete) live in `WORKSPACE/.workbench/`.
 
+Private folders: a top folder named `lokal` is for data that must stay on this computer. Jobs of parameter files below it keep their record and log in `WORKSPACE/lokal/.workbench/` instead; the page shows them together with the others. Through the MCP server, the top folders `lokal` and `robin` cannot be read, listed, written, or queued, and their jobs do not show.
+
 ## MCP server
 
 `opentopas-workbench mcp` lets an MCP client such as Claude Code or Claude Desktop drive the workbench: read cases and results, create cases with a generator, queue and stop runs, and read logs. It is a local stdio server (one JSON-RPC message per line) and a thin layer over the HTTP API of a running workbench, so runs it queues show in the Runs tab like any other.

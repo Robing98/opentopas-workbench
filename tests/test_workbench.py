@@ -493,3 +493,53 @@ def test_http_file_cache_header(srv, ws):
     def cache_control(q):
         with urllib.request.urlopen(srv + "/file?p=a.png&token=" + wb.TOKEN + q) as r: return r.headers["Cache-Control"]
     assert cache_control("") == "no-store" and cache_control("&v=1730000000.5").startswith("private")
+
+
+# ------------------------------------------------------------------ lokal zone
+def run_one(ws, rel):
+    """Queues and runs one job; the 'binary' is this Python, the parameter file a script that writes one output."""
+    import sys
+    p = ws / rel; p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text("open('out.csv', 'w').write('1')\nprint('done')\n")
+    wb.STATE["cfg"]["binaries"] = [{"name": "py", "cmd": sys.executable}]
+    wb.enqueue([rel], "py", "", False)
+    job = wb.STATE["jobs"][-1]; job["status"] = "running"; job["start"] = "x"
+    wb.run_job(job)
+    assert job["status"] == "done", job
+    return job
+
+
+def test_lokal_job_record_and_log_stay_in_lokal(ws):
+    pub = run_one(ws, "offen/case/a.txt")
+    lok = run_one(ws, "lokal/patient/case/b.txt")
+    assert pub["log"].startswith(".workbench/logs/") and (ws / pub["log"]).is_file()
+    assert lok["log"].startswith("lokal/.workbench/logs/") and (ws / lok["log"]).is_file()
+    assert not (ws / ".workbench/logs" / os.path.basename(lok["log"])).exists()
+    shared = (ws / ".workbench/jobs.json").read_text()
+    assert "offen/case/a.txt" in shared and "lokal" not in shared and "patient" not in shared
+    local = json.loads((ws / "lokal/.workbench/jobs.json").read_text())
+    assert [j["file"] for j in local] == ["lokal/patient/case/b.txt"]
+    # the local UI still shows both, in id order, after a restart
+    wb.STATE["jobs"] = []; wb.load_jobs()
+    assert [j["file"] for j in wb.STATE["jobs"]] == ["offen/case/a.txt", "lokal/patient/case/b.txt"]
+    assert wb.STATE["next_id"] == 3
+
+
+def test_no_lokal_folder_without_lokal_jobs(ws):
+    run_one(ws, "offen/a.txt"); run_one(ws, "b.txt"); run_one(ws, "offen/lokal/c.txt")
+    assert not (ws / "lokal").exists()   # only the top folder counts as the lokal zone
+    assert len(json.loads((ws / ".workbench/jobs.json").read_text())) == 3
+
+
+def test_lokal_job_given_another_way_stays_in_lokal(ws):
+    (ws / "lokal").mkdir(); (ws / "offen").mkdir(); os.symlink(ws / "lokal", ws / "offen/link")
+    for rel in ("./lokal/a.txt", str(ws / "lokal/b.txt"), "offen/link/c.txt"):
+        job = run_one(ws, rel)
+        assert job["file"].startswith("lokal/") and job["log"].startswith("lokal/.workbench/"), job
+    assert "lokal" not in (ws / ".workbench/jobs.json").read_text() if (ws / ".workbench/jobs.json").exists() else True
+
+
+def test_is_lokal():
+    assert wb.is_lokal("Lokal/x.txt") and wb.is_lokal("lokal./x.txt")
+    assert wb.is_lokal("lokal/x.txt") and wb.is_lokal("lokal\\x.txt") and wb.is_lokal("lokal")
+    assert not wb.is_lokal("offen/lokal/x.txt") and not wb.is_lokal("lokale/x.txt") and not wb.is_lokal("x.txt")

@@ -23,6 +23,14 @@ STATE = {"root": None, "cfg": {}, "lock": threading.Lock(), "jobs": [], "proc": 
 
 # ------------------------------------------------------------------ config
 def wb_dir(): return os.path.join(STATE["root"], ".workbench")
+# A top folder named "lokal" holds data that must stay on this computer (patient data, data under agreement). Jobs of its
+# parameter files keep their record and log in lokal/.workbench, so the shared .workbench never names them.
+LOKAL = "lokal"
+def is_lokal(rel):
+    """Lexical, on the normalised paths enqueue stores; case and trailing dots do not count (Windows, /mnt/c)."""
+    return str(rel).replace("\\", "/").lstrip("/").split("/")[0].casefold().rstrip(". ") == LOKAL
+def lokal_wb_dir(): return os.path.join(STATE["root"], LOKAL, ".workbench")
+def job_wb_dir(job): return lokal_wb_dir() if is_lokal(job["file"]) else wb_dir()
 
 
 def detect_binaries():
@@ -68,9 +76,12 @@ def save_cfg():
 
 
 def load_jobs():
-    try:
-        with open(os.path.join(wb_dir(), "jobs.json")) as fh: STATE["jobs"] = json.load(fh)
-    except (OSError, ValueError): STATE["jobs"] = []
+    jobs = []
+    for d in (wb_dir(), lokal_wb_dir()):
+        try:
+            with open(os.path.join(d, "jobs.json")) as fh: jobs += json.load(fh)
+        except (OSError, ValueError): pass
+    STATE["jobs"] = sorted(jobs, key=lambda j: j["id"])
     for j in STATE["jobs"]:
         if j["status"] in ("running", "queued"): j["status"] = "aborted"
     STATE["next_id"] = max([j["id"] for j in STATE["jobs"]] + [0]) + 1
@@ -78,8 +89,12 @@ def load_jobs():
 
 def save_jobs():
     STATE["rev"] += 1   # lets the page skip re-rendering the queue when nothing changed
-    os.makedirs(wb_dir(), exist_ok=True)
-    with open(os.path.join(wb_dir(), "jobs.json"), "w") as fh: json.dump(STATE["jobs"][-500:], fh, indent=0)
+    lok = [j for j in STATE["jobs"] if is_lokal(j["file"])]
+    shared = [j for j in STATE["jobs"] if not is_lokal(j["file"])]
+    for d, jobs in ((wb_dir(), shared), (lokal_wb_dir(), lok)):
+        if not jobs and not os.path.exists(os.path.join(d, "jobs.json")): continue   # no lokal folder made for nothing
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "jobs.json"), "w") as fh: json.dump(jobs[-500:], fh, indent=0)
 
 # ------------------------------------------------------------------ paths
 def resolve(rel):
@@ -481,7 +496,7 @@ def job_worker():
 
 def run_job(job):
     binary = next((b for b in STATE["cfg"]["binaries"] if b["name"] == job["binary"]), None)
-    logdir = os.path.join(wb_dir(), "logs"); os.makedirs(logdir, exist_ok=True)
+    logdir = os.path.join(job_wb_dir(job), "logs"); os.makedirs(logdir, exist_ok=True)
     job["log"] = relp(os.path.join(logdir, f"job{job['id']:05d}.log"))
     try:
         param = resolve(job["file"])
@@ -528,6 +543,7 @@ def enqueue(files, binary, subdir, skip_existing):
     for f in files:
         p = resolve(f)
         if not os.path.isfile(p): raise ValueError(f"not a file: {f}")
+        f = relp(p)   # "./lokal/x", an absolute path or a link into lokal must count as lokal too
         if skip_existing:
             info = file_info(p)
             outs = info["outs"] if info else []

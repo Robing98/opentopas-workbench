@@ -106,6 +106,13 @@ class Workbench:
         self.url = self.token = None
         self.started = None   # pid of a workbench this adapter started
 
+    def root(self):
+        """Real path of the workspace, for checks on the paths a tool is given."""
+        if not self.workspace:
+            try: self.workspace = os.path.realpath(self.get("/api/info")["root"])
+            except (ApiError, KeyError, OSError): return None
+        return self.workspace
+
     def _request(self, url, token, path, query=None, body=None):
         q = "?" + urllib.parse.urlencode({k: v for k, v in (query or {}).items() if v is not None}) if query else ""
         req = urllib.request.Request(url.rstrip("/") + path + q, data=None if body is None else json.dumps(body).encode())
@@ -216,7 +223,7 @@ def en(v):
 
 
 def find_job(wb, job_id):
-    jobs = wb.get("/api/jobs", hist=5000)["jobs"]
+    jobs = [j for j in wb.get("/api/jobs", hist=5000)["jobs"] if not private(j.get("file", ""))]
     if job_id is None:   # the running job, else the last one that ran
         job = next((j for j in jobs if j["status"] == "running"), None)
         job = job or next((j for j in reversed(jobs) if j.get("log")), None)
@@ -272,6 +279,38 @@ def t_list_cases(wb, a):
         out.append(item)
     limit = a.get("limit", 200)
     return {"total": len(out), "cases": out[:limit], "truncated": len(out) > limit}
+
+
+# Top folders an MCP client never reaches: "lokal" holds data that must stay on this computer, "robin" numbers shown only to
+# the owner. The deny rules of a client do not cover MCP calls, so the adapter refuses and hides them itself.
+PRIVATE = ("lokal", "robin")
+
+
+def private(path, root=None):
+    """True for a path in a private top folder. With root, the path is resolved as the workbench does (absolute paths,
+    links), so neither leads around the check. Case and trailing dots do not count: Windows and /mnt/c ignore them."""
+    path = str(path).replace("\\", "/")
+    if root:
+        real = os.path.realpath(os.path.join(root, path))
+        rel = os.path.relpath(real, root).replace(os.sep, "/")
+        if rel.startswith("../"): return False   # outside the workspace; the workbench refuses it anyway
+        path = rel
+    parts = [x for x in os.path.normpath(path).replace(os.sep, "/").split("/") if x not in ("", ".")]
+    return bool(parts) and parts[0].casefold().rstrip(". ") in PRIVATE
+
+
+def private_args(a, root=None):
+    vals = [a.get(k) for k in ("path", "folder", "subfolder")] + list(a.get("files") or [])
+    return [v for v in vals if isinstance(v, str) and (private(v) or private(v, root))]
+
+
+def hide_private(x):
+    """Drops list items that name a private path (strings, or records with a private file, path or name)."""
+    if isinstance(x, list):
+        return [hide_private(i) for i in x if not (isinstance(i, str) and private(i))
+                and not (isinstance(i, dict) and any(isinstance(i.get(k), str) and private(i[k]) for k in ("file", "path", "name")))]
+    if isinstance(x, dict): return {k: hide_private(v) for k, v in x.items()}
+    return x
 
 
 def inside_wb_dir(path):
@@ -528,8 +567,9 @@ class Server:
             return self.tool_error(f"{name} changes the workspace or the queue; this MCP server runs with --read-only")
         missing = [k for k in schema.get("required", []) if k not in args]
         if missing: return self.tool_error(f"missing argument: {', '.join(missing)}")
+        if private_args(args, self.wb.root()): return self.tool_error(f"{', '.join(PRIVATE)} are private folders, not reachable through MCP")
         try:
-            res = fn(self.wb, args)
+            res = hide_private(fn(self.wb, args))
         except ApiError as e:
             return self.tool_error(str(e))
         except (KeyError, TypeError, ValueError, AttributeError) as e:
