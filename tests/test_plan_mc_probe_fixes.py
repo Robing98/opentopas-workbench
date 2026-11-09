@@ -69,6 +69,21 @@ def test_empty_snout_isocenter_and_spot_size_count_as_missing(tmp_path):
     assert f.snout_position is None and f.iso == (0.0, 0.0, 0.0) and f.layers[0].spot_size is None
 
 
+def test_spot_size_given_once_holds_for_the_later_layers(tmp_path):
+    flds = fields(size=(7.0, 9.0))
+    flds[0].layers.append(pl.Layer(110.0, [0.0], [0.0], [1.0], spot_size=(8.0, 10.0)))
+    flds[0].layers.append(pl.Layer(100.0, [0.0], [0.0], [1.0], spot_size=(8.0, 10.0)))
+    path = write_plan(tmp_path, flds)
+    ds = pydicom.dcmread(path)
+    cps = ds.IonBeamSequence[0].IonControlPointSequence
+    for cp in cps[1:]:                        # DICOM: an attribute left out of a control point keeps its last value
+        if "ScanningSpotSize" in cp and list(cp.ScanningSpotSize) == [7.0, 9.0]: del cp.ScanningSpotSize
+    third = [cp for cp in cps if float(getattr(cp, "NominalBeamEnergy", 0) or 0) == 100.0]
+    for cp in third: del cp.ScanningSpotSize  # the third layer inherits the second one's size
+    ds.save_as(path)
+    assert [l.spot_size for l in pl.read_rtplan(path).fields[0].layers] == [(7.0, 9.0), (8.0, 10.0), (8.0, 10.0)]
+
+
 # ------------------------------------------------------------------ 2. NP unit
 @pytest.mark.parametrize("unit,particles", [("NP", 10.0), ("MU", 10.0 * 1e7)])
 def test_np_meterset_is_taken_as_particles(tmp_path, unit, particles):
@@ -103,6 +118,15 @@ def test_treatment_beams_in_groups_with_different_fractions_are_refused(tmp_path
         pl.read_rtplan(path)
     ds.FractionGroupSequence[1].NumberOfFractionsPlanned = 30; ds.save_as(path)
     assert pl.read_rtplan(path).fractions == 30
+
+
+def test_treatment_group_with_an_empty_fraction_count_is_refused(tmp_path):
+    path = write_plan(tmp_path, fields(1), setup_beams=2)
+    ds = pydicom.dcmread(path)
+    ds.FractionGroupSequence[0].NumberOfFractionsPlanned = None   # type 2: may be empty, then the count is unknown
+    ds.save_as(path)
+    with pytest.raises(ValueError, match="NumberOfFractionsPlanned"):
+        pl.read_rtplan(path)
 
 
 # ------------------------------------------------------------------ 4. range shifter distance
@@ -263,9 +287,12 @@ def test_reports_name_no_patient_file_and_no_label_with_the_name(tmp_path, capsy
 
 
 @pytest.mark.parametrize("label,name,shown", [("PT1 Prostata", "Synthetic^Phantom", "PT1 Prostata"),
-                                              ("Max", "Mustermann^Max", "Plan"), ("A^B", "X^Y", "Plan"), ("", "X^Y", "Plan")])
+                                              ("Max", "Mustermann^Max", "Plan"), ("A^B", "X^Y", "Plan"), ("", "X^Y", "Plan"),
+                                              ("1234567 Prost", "Synthetic^Phantom", "Plan"),
+                                              ("M.M. Prost", "Mustermann^Max", "Plan"), ("MM", "Mustermann^Max", "Plan"),
+                                              ("Prost MM2", "Mustermann^Max", "Prost MM2")])
 def test_plan_label_is_kept_only_when_it_is_not_a_name(label, name, shown):
-    ds = pydicom.Dataset(); ds.RTPlanLabel = label; ds.PatientName = name
+    ds = pydicom.Dataset(); ds.RTPlanLabel = label; ds.PatientName = name; ds.PatientID = "1234567"
     assert pl.safe_label(ds) == shown
 
 

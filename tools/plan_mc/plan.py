@@ -76,13 +76,16 @@ UNITS = ("MU", "NP")
 def _fractions(ds, beam_numbers):
     """Fractions of the plan: the fraction groups that reference the treatment beams must agree.
 
-    A plan may carry a second group for setup beams without NumberOfFractionsPlanned; that group says nothing.
+    A plan may carry a second group for setup beams without NumberOfFractionsPlanned; that group says nothing. A group
+    of treatment beams with an empty count is refused: a PLAN dose could not be divided, and 1 would be off by N.
     """
     seen = {}
     for fg in getattr(ds, "FractionGroupSequence", []):
         refs = {int(rb.ReferencedBeamNumber) for rb in getattr(fg, "ReferencedBeamSequence", [])}
         n = _f(getattr(fg, "NumberOfFractionsPlanned", None))
-        if refs & beam_numbers and n:
+        if refs & beam_numbers and not n:
+            raise ValueError(f"the fraction group of beams {sorted(refs & beam_numbers)} has no NumberOfFractionsPlanned")
+        if refs & beam_numbers:
             seen[int(n)] = seen.get(int(n), set()) | (refs & beam_numbers)
     if len(seen) > 1:
         raise ValueError("treatment beams sit in fraction groups with different fraction counts ("
@@ -135,17 +138,17 @@ def read_rtplan(path, include_setup=False):
         scale = (mu / final) if (mu and final) else 1.0
         unit = str(getattr(b, "PrimaryDosimeterUnit", "") or "MU").upper()
         if unit not in UNITS: raise ValueError(f"beam {b.BeamName}: PrimaryDosimeterUnit {unit} not supported")
-        layers, energy, gantry, couch, iso = [], None, None, None, None
+        layers, energy, gantry, couch, iso, size = [], None, None, None, None, None
         for cp in cps:
             energy = _f(getattr(cp, "NominalBeamEnergy", None), energy)
             gantry = _f(getattr(cp, "GantryAngle", None), gantry)
             couch = _f(getattr(cp, "PatientSupportAngle", None), couch)
             iso = tuple(_floats(cp, "IsocenterPosition") or iso or ()) or None
+            size = _floats(cp, "ScanningSpotSize") or size   # like energy: a left out value keeps the last one
             w = [float(v) for v in _as_list(getattr(cp, "ScanSpotMetersetWeights", []))]
             if not any(w): continue
             m = [float(v) for v in _as_list(cp.ScanSpotPositionMap)]
             keep = [i for i, wi in enumerate(w) if wi > 0]
-            size = _floats(cp, "ScanningSpotSize")
             layers.append(Layer(energy, [m[2 * i] for i in keep], [m[2 * i + 1] for i in keep], [w[i] * scale for i in keep],
                                 str(getattr(cp, "ScanSpotTuneID", "")), tuple(size) if size and len(size) == 2 else None))
         if iso is None or len(iso) != 3: raise ValueError(f"beam {b.BeamName}: no isocenter")
@@ -158,12 +161,20 @@ def read_rtplan(path, include_setup=False):
 
 
 def safe_label(ds_or_path):
-    """The plan label for reports, or "Plan" when it may carry the patient's name (any part of PatientName in it)."""
+    """The plan label for reports, or "Plan" when it may identify the patient: a part of PatientName, the patient's
+    initials as a word of the label (M.M., MM), the PatientID, or any run of five or more digits (IDs, birth dates)."""
     import pydicom
     ds = ds_or_path if not isinstance(ds_or_path, str) else pydicom.dcmread(ds_or_path, stop_before_pixels=True)
     label = str(getattr(ds, "RTPlanLabel", "") or "").strip()
-    parts = [p for p in re.split(r"[\\^\s,]+", str(getattr(ds, "PatientName", "") or "").lower()) if len(p) > 1]
-    if not label or "^" in label or any(p in label.lower() for p in parts): return "Plan"
+    names = [p for p in re.split(r"[\\^\s,.\-]+", str(getattr(ds, "PatientName", "") or "").lower()) if p]
+    parts = [p for p in names if len(p) > 1]
+    words = {w.replace(".", "") for w in re.split(r"[\s_\-/]+", label.lower()) if w}
+    initials = {"".join(p[0] for p in names[:k]) for k in range(2, len(names) + 1)}
+    initials |= {"".join(p[0] for p in reversed(names[:k])) for k in range(2, len(names) + 1)}
+    pid = str(getattr(ds, "PatientID", "") or "").strip().lower()
+    if (not label or "^" in label or any(p in label.lower() for p in parts) or words & initials
+            or (len(pid) >= 3 and pid in label.lower()) or re.search(r"\d{5,}", label)):
+        return "Plan"
     return label
 
 
