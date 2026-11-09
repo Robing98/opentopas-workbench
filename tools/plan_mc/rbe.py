@@ -113,12 +113,13 @@ def let_mask(dose, threshold=0.05, dmax=None):
 
 
 # ---------------------------------------------------------------- range along a beam
-def rays(arrays, origin, spacing, direction, min_ray=0.8, step=None):
+def rays(arrays, origin, spacing, direction, min_ray=0.8, step=None, offsets=False):
     """Depth profiles of each array along rays parallel to the unit vector `direction` (beam travel, DICOM).
 
     The rays run through every voxel where arrays[0] >= min_ray x its maximum, one ray per voxel width in the plane
     across the beam, from before that region to the edge of the grid. Yields (t [mm along the beam], [profile of each
-    array]) per ray, linear between voxel centres.
+    array]) per ray, linear between voxel centres; with `offsets` also the point where the ray crosses the plane
+    through the world origin across the beam (t = 0), so a caller can tell how far a ray runs from a given axis.
     """
     from scipy.ndimage import map_coordinates
     arrays = [np.asarray(a, float) for a in arrays]
@@ -146,10 +147,12 @@ def rays(arrays, origin, spacing, direction, min_ray=0.8, step=None):
         idx = ((p - o) / s)[..., ::-1].reshape(-1, 3).T                     # z, y, x indices
         prof = [map_coordinates(c, idx, order=1, mode="constant", cval=0.0).reshape(len(b), len(ts)) for c in arrays]
         for j in range(len(b)):
-            if prof[0][j].max() >= min_ray * top: yield ts, [pr[j] for pr in prof]
+            if prof[0][j].max() >= min_ray * top:
+                yield (ts, [pr[j] for pr in prof], b[j]) if offsets else (ts, [pr[j] for pr in prof])
 
 
-def distal_shift(ref, ev, origin, spacing, direction, level=0.8, min_ray=0.8, step=None):
+def distal_shift(ref, ev, origin, spacing, direction, level=0.8, min_ray=0.8, step=None, body=None, falloff_mm=15.0,
+                 low=0.2, centre=None, radius_mm=5.0):
     """Shift [mm] of the distal falloff of `ev` against `ref` along the unit vector `direction` (beam travel, DICOM).
 
     On each ray (see rays) two crossings are compared, ev minus ref (positive: ev reaches deeper):
@@ -157,21 +160,75 @@ def distal_shift(ref, ev, origin, spacing, direction, level=0.8, min_ray=0.8, st
     1.1 really lands, so a higher RBE everywhere moves it too;
     "shape": each at `level` x its own maximum on the ray (R80 of each depth dose), so only a change of the shape of
     the falloff counts.
-    Returns {mode: median, 5 and 95 % quantiles [mm], rays} and the level, or None without a ray.
+
+    Only rays with a clear distal falloff of ref count: after its last point above `level` x the ray maximum, ref
+    must fall to `low` x that maximum within `falloff_mm` (None: no limit), and with a `body` mask that stretch must
+    lie inside the body. A ray that runs obliquely along the isodose falls slowly, and there a small change of the
+    dose moves the crossing far; a ray that leaves the body meets the edge of a masked dose, not the range.
+    Dropped rays are counted by reason: "no_edge" (ref never falls below the level on the grid), "falloff", "body".
+
+    For the kept rays: median, 5 and 95 % quantiles [mm] of both shifts and of the distal falloff width (`level` to
+    `low`, each dose at its own maximum) of ref ("width_ref") and ev ("width"). With `centre` (a point, DICOM mm),
+    "axis" gives the medians over the kept rays within `radius_mm` of the beam axis through it.
+    Returns None when no ray passes the region above `min_ray` of the maximum.
     """
-    got = {"absolute": [], "shape": []}
-    for ts, (r, e) in rays([ref, ev], origin, spacing, direction, min_ray, step):
-        cr = distal_edge(ts, r, level)
-        if cr is None: continue
+    arrays = [ref, ev] + ([np.asarray(body, float)] if body is not None else [])
+    u = np.asarray(direction, float); u = u / np.linalg.norm(u)
+    if centre is not None:
+        c = np.asarray(centre, float); c = c - (c @ u) * u                 # the axis crosses the plane t = 0 here
+    got = {k: [] for k in ("absolute", "shape", "width_ref", "width")}
+    axis = {"absolute": [], "shape": []}
+    dropped = {"no_edge": 0, "falloff": 0, "body": 0}
+    seen = False
+    for ts, profs, b in rays(arrays, origin, spacing, direction, min_ray, step, offsets=True):
+        seen = True
+        r, e = profs[0], profs[1]
+        edge = _falloff(ts, r, level, low)
+        if edge is None: dropped["no_edge"] += 1; continue
+        cr, c20, i, j = edge
+        if c20 is None or (falloff_mm is not None and c20 - cr > falloff_mm): dropped["falloff"] += 1; continue
+        if body is not None and (profs[2][i:j + 1] < 0.5).any(): dropped["body"] += 1; continue
         ca, cs = _distal(ts, e, level * r.max()), distal_edge(ts, e, level)
         if ca is not None: got["absolute"].append(ca - cr)
         if cs is not None: got["shape"].append(cs - cr)
-    if not got["absolute"] and not got["shape"]: return None
-    out = {"level": level}
-    for k, v in got.items():
-        q = np.percentile(v, [5, 50, 95]) if v else [np.nan] * 3
-        out[k] = {"median_mm": float(q[1]), "q05_mm": float(q[0]), "q95_mm": float(q[2]), "rays": len(v)}
+        got["width_ref"].append(c20 - cr)
+        we = _falloff(ts, e, level, low) if e.max() > 0 else None
+        if we is not None and we[1] is not None: got["width"].append(we[1] - we[0])
+        if centre is not None and np.linalg.norm(b - c) <= radius_mm:
+            if ca is not None: axis["absolute"].append(ca - cr)
+            if cs is not None: axis["shape"].append(cs - cr)
+    if not seen: return None
+    kept = len(got["width_ref"])
+    out = {"level": level, "low": low, "falloff_mm": falloff_mm,
+           "rays": {"kept": kept, "dropped": sum(dropped.values()), "dropped_by": dropped}}
+    for k, v in got.items(): out[k] = _quantiles(v)
+    out["axis"] = None if centre is None else {
+        "radius_mm": radius_mm, "rays": len(axis["shape"]),
+        **{f"{k}_median_mm": float(np.median(v)) if v else None for k, v in axis.items()}}
     return out
+
+
+def _quantiles(v):
+    if not v: return {"median_mm": None, "q05_mm": None, "q95_mm": None, "rays": 0}
+    q = np.percentile(v, [5, 50, 95])
+    return {"median_mm": float(q[1]), "q05_mm": float(q[0]), "q95_mm": float(q[2]), "rays": len(v)}
+
+
+def _falloff(t, p, level, low):
+    """(distal crossing of `level` x max(p), first crossing of `low` x max(p) after it or None, index of the last
+    sample above the level, index of the first sample at or below `low`), or None without a distal crossing."""
+    top = p.max()
+    if top <= 0: return None
+    above = p >= level * top
+    i = int(np.nonzero(above)[0][-1])
+    if i + 1 >= len(p): return None
+    cr = float(t[i] + (p[i] - level * top) / (p[i] - p[i + 1]) * (t[i + 1] - t[i]))
+    below = np.nonzero(p[i + 1:] <= low * top)[0]
+    if not len(below): return cr, None, i, len(p) - 1
+    j = i + 1 + int(below[0])
+    L = low * top
+    c20 = float(t[j - 1] + (p[j - 1] - L) / (p[j - 1] - p[j]) * (t[j] - t[j - 1])) if p[j - 1] != p[j] else float(t[j])
+    return cr, c20, i, j
 
 
 def distal_edge(t, p, level=0.8):

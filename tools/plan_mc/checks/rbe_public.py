@@ -88,9 +88,9 @@ def check(out, ab=2.0, fraction_gy=2.0, let_threshold=0.05):
 
 
 def shift_text(s):
-    if not s: return "no distal edge found"
+    if not s or not s["rays"]["kept"]: return "no distal edge found"
     return "; ".join(f"{k} {s[k]['median_mm']:+.2f} mm (5 to 95 %: {s[k]['q05_mm']:+.2f} to {s[k]['q95_mm']:+.2f}, "
-                     f"{s[k]['rays']} rays)" for k in ("absolute", "shape"))
+                     f"{s[k]['rays']} rays)" for k in ("absolute", "shape")) + f"; {s['rays']['dropped']} rays dropped"
 
 
 if __name__ == "__main__":

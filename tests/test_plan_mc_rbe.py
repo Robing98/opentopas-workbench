@@ -217,6 +217,81 @@ def test_rtstruct_fills_every_slice_when_contour_planes_and_dose_slices_differ(t
     assert m.sum(axis=(1, 2)).tolist() == [9] * 8 + [0, 0]
 
 
+def edge_field(shift=0.0, scale=1.0, tilt_deg=70.0, n=100):
+    """Dose [z, y, x] on 1 mm voxels, beam along +z, a linear falloff of 0.1 per mm across its edge (80 to 20 % over
+    6 mm). Columns x 0 to 5 have their edge across the beam at z = 40; columns x 6 to 11 have an oblique edge, its
+    normal tilted by `tilt_deg` from the beam, so a ray along +z skims it and falls 80 to 20 % over 6 / cos(tilt) mm.
+    The whole dose is moved `shift` mm deeper along the beam and multiplied by `scale`."""
+    z, y, x = np.meshgrid(np.arange(n) - shift, np.arange(3), np.arange(12), indexing="ij")
+    a = np.radians(tilt_deg)
+    s = np.where(x < 6, z - 40.0, (x - 6) * np.sin(a) + z * np.cos(a) - 40.0 * np.cos(a))
+    return scale * np.clip(-s / 10.0 + 0.5, 0.0, 1.0)
+
+
+GRID = ((0.0, 0.0, 0.0), (1.0, 1.0, 1.0), (0.0, 0.0, 1.0))
+
+
+def test_distal_shift_drops_rays_that_skim_an_oblique_edge():
+    # 1.1 x a range 2 mm deeper: on the clean edge the absolute shift is 2 + (0.8 - 0.8 / 1.1) / 0.1 = 2.73 mm and the
+    # shape shift 2; along the oblique edge the dose falls only 0.1 x cos(70 deg) per mm and the absolute shift grows
+    # to 2 + 0.73 / 0.342 = 4.13 mm
+    ref, ev = edge_field(), edge_field(shift=2.0, scale=1.1)
+    loose = rbe.distal_shift(ref, ev, *GRID, falloff_mm=None)
+    assert loose["rays"]["kept"] == 36 and loose["absolute"]["q95_mm"] > 4.0
+    s = rbe.distal_shift(ref, ev, *GRID)
+    assert s["falloff_mm"] == 15.0
+    assert s["rays"] == {"kept": 18, "dropped": 18, "dropped_by": {"no_edge": 0, "falloff": 18, "body": 0}}
+    clean = 2.0 + (0.8 - 0.8 / 1.1) / 0.1
+    assert s["absolute"]["median_mm"] == pytest.approx(clean, abs=0.05) and s["absolute"]["q95_mm"] == pytest.approx(clean, abs=0.05)
+    assert s["shape"]["median_mm"] == pytest.approx(2.0, abs=0.05) and s["shape"]["q95_mm"] == pytest.approx(2.0, abs=0.05)
+    assert s["width_ref"]["median_mm"] == pytest.approx(6.0, abs=0.05) and s["width"]["median_mm"] == pytest.approx(6.0, abs=0.05)
+
+
+def test_distal_shift_keeps_an_oblique_edge_below_the_limit():
+    # tilt 40 deg: 80 to 20 % over 6 / cos(40 deg) = 7.8 mm, a clear falloff, and the shape shift is the true 2 mm
+    s = rbe.distal_shift(edge_field(tilt_deg=40.0), edge_field(shift=2.0, tilt_deg=40.0), *GRID)
+    assert s["rays"]["kept"] == 36 and s["shape"]["q05_mm"] == pytest.approx(2.0, abs=0.05)
+    assert s["width_ref"]["q95_mm"] == pytest.approx(6.0 / np.cos(np.radians(40.0)), abs=0.1)
+
+
+@pytest.mark.parametrize("shift", [0.0, 1.5, 2.7])
+def test_distal_shift_recovers_a_known_shift_on_kept_rays(shift):
+    s = rbe.distal_shift(edge_field(), edge_field(shift=shift), *GRID)
+    assert s["rays"]["kept"] == 18
+    for mode in ("absolute", "shape"):
+        assert s[mode]["median_mm"] == pytest.approx(shift, abs=0.05)
+        assert s[mode]["q05_mm"] == pytest.approx(shift, abs=0.05) and s[mode]["q95_mm"] == pytest.approx(shift, abs=0.05)
+
+
+def test_distal_shift_drops_rays_whose_falloff_leaves_the_body():
+    # a masked dose ends at the skin: that edge is the mask, not the range
+    ref, ev = falloff(30.0), falloff(32.0)
+    body = np.zeros(ref.shape, bool); body[:28] = True                       # skin before the falloff
+    s = rbe.distal_shift(ref * body, ev * body, *GRID, body=body)
+    assert s["rays"]["kept"] == 0 and s["rays"]["dropped_by"]["body"] == 9 and s["shape"]["median_mm"] is None
+    body[:45] = True                                                          # skin beyond the 20 % point
+    s = rbe.distal_shift(ref * body, ev * body, *GRID, body=body)
+    assert s["rays"]["kept"] == 9 and s["shape"]["median_mm"] == pytest.approx(2.0, abs=0.05)
+
+
+def test_distal_shift_drops_a_dose_cut_by_the_edge_of_the_grid_inside_the_body():
+    ref = np.ones((20, 3, 3))                                                 # dose and body up to the edge of the grid
+    s = rbe.distal_shift(ref, ref, *GRID, body=np.ones(ref.shape, bool))
+    assert s["rays"]["kept"] == 0 and s["rays"]["dropped_by"]["body"] == 9
+
+
+def test_distal_shift_on_the_axis_takes_the_bundle_around_the_centre():
+    # range 2 mm deeper in columns x < 6, 4 mm in the others: the bundle through x = 2 sees only the 2 mm
+    ref = edge_field(tilt_deg=0.0)
+    ev = np.where(np.arange(12)[None, None, :] < 6, edge_field(shift=2.0, tilt_deg=0.0), edge_field(shift=4.0, tilt_deg=0.0))
+    s = rbe.distal_shift(ref, ev, *GRID, centre=(2.0, 1.0, 37.0), radius_mm=1.5)
+    assert s["axis"]["rays"] == 9 and s["axis"]["radius_mm"] == 1.5
+    assert s["axis"]["shape_median_mm"] == pytest.approx(2.0, abs=0.05)
+    assert s["axis"]["absolute_median_mm"] == pytest.approx(2.0, abs=0.05)
+    assert s["shape"]["median_mm"] == pytest.approx(3.0, abs=1.01)          # all rays mix both
+    assert rbe.distal_shift(ref, ev, *GRID)["axis"] is None
+
+
 # ------------------------------------------------------------------ the rbe command of run_patient.py
 def run_with_let(tmp_path, capsys, n_fields=1, hot_air=False, hot_tissue=False):
     """A zoned synthetic run whose field 1 (gantry 0, beam along +y) falls off distally in y with LET rising there.
@@ -275,6 +350,10 @@ def test_rbe_command_writes_maps_and_a_report_with_the_disclaimer(tmp_path, caps
     for n in ("mcnamara", "wedenberg", "carabe"):
         s = res["models"][n]["distal_shift"]["1"]
         assert s["absolute"]["median_mm"] > 0 and s["shape"]["median_mm"] > 0    # RBE rises distally: range extends
+        assert s["rays"]["kept"] > 0 and s["rays"]["dropped_by"]["falloff"] == 0 and s["falloff_mm"] == 15.0
+        assert s["width_ref"]["median_mm"] > 0 and s["axis"]["rays"] > 0
+    assert res["falloff_mm"] == 15.0 and res["axis_centre"] == "isocenter"
+    assert "Strahlen behalten / verworfen" in rep and "Breite 1,1 / Modell" in rep
     assert sorted(os.listdir(ws / "robin")) == [] and os.listdir(ws / "offen") == []
 
 
@@ -467,3 +546,17 @@ def test_find_refuses_a_missing_export_folder(tmp_path):
     from plan_mc import run_patient
     with pytest.raises(SystemExit, match="does not exist"):
         run_patient.main(["find", str(tmp_path / "PUT-EXPORT-FOLDER-HERE")])
+
+
+def test_rbe_command_takes_the_falloff_limit(tmp_path, capsys):
+    # the synthetic field falls 80 to 20 % over about 2 mm: a limit of 1 mm drops every ray, and the report says so
+    run_patient, ws, out, inp, dose, let = run_with_let(tmp_path, capsys)
+    run_patient.main(["rbe", "--workspace", str(ws), "--name", "run1", "--alpha-beta", "2", "--falloff-mm", "1"])
+    import json
+    res = json.loads((out / "rbe_result.json").read_text())
+    s = res["models"]["mcnamara"]["distal_shift"]["1"]
+    assert s["rays"]["kept"] == 0 and s["rays"]["dropped_by"]["falloff"] > 0 and s["absolute"]["median_mm"] is None
+    rep = (out / "RBE_BERICHT.md").read_text()
+    assert "innerhalb von 1 mm" in rep
+    row = next(l for l in rep.splitlines() if l.startswith("| mcnamara | 1 |"))
+    assert row.startswith("| mcnamara | 1 | - | - | - / - | - | 0 / 0 / ")

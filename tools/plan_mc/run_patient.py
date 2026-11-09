@@ -484,10 +484,17 @@ def rbe_run(a):
         ab, ab_text = a.alpha_beta, f"{a.alpha_beta:g} Gy ueberall"
     hi = valid & body & (dose >= 0.5 * dmax)
     plan = pl.read_rtplan(run["rtplan"])
+    # the axis measure runs through the centre of the targets; without targets through each field's isocenter
+    if targets.any():
+        zc, yc, xc = np.argwhere(targets).mean(0)
+        axis_centre = np.asarray(origin, float) + np.array([xc, yc, zc]) * np.asarray(spacing, float)
+    else:
+        axis_centre = None
     by_number = {f.number: f for f in plan.fields}
     names = ["1.1"] + sorted(rbe_models.MODELS)
     res = {"alpha_beta": ab_text, "let_threshold": a.let_threshold, "let_scaling": how, "body_mask": body_name,
-           "body_roi": ext[0] if ext else None,
+           "body_roi": ext[0] if ext else None, "falloff_mm": a.falloff_mm,
+           "axis_centre": "target" if axis_centre is not None else "isocenter",
            "voxels_variable_rbe": int(valid.sum()),
            "letd_high_dose_q50_q95": [float(v) for v in np.percentile(letd[hi], [50, 95])] if hi.any() else None,
            "models": {}}
@@ -511,7 +518,10 @@ def rbe_run(a):
                     print(f"Warnung: Feld {mf['number']} des Laufs fehlt im Plan, keine distale Verschiebung.", file=sys.stderr)
                     continue
                 _, u = iec.spot_ray(0.0, 0.0, f.gantry, f.couch, f.iso, position=plan.patient_position)
-                m["distal_shift"][str(mf["number"])] = rbe_models.distal_shift(rbe_models.CONSTANT * d * body, r * d * body, origin, spacing, u)
+                c = axis_centre if axis_centre is not None else f.iso
+                m["distal_shift"][str(mf["number"])] = rbe_models.distal_shift(
+                    rbe_models.CONSTANT * d * body, r * d * body, origin, spacing, u, body=body,
+                    falloff_mm=a.falloff_mm, centre=c)
         for sname, kind, mask in structures:
             fig = evaluate.dvh_figures(w, mask, 1.0)
             if not fig: continue
@@ -553,16 +563,33 @@ def rbe_report(res, run, names):
     if means:
         lines += ["", f"Streuung der drei Modelle (mittlere RBE im Hochdosisbereich): {min(means):.3f} bis {max(means):.3f}, "
                       f"Spanne {max(means) - min(means):.3f}."]
+    lim = res.get("falloff_mm")
+    lim_text = f"innerhalb von {lim:g} mm" if lim is not None else "ohne Grenze"
+    centre = "Mitte der Zielvolumen" if res.get("axis_centre") == "target" else "Isozentrum des Felds"
     lines += ["", "Distale Verschiebung der RBE-gewichteten Dosis gegen 1,1 x Dosis entlang jedes Strahls, Median und "
                   "5 bis 95 % ueber die Strahlen durch den Bereich ueber 80 % des Feldmaximums, in mm, positiv: tiefer. "
                   "Absolut: bei 80 % des Maximums der 1,1-Dosis auf dem Strahl (wohin die mit 1,1 geplante Isodose "
-                  "reicht). Form: jede Dosis bei 80 % ihres eigenen Maximums (nur die Form des Abfalls).", "",
-              "| Modell | Feld | absolut | Form | Strahlen |", "|---|---|---|---|---|"]
+                  "reicht). Form: jede Dosis bei 80 % ihres eigenen Maximums (nur die Form des Abfalls). "
+                  f"Nur Strahlen mit klarem distalem Abfall: die 1,1-Dosis faellt nach ihrem letzten Punkt ueber 80 % "
+                  f"des Strahlmaximums {lim_text} auf hoechstens 20 %, und diese Strecke liegt im Koerper. "
+                  "Verworfen: kein Abfall auf dem Gitter / zu flacher Abfall (Strahl laeuft schraeg an der Isodose "
+                  "entlang) / Abfall verlaesst den Koerper. Breite: distaler Abfall 80 auf 20 % (Median) der 1,1-Dosis "
+                  f"und des Modells. Achse: Median der Strahlen bis 5 mm um die Strahlachse durch die {centre}.", "",
+              "| Modell | Feld | absolut | Form | Breite 1,1 / Modell | Achse absolut / Form (Strahlen) | Strahlen behalten / verworfen: kein Abfall, flach, Koerper |",
+              "|---|---|---|---|---|---|---|"]
     cell = lambda v: f"{v['median_mm']:+.2f} ({v['q05_mm']:+.2f} bis {v['q95_mm']:+.2f})" if v["rays"] else "-"
+    mm = lambda v: "-" if v is None else f"{v:+.2f}"
+    width = lambda v: f"{v['median_mm']:.1f}" if v["rays"] else "-"
     for n in names[1:]:
         for fnum, s in ms[n]["distal_shift"].items():
-            lines.append(f"| {n} | {fnum} | " + (f"{cell(s['absolute'])} | {cell(s['shape'])} | {s['absolute']['rays']} |"
-                                                  if s else "- | - | 0 |"))
+            if not s:
+                lines.append(f"| {n} | {fnum} | - | - | - | - | 0 / 0 |"); continue
+            ax = s["axis"]
+            ax_text = f"{mm(ax['absolute_median_mm'])} / {mm(ax['shape_median_mm'])} ({ax['rays']})" if ax and ax["rays"] else "-"
+            d = s["rays"]["dropped_by"]
+            lines.append(f"| {n} | {fnum} | {cell(s['absolute'])} | {cell(s['shape'])} | "
+                         f"{width(s['width_ref'])} / {width(s['width'])} | {ax_text} | {s['rays']['kept']} / "
+                         f"{d['no_edge']} / {d['falloff']} / {d['body']} |")
     if any(ms[n]["structures"] for n in names):
         lines += ["", "D2 / D50 / D98 je Struktur [Gy(RBE) je Fraktion]:", "",
                   "| Struktur | Art | " + " | ".join(names) + " |", "|---|---|" + "---|" * len(names)]
@@ -608,6 +635,9 @@ def main(argv=None):
                     "auto: the structure set of the run's plan, found beside the plan file")
     ap.add_argument("--ab-normal", type=float, default=2.0, help="rbe with --rtstruct: alpha/beta of normal tissue [Gy]")
     ap.add_argument("--ab-target", type=float, default=10.0, help="rbe with --rtstruct: alpha/beta of PTV/CTV/GTV [Gy]")
+    ap.add_argument("--falloff-mm", type=float, default=15.0,
+                    help="rbe: keep a ray for the distal shift only when its 1.1 dose falls from 80 to 20 %% of the ray "
+                         "maximum within this distance [mm]")
     ap.add_argument("--let-threshold", type=float, default=0.05, help="rbe: model RBE only above this dose fraction of the max")
     a = ap.parse_args(argv)
     if a.cmd == "find":
