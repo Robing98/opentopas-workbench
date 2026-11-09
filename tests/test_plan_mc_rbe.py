@@ -162,3 +162,77 @@ def test_rtstruct_leaves_out_structures_off_the_grid_and_keeps_holes(tmp_path):
     px, py = np.meshgrid(np.arange(5.0), np.arange(5.0))
     ring = rtstruct.inside(px, py, sq(-0.5, 4.5)) ^ rtstruct.inside(px, py, sq(1.5, 2.5))
     assert ring.sum() == 24 and not ring[2, 2]
+
+
+# ------------------------------------------------------------------ the rbe command of run_patient.py
+def run_with_let(tmp_path, capsys, n_fields=1):
+    """A zoned synthetic run whose field 1 (gantry 0, beam along +y) falls off distally in y with LET rising there."""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from plan_mc import run_patient
+    from test_plan_mc_probe_fixes import fake_topas
+    from test_plan_mc_run_patient import SHAPE, args, make_inputs
+    ws = tmp_path / "ws"
+    for z in ("offen", "robin", "lokal"): (ws / z).mkdir(parents=True)
+    inp = make_inputs(tmp_path, n_fields)
+    run_patient.main(args(ws, inp))
+    out = ws / "lokal" / "patient" / "plan_mc" / "run1"
+    prof = np.array([1.0, 1.0, 1.0, 0.6, 0.02])                                # dose along y, Gy per fraction
+    lety = np.array([1.5, 2.0, 3.0, 8.0, 15.0])                                # keV/um, rising distally
+    dose = np.broadcast_to(2.0 * prof[None, :, None], SHAPE).copy()
+    let = np.broadcast_to(lety[None, :, None], SHAPE).copy()
+    fake_topas(out, [dose] * n_fields)
+    run = __import__("json").loads((out / "run.json").read_text())
+    for m in run["fields"]:
+        write_let(str(out / f"field{m['number']}_let.bin"), let.transpose(2, 1, 0) / m["histories"], "Mean")
+    capsys.readouterr()
+    return run_patient, ws, out, inp, dose, let
+
+
+def test_rbe_command_writes_maps_and_a_report_with_the_disclaimer(tmp_path, capsys):
+    run_patient, ws, out, inp, dose, let = run_with_let(tmp_path, capsys)
+    run_patient.main(["rbe", "--workspace", str(ws), "--name", "run1", "--alpha-beta", "2"])
+    printed = capsys.readouterr().out
+    rep = (out / "RBE_BERICHT.md").read_text()
+    assert run_patient.DISCLAIMER in rep and run_patient.DISCLAIMER_DE in rep and run_patient.DISCLAIMER in printed
+    from test_plan_mc_probe_fixes import NAME
+    assert NAME not in rep and str(tmp_path) not in printed
+    assert np.load(out / "letd.npy") == pytest.approx(let, rel=1e-5)
+    from plan_mc import synthetic
+    import json, pydicom
+    for tag in ("1_1", "mcnamara", "wedenberg", "carabe"):
+        w = np.load(out / f"rbe_dose_{tag}.npy")
+        assert pydicom.dcmread(str(out / f"rbe_dose_{tag}.dcm")).DoseType == "EFFECTIVE"
+        assert synthetic.read_rtdose(str(out / f"rbe_dose_{tag}.dcm"))[0] == pytest.approx(w, rel=1e-4, abs=1e-6)
+    assert np.load(out / "rbe_dose_1_1.npy") == pytest.approx(1.1 * dose, rel=1e-5)
+    mc = np.load(out / "rbe_mcnamara.npy")
+    expect = rbe.rbe("mcnamara", dose[0, 2, 0], let[0, 2, 0], 2.0)
+    assert float(mc[0, 2, 0]) == pytest.approx(float(expect), rel=1e-5)
+    assert mc[0, 4, 0] == pytest.approx(1.1)                                    # 1 % of the maximum: LET not trusted
+    res = json.loads((out / "rbe_result.json").read_text())
+    for n in ("mcnamara", "wedenberg", "carabe"):
+        s = res["models"][n]["distal_shift"]["1"]
+        assert s["median_mm"] > 0                                               # RBE rises distally: range extends
+    assert sorted(os.listdir(ws / "robin")) == [] and os.listdir(ws / "offen") == []
+
+
+def test_rbe_command_takes_alpha_beta_per_structure(tmp_path, capsys):
+    run_patient, ws, out, inp, dose, let = run_with_let(tmp_path, capsys)
+    from test_plan_mc_run_patient import ORIGIN, SHAPE, SPACING
+    ptv = np.zeros(SHAPE, bool); ptv[1:3, 0:3, 1:4] = True
+    rs = rtstruct.write(str(tmp_path / "rs.dcm"), [("PTV", "PTV", ptv)], ORIGIN, SPACING)
+    run_patient.main(["rbe", "--workspace", str(ws), "--name", "run1", "--rtstruct", rs])
+    rep = (out / "RBE_BERICHT.md").read_text()
+    mc = np.load(out / "rbe_mcnamara.npy")
+    assert float(mc[1, 1, 1]) == pytest.approx(float(rbe.rbe("mcnamara", dose[1, 1, 1], let[1, 1, 1], 10.0)), rel=1e-5)
+    assert float(mc[0, 1, 1]) == pytest.approx(float(rbe.rbe("mcnamara", dose[0, 1, 1], let[0, 1, 1], 2.0)), rel=1e-5)
+    import json
+    s = json.loads((out / "rbe_result.json").read_text())["models"]
+    assert s["1.1"]["structures"]["PTV"]["D50"] == pytest.approx(2.2, rel=1e-4)
+    assert s["mcnamara"]["structures"]["PTV"]["kind"] == "TARGET" and "| PTV | TARGET |" in rep
+
+
+def test_rbe_command_refuses_a_run_without_let(tmp_path, capsys):
+    run_patient, ws, out, *_ = run_with_let(tmp_path, capsys)
+    (out / "field1_let.bin").unlink()
+    with pytest.raises(SystemExit, match="no LET output"):
+        run_patient.main(["rbe", "--workspace", str(ws), "--name", "run1"])

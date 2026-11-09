@@ -11,6 +11,8 @@ Research use only: TOPAS is not approved for clinical use; the results never inf
     python3 run_patient.py queue    --workspace WS --name NAME
     python3 run_patient.py status   --workspace WS --name NAME
     python3 run_patient.py evaluate --workspace WS --name NAME [--rbe 1.1] [--normalised-gamma]
+    python3 run_patient.py rbe      --workspace WS --name NAME [--alpha-beta 2] [--let-threshold 0.05] \
+                                    [--rtstruct RS.dcm [--ab-normal 2] [--ab-target 10]]
 
 Everything goes to WS/lokal/patient/plan_mc/NAME/ (WS/patient/plan_mc/NAME/ in a workspace without zones) and nowhere
 else: the Schneider file tuned to the HLUT (hlut.py), one
@@ -31,6 +33,10 @@ fractions of the plan before the comparison. The beam model's particles_per_mu a
 (abs_dose.py fits dose_scale to a reference measurement). A beam in NP (particles) needs no particles_per_mu.
 RBE: TOPAS scores physical dose. A TPS dose of DoseType EFFECTIVE is compared with RBE x TOPAS, RBE 1.1 by default
 (1.0 for PHYSICAL); --rbe sets it. The report states the RBE and the ratio of the physical doses.
+
+rbe (research only, a side project): RBE and RBE weighted dose per voxel of the McNamara, Wedenberg and Carabe models
+(rbe.py) from the physical dose and the LETd that TOPAS scored per field, against the constant 1.1, and the distal
+shift of the RBE weighted dose along each beam. Variable RBE models carry large uncertainties; clinically 1.1 applies.
 """
 import argparse, glob, json, os, shlex, sys
 
@@ -38,6 +44,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from plan_mc import beam_model, dicom_compat, evaluate, hlut, plan as pl, synthetic, topas_io, topas_writer as tw, wbqueue  # noqa: E402,E501
+from plan_mc import iec, rbe as rbe_models, rtstruct  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PUBLIC_HLUT = os.path.join("offen", "plan_mc", "hluts", "matRad_default.hlut")     # below a workspace
@@ -354,9 +361,132 @@ def evaluate_run(a):
     if rel: print(f"\nKennzahlen fuer den Hub (nur Robin): {rel}")
 
 
+# ---------------------------------------------------------------- variable RBE (research only)
+DISCLAIMER = "Variable RBE models carry large uncertainties; clinically 1.1 applies."
+DISCLAIMER_DE = "Variable RBE-Modelle sind mit grossen Unsicherheiten behaftet; klinisch gilt 1,1."
+
+
+def field_doses_and_lets(out, run, model_scale):
+    """Physical dose per fraction [z, y, x] and LETd [keV/um] of each field, scaled as summed_dose scales them."""
+    doses, lets, how = [], [], set()
+    for m in run["fields"]:
+        _, arr = topas_io.read(os.path.join(out, f"field{m['number']}_dose.bin"))
+        doses.append(np.asarray(arr["Sum"], float).transpose(2, 1, 0) * m["particles"] / m["histories"] * model_scale)
+        path = os.path.join(out, f"field{m['number']}_let.bin")
+        if not os.path.exists(path):
+            raise SystemExit(f"field {m['number']}: no LET output; the run was written without the ProtonLET scorer")
+        let, h = rbe_models.read_let(path, m["histories"])
+        lets.append(let.transpose(2, 1, 0)); how.add(h)
+        if lets[-1].shape != doses[-1].shape: raise SystemExit(f"field {m['number']}: LET grid differs from the dose grid")
+    return doses, lets, sorted(how)
+
+
+def rbe_grid(run, shape):
+    """(origin, spacing) of the scoring grid: the TPS dose grid when the run has one, else the CT."""
+    if run["rtdose"]: d, origin, spacing = synthetic.read_rtdose(run["rtdose"])
+    else: d, origin, spacing = synthetic.read_ct(run["ct"])
+    if d.shape != shape: raise SystemExit(f"grid {d.shape} of the {'RT Dose' if run['rtdose'] else 'CT'} differs from TOPAS {shape}")
+    return origin, spacing
+
+
+def rbe_run(a):
+    out, run, _ = _files(a)
+    model = beam_model.BeamModel.load(os.path.join(out, "beam_model.json"))
+    doses, lets, how = field_doses_and_lets(out, run, model.dose_scale)
+    dose = sum(doses)
+    letd = rbe_models.combine_letd(doses, lets)
+    origin, spacing = rbe_grid(run, dose.shape)
+    valid = rbe_models.let_mask(dose, a.let_threshold)
+    structures = rtstruct.read(a.rtstruct, dose.shape, origin, spacing) if a.rtstruct else []
+    if a.rtstruct:
+        ab = np.full(dose.shape, a.ab_normal)
+        for _, kind, m in structures:
+            if kind == "TARGET": ab[m] = a.ab_target
+        ab_text = f"{a.ab_normal:g} Gy im Normalgewebe, {a.ab_target:g} Gy in den Zielvolumen (PTV, CTV, GTV)"
+    else:
+        ab, ab_text = a.alpha_beta, f"{a.alpha_beta:g} Gy ueberall"
+    hi = valid & (dose >= 0.5 * dose.max())
+    plan = pl.read_rtplan(run["rtplan"])
+    by_number = {f.number: f for f in plan.fields}
+    names = ["1.1"] + sorted(rbe_models.MODELS)
+    res = {"alpha_beta": ab_text, "let_threshold": a.let_threshold, "let_scaling": how,
+           "voxels_variable_rbe": int(valid.sum()),
+           "letd_high_dose_q50_q95": [float(v) for v in np.percentile(letd[hi], [50, 95])] if hi.any() else None,
+           "models": {}}
+    np.save(os.path.join(out, "letd.npy"), letd.astype(np.float32))
+    for name in names:
+        r = rbe_models.rbe(name, dose, letd, ab, valid)
+        w = r * dose
+        tag = name.replace(".", "_")
+        np.save(os.path.join(out, f"rbe_{tag}.npy"), r.astype(np.float32))
+        np.save(os.path.join(out, f"rbe_dose_{tag}.npy"), w.astype(np.float32))
+        synthetic.write_rtdose(os.path.join(out, f"rbe_dose_{tag}.dcm"), w, origin, spacing, dose_type="EFFECTIVE",
+                               summation="FRACTION")
+        m = {"rbe_high_dose_mean": float(r[hi].mean()) if hi.any() else None,
+             "rbe_high_dose_q05_q50_q95": [float(v) for v in np.percentile(r[hi], [5, 50, 95])] if hi.any() else None,
+             "max_gy": float(w.max()), "distal_shift": {}, "structures": {}}
+        if name != "1.1":
+            # each field's dose weighted by the RBE of the whole plan: the RBE depends on the summed dose and LETd
+            for mf, d in zip(run["fields"], doses):
+                f = by_number.get(mf["number"])
+                if f is None: continue
+                _, u = iec.spot_ray(0.0, 0.0, f.gantry, f.couch, f.iso, position=plan.patient_position)
+                m["distal_shift"][str(mf["number"])] = rbe_models.distal_shift(rbe_models.CONSTANT * d, r * d, origin, spacing, u)
+        for sname, kind, mask in structures:
+            fig = evaluate.dvh_figures(w, mask, 1.0)
+            if fig: m["structures"][sname] = {"kind": kind, **{k: fig[k] for k in ("D2", "D50", "D98")}}
+        res["models"][name] = m
+    lines = rbe_report(res, run, names)
+    json.dump(res, open(os.path.join(out, "rbe_result.json"), "w"), indent=1)
+    open(os.path.join(out, "RBE_BERICHT.md"), "w").write("\n".join(lines) + "\n")
+    print("\n".join(lines))
+
+
+def rbe_report(res, run, names):
+    """German report; structure names stay (they are the clinic's labels, not file names of the export)."""
+    ms = res["models"]
+    f2 = lambda v: "-" if v is None else f"{v:.3f}"
+    lines = ["# Variable RBE (Nebenprojekt, nur Forschung, keine klinische Entscheidung)", "",
+             f"**{DISCLAIMER}**", "", f"**{DISCLAIMER_DE}**", "",
+             f"{len(run['fields'])} Felder, Dosis je Fraktion. alpha/beta: {res['alpha_beta']}.",
+             "LETd: TOPAS ProtonLET, dosisgewichtet, nur Protonen (Primaer- und Sekundaerprotonen), Schritte ueber "
+             f"100 keV/um ausgelassen; Skalierung: {', '.join(res['let_scaling'])}. Felder dosisgewichtet kombiniert.",
+             f"Modell-RBE nur in Voxeln mit mindestens {100 * res['let_threshold']:g} % der maximalen Dosis "
+             f"({res['voxels_variable_rbe']} Voxel), sonst 1,1: dort ist das LET Rauschen.", ""]
+    q = res["letd_high_dose_q50_q95"]
+    if q: lines += [f"LETd im Hochdosisbereich (> 50 % Maximum): Median {q[0]:.2f}, 95 %-Quantil {q[1]:.2f} keV/um.", ""]
+    lines += ["| Modell | mittlere RBE (> 50 % Max.) | RBE 5/50/95 % | max. RBE-gewichtete Dosis [Gy(RBE)] |",
+              "|---|---|---|---|"]
+    for n in names:
+        m = ms[n]; qq = m["rbe_high_dose_q05_q50_q95"]
+        lines.append(f"| {n} | {f2(m['rbe_high_dose_mean'])} | "
+                     + (" / ".join(f"{v:.3f}" for v in qq) if qq else "-") + f" | {m['max_gy']:.3f} |")
+    means = [ms[n]["rbe_high_dose_mean"] for n in names if n != "1.1" and ms[n]["rbe_high_dose_mean"] is not None]
+    if means:
+        lines += ["", f"Streuung der drei Modelle (mittlere RBE im Hochdosisbereich): {min(means):.3f} bis {max(means):.3f}, "
+                      f"Spanne {max(means) - min(means):.3f}."]
+    lines += ["", "Distale Verschiebung der RBE-gewichteten Dosis gegen 1,1 x Dosis entlang jedes Strahls "
+                  "(80 %-Isodose, Strahlen durch den Bereich ueber 80 % des Feldmaximums; Median, 5 und 95 % in mm, "
+                  "positiv: tiefer):", "", "| Modell | Feld | Median | 5 % | 95 % | Strahlen |", "|---|---|---|---|---|---|"]
+    for n in names[1:]:
+        for fnum, s in ms[n]["distal_shift"].items():
+            lines.append(f"| {n} | {fnum} | " + (f"{s['median_mm']:+.2f} | {s['q05_mm']:+.2f} | {s['q95_mm']:+.2f} | {s['rays']} |"
+                                                  if s else "- | - | - | 0 |"))
+    if any(ms[n]["structures"] for n in names):
+        lines += ["", "D2 / D50 / D98 je Struktur [Gy(RBE) je Fraktion]:", "",
+                  "| Struktur | Art | " + " | ".join(names) + " |", "|---|---|" + "---|" * len(names)]
+        for s, v in ms["1.1"]["structures"].items():
+            cells = [" / ".join(f"{ms[n]['structures'][s][k]:.3f}" for k in ("D2", "D50", "D98"))
+                     if s in ms[n]["structures"] else "-" for n in names]
+            lines.append(f"| {s} | {v['kind']} | " + " | ".join(cells) + " |")
+    lines += ["", "Dateien im Laufordner: letd.npy, rbe_*.npy, rbe_dose_*.npy und rbe_dose_*.dcm (RT Dose, DoseType "
+                  "EFFECTIVE), rbe_result.json."]
+    return lines
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("cmd", choices=("find", "write", "queue", "status", "evaluate"))
+    ap.add_argument("cmd", choices=("find", "write", "queue", "status", "evaluate", "rbe"))
     ap.add_argument("export", nargs="?", help="find: folder of the DICOM export")
     ap.add_argument("--hlut-dir", help="find: folder with the clinic's .hlut")
     ap.add_argument("--workspace"); ap.add_argument("--name")
@@ -369,6 +499,11 @@ def main(argv=None):
     ap.add_argument("--ripple-filter"); ap.add_argument("--rifi-distance", type=float)
     ap.add_argument("--rbe", type=float, help="evaluate: RBE for the TPS dose (default 1.1 for EFFECTIVE, else 1.0)")
     ap.add_argument("--normalised-gamma", action="store_true", help="evaluate: also gamma with TOPAS scaled to the TPS mean")
+    ap.add_argument("--alpha-beta", type=float, default=2.0, help="rbe: alpha/beta [Gy] everywhere without --rtstruct")
+    ap.add_argument("--rtstruct", help="rbe: RT Structure Set for alpha/beta per structure and D2/D50/D98")
+    ap.add_argument("--ab-normal", type=float, default=2.0, help="rbe with --rtstruct: alpha/beta of normal tissue [Gy]")
+    ap.add_argument("--ab-target", type=float, default=10.0, help="rbe with --rtstruct: alpha/beta of PTV/CTV/GTV [Gy]")
+    ap.add_argument("--let-threshold", type=float, default=0.05, help="rbe: model RBE only above this dose fraction of the max")
     a = ap.parse_args(argv)
     if a.cmd == "find":
         if not a.export: ap.error("find needs the export folder")
@@ -376,8 +511,8 @@ def main(argv=None):
     if a.cmd == "write":
         miss = [k for k in ("ct", "rtplan", "hlut", "template", "beam_model") if not getattr(a, k)]
         if miss: ap.error("write needs " + ", ".join("--" + k.replace("_", "-") for k in miss))
-    if a.cmd in ("find", "write", "evaluate"): dicom_compat.check()
-    {"find": find, "write": write, "queue": queue, "status": status, "evaluate": evaluate_run}[a.cmd](a)
+    if a.cmd in ("find", "write", "evaluate", "rbe"): dicom_compat.check()
+    {"find": find, "write": write, "queue": queue, "status": status, "evaluate": evaluate_run, "rbe": rbe_run}[a.cmd](a)
 
 
 if __name__ == "__main__":
