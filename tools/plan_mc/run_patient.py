@@ -2,7 +2,7 @@
 
 Research use only: TOPAS is not approved for clinical use; the results never inform a treatment decision.
 
-    eval "$(python3 run_patient.py find EXPORT [--hlut-dir DIR] [--workspace WS])"     # sets CT= RP= RD= HLUT=
+    eval "$(python3 run_patient.py find EXPORT [--hlut-dir DIR] [--workspace WS])"  # sets CT= RP= RD= RS= HLUT=
     python3 run_patient.py write    --workspace WS --name NAME --ct "$CT" --rtplan "$RP" --hlut "$HLUT" \
                                     --template HUtoMaterialSchneider.txt --beam-model MODEL.json|generic \
                                     [--rtdose "$RD"] [--histories 10000000] [--i-water 78] [--spots-from-plan] \
@@ -49,6 +49,7 @@ from plan_mc import iec, rbe as rbe_models, rtstruct  # noqa: E402
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PUBLIC_HLUT = os.path.join("offen", "plan_mc", "hluts", "matRad_default.hlut")     # below a workspace
 CT_CLASS, PLAN_CLASS, DOSE_CLASS = synthetic.CT_CLASS, "1.2.840.10008.5.1.4.1.1.481.8", synthetic.RTDOSE_CLASS
+STRUCT_CLASS = "1.2.840.10008.5.1.4.1.1.481.3"
 
 
 def warn(msg): print(f"warning: {msg}", file=sys.stderr)
@@ -75,9 +76,10 @@ def public_hlut(ws=None):
 
 # ---------------------------------------------------------------- find
 def scan(export):
-    """Headers of the DICOM files below `export`: CT series, RT Ion Plans and RT Doses with their references."""
+    """Headers of the DICOM files below `export`: CT series, RT Ion Plans, RT Doses and RT Structure Sets with their
+    references."""
     import pydicom
-    series, plans, doses, other_plans = {}, [], [], 0
+    series, plans, doses, structs, other_plans = {}, [], [], [], 0
     for d, _, names in os.walk(export):
         for n in sorted(names):
             p = os.path.join(d, n)
@@ -89,24 +91,48 @@ def scan(export):
                                                                   "frame": str(getattr(ds, "FrameOfReferenceUID", ""))})
                 s["dirs"].add(d); s["slices"] += 1
             elif cls == PLAN_CLASS:
-                plans.append({"path": p, "uid": str(ds.SOPInstanceUID), "frame": str(getattr(ds, "FrameOfReferenceUID", ""))})
+                plans.append({"path": p, "uid": str(ds.SOPInstanceUID), "frame": str(getattr(ds, "FrameOfReferenceUID", "")),
+                              "rs_refs": [str(r.ReferencedSOPInstanceUID) for r in getattr(ds, "ReferencedStructureSetSequence", [])]})
             elif cls.startswith("1.2.840.10008.5.1.4.1.1.481.") and str(getattr(ds, "Modality", "")) == "RTPLAN":
                 other_plans += 1
             elif cls == DOSE_CLASS:
                 refs = [str(r.ReferencedSOPInstanceUID) for r in getattr(ds, "ReferencedRTPlanSequence", [])]
                 doses.append({"path": p, "refs": refs, "kind": str(getattr(ds, "DoseSummationType", "") or "?").upper(),
                               "frame": str(getattr(ds, "FrameOfReferenceUID", ""))})
-    return series, plans, doses, other_plans
+            elif cls == STRUCT_CLASS:
+                frames = {str(f.FrameOfReferenceUID) for f in getattr(ds, "ReferencedFrameOfReferenceSequence", [])
+                          if hasattr(f, "FrameOfReferenceUID")}
+                frames |= {str(r.ReferencedFrameOfReferenceUID) for r in getattr(ds, "StructureSetROISequence", [])
+                           if hasattr(r, "ReferencedFrameOfReferenceUID")}
+                structs.append({"path": p, "uid": str(ds.SOPInstanceUID), "frames": frames})
+    return series, plans, doses, structs, other_plans
+
+
+def find_structures(structs, plan):
+    """The RT Structure Set of the plan: the one the plan references, else the one in the plan's frame of reference,
+    else the only one with a warning; several candidates or none leave RS empty with a warning."""
+    for pool, note in (([s for s in structs if s["uid"] in plan["rs_refs"]], None),
+                       ([s for s in structs if plan["frame"] and plan["frame"] in s["frames"]], None),
+                       (structs, "the RT Structure Set has another frame of reference than the plan: check that it belongs to it")):
+        if len(pool) == 1:
+            if note: warn(note)
+            return pool[0]["path"]
+        if len(pool) > 1:
+            warn(f"{len(pool)} RT Structure Sets fit the plan: RS stays empty, give --rtstruct the one to use")
+            return ""
+    warn("no RT Structure Set in the export: rbe and evaluate run without --rtstruct")
+    return ""
 
 
 def find(a):
-    series, plans, doses, other_plans = scan(a.export)
+    series, plans, doses, structs, other_plans = scan(a.export)
     err = lambda m: print(m, file=sys.stderr)
     err(f"CT series: {len(series)} (slices: {', '.join(str(s['slices']) for s in series.values()) or '-'})")
     err(f"RT Ion Plans: {len(plans)}" + (f" (and {other_plans} RT Plans of other kinds, not read)" if other_plans else ""))
     kinds = {}
     for d in doses: kinds[d["kind"]] = kinds.get(d["kind"], 0) + 1
     err(f"RT Doses: {len(doses)}" + (" (" + ", ".join(f"{k}: {v}" for k, v in sorted(kinds.items())) + ")" if doses else ""))
+    err(f"RT Structure Sets: {len(structs)}")
     if not plans: raise SystemExit("no RT Ion Plan in the export")
     whole = [d for d in doses if d["kind"] in ("PLAN", "FRACTION")]
     if len(plans) == 1: plan = plans[0]
@@ -149,7 +175,8 @@ def find(a):
         hl = public_hlut(a.workspace)
         if hl: warn("no HLUT of the clinic: the public matRad default HLUT stands in, for probes only")
         else: warn("no HLUT found: give --hlut-dir, --workspace with offen/plan_mc/hluts, or --hlut to write")
-    for k, v in (("CT", ct_dir), ("RP", plan["path"]), ("RD", rd["path"] if rd else ""), ("HLUT", hl or "")):
+    rs = find_structures(structs, plan)
+    for k, v in (("CT", ct_dir), ("RP", plan["path"]), ("RD", rd["path"] if rd else ""), ("RS", rs), ("HLUT", hl or "")):
         print(f"{k}={shlex.quote(v)}")
 
 

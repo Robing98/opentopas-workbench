@@ -213,6 +213,36 @@ def test_find_without_dose_and_hlut_says_so(tmp_path, capsys, monkeypatch):
     assert "no RT Dose" in err and "public matRad default HLUT" in err
 
 
+def add_structure_set(path, frame=None):
+    from plan_mc import rtstruct
+    box = np.zeros(SHAPE, bool); box[1:3, 1:3, 1:3] = True
+    return rtstruct.write(str(path), [("Body", "EXTERNAL", box)], ORIGIN, SPACING, frame_uid=frame)
+
+
+@pytest.mark.parametrize("n", [1, 3])
+def test_find_takes_the_structure_set_in_the_plan_frame(tmp_path, capsys, n):
+    ex, hd, rp = export(tmp_path, "fits")
+    frame = str(pydicom.dcmread(rp).FrameOfReferenceUID)
+    rs = add_structure_set(ex / f"RS_{NAME}.dcm", frame)
+    for i in range(1, n): add_structure_set(ex / f"RS_{NAME}_other{i}.dcm")          # other frames of reference
+    env, err = run_find(capsys, str(ex), "--hlut-dir", str(hd))
+    assert env["RS"] == rs and f"RT Structure Sets: {n}" in err and NAME not in err
+
+
+def test_find_leaves_rs_empty_when_several_structure_sets_fit(tmp_path, capsys):
+    ex, hd, rp = export(tmp_path, "fits")
+    frame = str(pydicom.dcmread(rp).FrameOfReferenceUID)
+    for i in range(2): add_structure_set(ex / f"RS_{NAME}_{i}.dcm", frame)
+    env, err = run_find(capsys, str(ex), "--hlut-dir", str(hd))
+    assert env["RS"] == "" and "2 RT Structure Sets fit" in err
+
+
+def test_find_without_structure_set_says_so(tmp_path, capsys):
+    ex, hd, rp = export(tmp_path, "fits")
+    env, err = run_find(capsys, str(ex), "--hlut-dir", str(hd))
+    assert env["RS"] == "" and "no RT Structure Set" in err
+
+
 def test_find_refuses_several_plans_without_a_dose_to_choose(tmp_path, capsys):
     ex, hd, _ = export(tmp_path, None, n_plans=3)
     with pytest.raises(SystemExit, match="3 RT Ion Plans"):
