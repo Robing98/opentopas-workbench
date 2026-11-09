@@ -9,6 +9,7 @@ without a type, when its name starts with one of them.
 The external contour (the body) is the structure of type EXTERNAL, else one named as in EXTERNAL_NAMES (see external).
 """
 import re
+import unicodedata
 
 import numpy as np
 
@@ -33,8 +34,12 @@ def inside(px, py, poly):
 
 def normalise(name):
     """Lower case, umlauts and sharp s spelled out, everything but letters and digits dropped: "Außenkontur" ->
-    "aussenkontur", "KÖRPER_1" -> "koerper1"."""
-    s = str(name).lower()
+    "aussenkontur", "KÖRPER_1" -> "koerper1". Umlauts written as a letter plus a combining mark count, and so do UTF-8
+    names that pydicom decoded as Latin-1 because the file declares no SpecificCharacterSet ("KÃ¶rper")."""
+    s = str(name)
+    try: s = s.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError): pass
+    s = unicodedata.normalize("NFC", s).lower()
     for a, b in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")): s = s.replace(a, b)
     return re.sub(r"[^a-z0-9]", "", s)
 
@@ -94,7 +99,8 @@ def read(path, shape, origin, spacing, types=False):
         out.append((name, "TARGET" if target else "OAR", mask, kind))
     body = external(out)
     if body:
-        out = [(n, "EXTERNAL" if n == body[0] and m is body[2] else k, m, t) for n, k, m, t in out]
+        # every structure of type EXTERNAL is a body outline, not an organ; only the first one is the body mask
+        out = [(n, "EXTERNAL" if t == "EXTERNAL" or m is body[2] else k, m, t) for n, k, m, t in out]
     return out if types else [o[:3] for o in out]
 
 

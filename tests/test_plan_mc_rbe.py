@@ -424,3 +424,18 @@ def test_rbe_command_without_an_external_falls_back_with_a_warning(tmp_path, cap
     assert "without an external contour" in capsys.readouterr().err
     res = json.loads((out / "rbe_result.json").read_text())
     assert "CT" in res["body_mask"] and res["body_roi"] is None
+
+
+@pytest.mark.parametrize("raw", ["K\u006f\u0308rper", "K\u00c3\u00b6rper", "Au\u00c3\u009fenkontur", "Au\u00dfenkontur"])
+def test_external_names_with_decomposed_or_misdecoded_umlauts(raw):
+    # o + combining diaeresis, and UTF-8 bytes read as Latin-1 from a file without SpecificCharacterSet
+    assert rtstruct.is_external_name(raw)
+
+
+def test_a_second_external_is_no_organ(tmp_path):
+    shape, origin, spacing = (3, 4, 4), (0.0, 0.0, 0.0), (1.0, 1.0, 1.0)
+    big = np.ones(shape, bool)
+    small = np.zeros(shape, bool); small[:, 1:3, 1:3] = True
+    p = rtstruct.write(str(tmp_path / "rs.dcm"), [("Body", "EXTERNAL", big), ("Body alt", "EXTERNAL", small)], origin, spacing)
+    assert {n: k for n, k, _ in rtstruct.read(p, shape, origin, spacing)} == {"Body": "EXTERNAL", "Body alt": "EXTERNAL"}
+    assert rtstruct.external(rtstruct.read(p, shape, origin, spacing, types=True))[0] == "Body"
