@@ -96,6 +96,51 @@ def compare(ref, ev, origin, spacing, structures=(), criteria=((2.0, 2.0), (3.0,
     return res
 
 
+def centre_of_mass(dose, mask, origin, spacing):
+    """Dose weighted centre of the voxels in `mask`, (x, y, z) in DICOM mm."""
+    w = np.where(mask, np.asarray(dose, float), 0.0)
+    tot = w.sum()
+    if tot <= 0: return None
+    z, y, x = np.indices(w.shape)
+    return [float(origin[k] + spacing[k] * (w * c).sum() / tot) for k, c in enumerate((x, y, z))]
+
+
+def rigid_shift(ref, ev, region, spacing, max_shift=3):
+    """Integer voxel shift of `ev` that fits `ref` best in `region` (rms of the difference over the mean of ref there).
+
+    The shift d (mm, x y z) means ev(p + d) matches ref(p): TOPAS lies displaced by +d against the TPS. Indices beyond
+    the grid are clamped to its edge.
+    """
+    idx = np.array(np.nonzero(region))
+    r = ref[region]; m = float(r.mean())
+    best, zero = None, None
+    hi = np.array(ref.shape)[:, None] - 1
+    rng = range(-max_shift, max_shift + 1)
+    for dz in rng:
+        for dy in rng:
+            for dx in rng:
+                j = np.clip(idx + np.array([dz, dy, dx])[:, None], 0, hi)
+                rms = float(np.sqrt(np.mean((ev[tuple(j)] - r) ** 2))) / m
+                if dz == dy == dx == 0: zero = rms
+                if best is None or rms < best[0] - 1e-12: best = (rms, (dx, dy, dz))
+    return {"shift_mm": [float(best[1][k] * spacing[k]) for k in range(3)], "shift_voxels": list(best[1]),
+            "rms_rel_best": best[0], "rms_rel_unshifted": zero, "max_shift_voxels": max_shift}
+
+
+def diagnostics(ref, ev, origin, spacing, cutoff=10.0, max_shift=3):
+    """Where TOPAS and TPS differ: voxel ratio in the high dose region (ref >= 50 % of its maximum) with the 5/50/95 %
+    quantiles, centre of mass of each dose over its own voxels above cutoff % of its maximum (a common mask would cut
+    off the part of a shifted dose that lies outside it), and the best rigid shift (rigid_shift)."""
+    hi = ref >= 0.5 * ref.max()
+    q = np.percentile(ev[hi] / ref[hi], [5, 50, 95])
+    cr = centre_of_mass(ref, ref >= cutoff / 100.0 * ref.max(), origin, spacing)
+    ce = centre_of_mass(ev, ev >= cutoff / 100.0 * ev.max(), origin, spacing)
+    return {"high_dose_mean_ratio": float(ev[hi].mean() / ref[hi].mean()), "ratio_q05_q50_q95": [float(v) for v in q],
+            "high_dose_voxels": int(hi.sum()),
+            "centre_of_mass_shift_mm": [b - a for a, b in zip(cr, ce)] if cr and ce else None,
+            "rigid": rigid_shift(ref, ev, hi, spacing, max_shift)}
+
+
 def _load(path, origin=None, spacing=None):
     if path.endswith(".npy"):
         if origin is None or spacing is None: raise SystemExit(f"{path}: give --origin and --spacing for .npy")

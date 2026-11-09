@@ -73,3 +73,40 @@ def generic(energies=None, sigma=2.97, div=1.0, spread=0.2, particles_per_mu=1.0
     return BeamModel({"name": "generic (spot_dist placeholders)", "particle": "proton", "source_distance_mm": 1150.0,
                       "vsad_x_mm": 7549.0, "vsad_y_mm": 8219.0, "dose_scale": 1.0, "energies": rows,
                       "sources": {"all": "spot_dist placeholders (Simulationskette par. 6), not fitted"}})
+
+
+FWHM_PER_SIGMA = 2.0 * math.sqrt(2.0 * math.log(2.0))
+
+
+def with_plan_spots(model, plan):
+    """Copy of `model` whose sigma per energy reproduces the plan's ScanningSpotSize at the isocenter.
+
+    DICOM states the spot size as FWHM in air at the isocenter; the model's sigma sits at the source plane. With the
+    model's divergence d and correlation r kept, the drift over the source distance z gives
+    sigma_iso^2 = s^2 + 2 r s d z + d^2 z^2, solved here for s. The drift is taken in vacuum: the air between source
+    and isocenter that TOPAS simulates widens the spot a little more. The values are the clinic's beam data: they go
+    into the run folder only and into no message.
+    """
+    z = model.source_distance
+    rows = {}
+    for f in plan.fields:
+        for l in f.layers:
+            if not l.spot_size: raise ValueError(f"field {f.name}: layer at {l.energy:g} MeV without ScanningSpotSize")
+            base = model.at(l.energy)
+            row = dict(base, nominal=float(l.energy))
+            for k, fwhm in zip("xy", l.spot_size):
+                s_iso, d, r = float(fwhm) / FWHM_PER_SIGMA, base[f"div_{k}"] / 1000.0, base[f"corr_{k}"]
+                disc = s_iso ** 2 - (d * z) ** 2 * (1.0 - r * r)
+                s = -r * d * z + math.sqrt(disc) if disc > 0 else -1.0
+                if s <= 0:
+                    raise ValueError(f"field {f.name}: the plan's spot size at {l.energy:g} MeV is smaller than the "
+                                     f"model's divergence alone gives at the isocenter")
+                row[f"sigma_{k}"] = s
+            key = round(float(l.energy), 6)
+            if key in rows and any(abs(rows[key][k] - row[k]) > 1e-3 for k in ("sigma_x", "sigma_y")):
+                raise ValueError(f"layers at {l.energy:g} MeV state different spot sizes: run their fields on their own")
+            rows[key] = row
+    d = dict(model.d, name=model.name + ", spot sizes from the plan", energies=sorted(rows.values(), key=lambda r: r["nominal"]))
+    d["sources"] = dict(model.d.get("sources", {}), sigma="ScanningSpotSize of the plan (FWHM / 2.3548), projected back "
+                        "to the source plane with the model's divergence and correlation, drift in vacuum")
+    return BeamModel(d)

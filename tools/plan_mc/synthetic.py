@@ -8,6 +8,8 @@ import os
 
 import numpy as np
 
+from plan_mc import dicom_compat
+
 CT_CLASS = "1.2.840.10008.5.1.4.1.1.2"
 RTDOSE_CLASS = "1.2.840.10008.5.1.4.1.1.481.2"
 
@@ -49,11 +51,12 @@ def write_ct(folder, hu, origin, spacing, position="HFS", study_uid=None, frame_
         ds.BitsAllocated, ds.BitsStored, ds.HighBit, ds.PixelRepresentation = 16, 16, 15, 1
         ds.RescaleIntercept, ds.RescaleSlope, ds.RescaleType = 0, 1, "HU"
         ds.PixelData = hu[k].tobytes()
-        ds.save_as(p, enforce_file_format=True)
+        dicom_compat.save(ds, p)
     return study_uid, frame_uid
 
 
-def write_rtdose(path, dose_gy, origin, spacing, study_uid=None, frame_uid=None, plan_uid=None):
+def write_rtdose(path, dose_gy, origin, spacing, study_uid=None, frame_uid=None, plan_uid=None, dose_type="PHYSICAL",
+                 summation="PLAN"):
     """Multi-frame RT Dose, uint32 with DoseGridScaling, frames along +z."""
     from pydicom.dataset import Dataset
     from pydicom.sequence import Sequence
@@ -70,12 +73,12 @@ def write_rtdose(path, dose_gy, origin, spacing, study_uid=None, frame_uid=None,
     ds.NumberOfFrames, ds.Rows, ds.Columns = nz, ny, nx
     ds.SamplesPerPixel, ds.PhotometricInterpretation = 1, "MONOCHROME2"
     ds.BitsAllocated, ds.BitsStored, ds.HighBit, ds.PixelRepresentation = 32, 32, 31, 0
-    ds.DoseUnits, ds.DoseType, ds.DoseSummationType, ds.DoseGridScaling = "GY", "PHYSICAL", "PLAN", f"{scale:.10g}"
+    ds.DoseUnits, ds.DoseType, ds.DoseSummationType, ds.DoseGridScaling = "GY", dose_type, summation, f"{scale:.10g}"
     if plan_uid:
         r = Dataset(); r.ReferencedSOPClassUID = "1.2.840.10008.5.1.4.1.1.481.8"; r.ReferencedSOPInstanceUID = plan_uid
         ds.ReferencedRTPlanSequence = Sequence([r])
     ds.PixelData = np.rint(d / scale).astype(np.uint32).tobytes()
-    ds.save_as(path, enforce_file_format=True)
+    dicom_compat.save(ds, path)
 
 
 def read_rtdose(path):
@@ -86,11 +89,11 @@ def read_rtdose(path):
     if d.ndim == 2: d = d[None]
     off = np.atleast_1d(np.asarray(ds.GridFrameOffsetVector, float)).tolist()   # one frame: a single value
     dz = off[1] - off[0] if len(off) > 1 else float(getattr(ds, "SliceThickness", 0) or 0)
-    if len(off) > 2 and np.ptp(np.diff(off)) > 1e-3: raise ValueError(f"{path}: uneven frame spacing")
+    if len(off) > 2 and np.ptp(np.diff(off)) > 1e-3: raise ValueError("RT Dose: uneven frame spacing")
     # TOPAS clones the grid as axial, ascending z: refuse layouts that would put the voxels elsewhere
     iop = np.asarray(getattr(ds, "ImageOrientationPatient", [1, 0, 0, 0, 1, 0]), float)
-    if not np.allclose(iop, [1, 0, 0, 0, 1, 0], atol=1e-4): raise ValueError(f"{path}: orientation {iop.tolist()} not supported")
-    if dz < 0: raise ValueError(f"{path}: descending GridFrameOffsetVector not supported")
+    if not np.allclose(iop, [1, 0, 0, 0, 1, 0], atol=1e-4): raise ValueError(f"RT Dose: orientation {iop.tolist()} not supported")
+    if dz < 0: raise ValueError("RT Dose: descending GridFrameOffsetVector not supported")
     x0, y0, z0 = (float(v) for v in ds.ImagePositionPatient)
     return d, (x0, y0, z0 + off[0]), (float(ds.PixelSpacing[1]), float(ds.PixelSpacing[0]), dz)
 
@@ -103,7 +106,7 @@ def read_ct(folder):
         try: ds = pydicom.dcmread(os.path.join(folder, n))
         except Exception: continue
         if getattr(ds, "Modality", "") == "CT": sl.append(ds)
-    if not sl: raise ValueError(f"{folder}: no CT slices")
+    if not sl: raise ValueError("CT folder: no CT slices")
     sl.sort(key=lambda s: float(s.ImagePositionPatient[2]))
     hu = np.stack([s.pixel_array * float(s.RescaleSlope) + float(s.RescaleIntercept) for s in sl])
     z = [float(s.ImagePositionPatient[2]) for s in sl]
