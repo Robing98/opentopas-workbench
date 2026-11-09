@@ -90,6 +90,7 @@ def test_split_recovers_start_spot_and_history_cost(runs):
 
 
 def test_write_refuses_a_matrad_field_with_a_range_shifter(tmp_path):
+    pytest.importorskip("pydicom")                    # write reads the plan through the DICOM layer
     hu = np.zeros((4, 5, 6), np.int16)
     mat = _mat(str(tmp_path / "plan.mat"), hu, [1.0], [((0, 0, 0), [80.0])], rs=40.0)
     with pytest.raises(SystemExit, match="range shifter"):
