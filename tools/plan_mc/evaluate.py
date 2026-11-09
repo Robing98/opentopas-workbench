@@ -127,14 +127,18 @@ def rigid_shift(ref, ev, region, spacing, max_shift=3):
             "rms_rel_best": best[0], "rms_rel_unshifted": zero, "max_shift_voxels": max_shift}
 
 
-def diagnostics(ref, ev, origin, spacing, cutoff=10.0, max_shift=3):
+def diagnostics(ref, ev, origin, spacing, cutoff=10.0, max_shift=3, body=None):
     """Where TOPAS and TPS differ: voxel ratio in the high dose region (ref >= 50 % of its maximum) with the 5/50/95 %
     quantiles, centre of mass of each dose over its own voxels above cutoff % of its maximum (a common mask would cut
-    off the part of a shifted dose that lies outside it), and the best rigid shift (rigid_shift)."""
+    off the part of a shifted dose that lies outside it), and the best rigid shift (rigid_shift).
+
+    `body` (bool [z, y, x]) limits both centres to the patient: TOPAS scores dose in the air and the couch where the TPS
+    has none, and those voxels would pull the TOPAS centre away although the dose in the body lies in place."""
+    body = np.ones(ref.shape, bool) if body is None else np.asarray(body, bool)
     hi = ref >= 0.5 * ref.max()
     q = np.percentile(ev[hi] / ref[hi], [5, 50, 95])
-    cr = centre_of_mass(ref, ref >= cutoff / 100.0 * ref.max(), origin, spacing)
-    ce = centre_of_mass(ev, ev >= cutoff / 100.0 * ev.max(), origin, spacing)
+    cr = centre_of_mass(ref, body & (ref >= cutoff / 100.0 * ref[body].max()), origin, spacing) if body.any() else None
+    ce = centre_of_mass(ev, body & (ev >= cutoff / 100.0 * ev[body].max()), origin, spacing) if body.any() else None
     return {"high_dose_mean_ratio": float(ev[hi].mean() / ref[hi].mean()), "ratio_q05_q50_q95": [float(v) for v in q],
             "high_dose_voxels": int(hi.sum()),
             "centre_of_mass_shift_mm": [b - a for a, b in zip(cr, ce)] if cr and ce else None,

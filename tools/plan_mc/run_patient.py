@@ -2,9 +2,9 @@
 
 Research use only: TOPAS is not approved for clinical use; the results never inform a treatment decision.
 
-    eval "$(python3 run_patient.py find EXPORT [--hlut-dir DIR])"     # sets CT= RP= RD= HLUT=
+    eval "$(python3 run_patient.py find EXPORT [--hlut-dir DIR] [--workspace WS])"     # sets CT= RP= RD= HLUT=
     python3 run_patient.py write    --workspace WS --name NAME --ct "$CT" --rtplan "$RP" --hlut "$HLUT" \
-                                    --template HUtoMaterialSchneider.txt --beam-model MODEL.json \
+                                    --template HUtoMaterialSchneider.txt --beam-model MODEL.json|generic \
                                     [--rtdose "$RD"] [--histories 10000000] [--i-water 78] [--spots-from-plan] \
                                     [--rs-material Lexan --rs-thickness MM [--rs-iso-distance MM]] \
                                     [--ripple-filter t4 --rifi-distance MM]
@@ -12,7 +12,8 @@ Research use only: TOPAS is not approved for clinical use; the results never inf
     python3 run_patient.py status   --workspace WS --name NAME
     python3 run_patient.py evaluate --workspace WS --name NAME [--rbe 1.1] [--normalised-gamma]
 
-Everything goes to WS/patient/plan_mc/NAME/ and nowhere else: the Schneider file tuned to the HLUT (hlut.py), one
+Everything goes to WS/lokal/patient/plan_mc/NAME/ (WS/patient/plan_mc/NAME/ in a workspace without zones) and nowhere
+else: the Schneider file tuned to the HLUT (hlut.py), one
 TOPAS file per field (spot by spot, topas_writer.py), the summed dose as RT Dose, and BERICHT.md with the comparison
 against the TPS dose. The CT is read where it lies; nothing is copied out of the patient folder. No message and no
 report names a file of the patient data: file names of an export carry the patient's name.
@@ -39,7 +40,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from plan_mc import beam_model, dicom_compat, evaluate, hlut, plan as pl, synthetic, topas_io, topas_writer as tw, wbqueue  # noqa: E402,E501
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-PUBLIC_HLUT = os.path.join(ROOT, "workspace", "plan_mc", "hluts", "matRad_default.hlut")
+PUBLIC_HLUT = os.path.join("offen", "plan_mc", "hluts", "matRad_default.hlut")     # below a workspace
 CT_CLASS, PLAN_CLASS, DOSE_CLASS = synthetic.CT_CLASS, "1.2.840.10008.5.1.4.1.1.481.8", synthetic.RTDOSE_CLASS
 
 
@@ -47,9 +48,22 @@ def warn(msg): print(f"warning: {msg}", file=sys.stderr)
 
 
 def folder(ws, name):
+    """Run folder of NAME. A workspace with data zones (offen/, robin/, lokal/) keeps patient runs in lokal/; an older
+    workspace without them keeps the former place, so a run already written there is still found."""
     # ":" too: on Windows Python a drive-relative name such as "D:x" would leave the patient folder
     if not name or any(c in name for c in "/\\:") or name.startswith("."): raise SystemExit(f"bad run name {name!r}")
-    return os.path.join(os.path.abspath(ws), "patient", "plan_mc", name)
+    ws = os.path.abspath(ws)
+    base = os.path.join(ws, "lokal") if os.path.isdir(os.path.join(ws, "lokal")) else ws
+    return os.path.join(base, "patient", "plan_mc", name)
+
+
+def public_hlut(ws=None):
+    """The public matRad default HLUT: in the given workspace, else in the workspace of this checkout (a git archive
+    has none)."""
+    for w in ([ws] if ws else []) + [os.path.join(ROOT, "workspace")]:
+        p = os.path.join(w, PUBLIC_HLUT)
+        if os.path.exists(p): return p
+    return None
 
 
 # ---------------------------------------------------------------- find
@@ -125,10 +139,9 @@ def find(a):
         if len(found) > 1: raise SystemExit(f"{len(found)} .hlut files in --hlut-dir: leave the one to use")
         hl = found[0] if found else None
     if hl is None:
-        if os.path.exists(PUBLIC_HLUT):
-            hl = PUBLIC_HLUT
-            warn("no HLUT of the clinic: the public matRad default HLUT stands in, for probes only")
-        else: warn("no HLUT found: give --hlut-dir, or --hlut to write")
+        hl = public_hlut(a.workspace)
+        if hl: warn("no HLUT of the clinic: the public matRad default HLUT stands in, for probes only")
+        else: warn("no HLUT found: give --hlut-dir, --workspace with offen/plan_mc/hluts, or --hlut to write")
     for k, v in (("CT", ct_dir), ("RP", plan["path"]), ("RD", rd["path"] if rd else ""), ("HLUT", hl or "")):
         print(f"{k}={shlex.quote(v)}")
 
@@ -178,7 +191,10 @@ def write(a):
     plan = pl.read_rtplan(a.rtplan)
     plan.label = pl.safe_label(a.rtplan)          # the label goes into the TOPAS files and the report
     one_range_shifter(plan)
-    model = beam_model.BeamModel.load(a.beam_model)
+    if a.beam_model == "generic":
+        model = beam_model.generic()
+        warn("generic beam model (spot_dist placeholders, not the machine's data): for probes only")
+    else: model = beam_model.BeamModel.load(a.beam_model)
     if a.spots_from_plan:
         try: model = beam_model.with_plan_spots(model, plan)
         except ValueError as e: raise SystemExit(f"--spots-from-plan: {e}")
@@ -243,6 +259,35 @@ def body_mask(run, dose, ref):
     return np.ones(dose.shape, bool), "ganzes Gitter (CT nicht auf dem Dosisgitter)"
 
 
+def kennzahlen(res, run):
+    """The figures of an evaluation in the robin-only format of the hub (claude-hub docs/research-studies.md): a flat
+    object of numbers and texts of at most 200 characters. No plan label, no file name and no path: the label can be
+    the patient's name, and the paths name the export."""
+    k = {"fields": len(run["fields"]), "fractions": run["fractions"], "histories_per_field": run["histories"],
+         "uncertainty_rms_pct": 100 * res["uncertainty_rms"], "topas_max_gy": res["topas_max_gy"],
+         "body_mask": res["body_mask"][:200]}
+    if "comparison" in res:
+        d = res["diagnostics"]
+        k.update(rbe=res["rbe"], tps_dose_type=res["tps_dose_type"] or "fehlt", high_dose_mean_ratio=d["high_dose_mean_ratio"])
+        for crit, v in res["comparison"]["gamma"].items(): k[f"gamma_{crit}_pass_pct"] = v["pass_pct"]
+        for crit, v in res.get("gamma_normalised_to_tps_mean", {}).items(): k[f"gamma_{crit}_normalised_pass_pct"] = v["pass_pct"]
+        for q, v in zip(("q05", "q50", "q95"), d["ratio_q05_q50_q95"]): k[f"ratio_{q}"] = v
+        for ax, v in zip("xyz", d["centre_of_mass_shift_mm"] or ()): k[f"centre_of_mass_shift_{ax}_mm"] = v
+        for ax, v in zip("xyz", d["rigid"]["shift_mm"]): k[f"rigid_shift_{ax}_mm"] = v
+        k["rigid_rms_rel_best_pct"] = 100 * d["rigid"]["rms_rel_best"]
+        k["rigid_rms_rel_unshifted_pct"] = 100 * d["rigid"]["rms_rel_unshifted"]
+    return {n: v for n, v in k.items() if isinstance(v, str) or (v is not None and np.isfinite(v))}
+
+
+def write_kennzahlen(ws, name, figures):
+    """WS/robin/plan_mc/NAME/kennzahlen.json, only in a workspace with zones (robin/ exists): the hub shows it to Robin."""
+    robin = os.path.join(os.path.abspath(ws), "robin")
+    if not os.path.isdir(robin): return None
+    d = os.path.join(robin, "plan_mc", name); os.makedirs(d, exist_ok=True)
+    json.dump(figures, open(os.path.join(d, "kennzahlen.json"), "w"), indent=1)
+    return os.path.join("robin", "plan_mc", name, "kennzahlen.json")
+
+
 def evaluate_run(a):
     out, run, _ = _files(a)
     model = beam_model.BeamModel.load(os.path.join(out, "beam_model.json"))
@@ -277,7 +322,7 @@ def evaluate_run(a):
         synthetic.write_rtdose(os.path.join(out, "topas_dose.dcm"), dose, origin, spacing, summation="FRACTION")
         ev = rbe * dose
         cmp_ = evaluate.compare(ref, ev, origin, spacing)
-        diag = evaluate.diagnostics(ref, ev, origin, spacing)
+        diag = evaluate.diagnostics(ref, ev, origin, spacing, body=body)
         res.update(rbe=rbe, tps_dose_type=dose_type or None, comparison=cmp_, diagnostics=diag)
         ratio = diag["high_dose_mean_ratio"]
         q, com, rig = diag["ratio_q05_q50_q95"], diag["centre_of_mass_shift_mm"], diag["rigid"]
@@ -294,7 +339,7 @@ def evaluate_run(a):
                   f"- Mittelwert physikalisch, TOPAS / (TPS / RBE): {ratio:.3f}; "
                   f"TOPAS / TPS wie gespeichert ({dose_type or 'DoseType fehlt'}): {ratio / rbe:.3f}.",
                   f"- Quantile 5/50/95 % des Verhaeltnisses je Voxel: {q[0]:.2f} / {q[1]:.2f} / {q[2]:.2f}.",
-                  "- Schwerpunkt TOPAS minus TPS (x/y/z, je Dosis ueber 10 % ihres Maximums): "
+                  "- Schwerpunkt TOPAS minus TPS (x/y/z, je Dosis ueber 10 % ihres Maximums, nur in der Koerpermaske): "
                   + (" / ".join(f"{v:+.1f}" for v in com) + " mm." if com else "nicht bestimmbar."),
                   f"- Beste starre Verschiebung (+-{rig['max_shift_voxels']} Voxel): "
                   + " / ".join(f"{v:+.1f}" for v in rig["shift_mm"])
@@ -305,6 +350,8 @@ def evaluate_run(a):
     json.dump(res, open(os.path.join(out, "result.json"), "w"), indent=1)
     open(os.path.join(out, "BERICHT.md"), "w").write("\n".join(lines) + "\n")
     print("\n".join(lines))
+    rel = write_kennzahlen(a.workspace, a.name, kennzahlen(res, run))
+    if rel: print(f"\nKennzahlen fuer den Hub (nur Robin): {rel}")
 
 
 def main(argv=None):
