@@ -1,7 +1,8 @@
 """Structures of an RT Structure Set as masks on an axial dose grid, numpy only (no matplotlib or scikit-image).
 
-Each closed planar contour fills the voxel centres it encloses on the slice nearest to its z; several contours of one
-structure on a slice combine by even-odd, so a hole drawn as an inner contour stays empty. Structures without any
+Several contours of one structure in one plane combine by even-odd, so a hole drawn as an inner contour stays empty.
+Each dose slice inside the structure's z extent takes the contour plane nearest to it, so contour planes and dose
+slices need not have the same spacing. Structures without any
 contour on the grid are left out. A structure counts as a target when its RTROIInterpretedType is PTV, CTV or GTV, or,
 without a type, when its name starts with one of them.
 """
@@ -36,15 +37,24 @@ def read(path, shape, origin, spacing):
     gy = origin[1] + spacing[1] * np.arange(ny)
     PX, PY = np.meshgrid(gx, gy)
     out = []
+    gz = origin[2] + spacing[2] * np.arange(nz)
     for rc in getattr(ds, "ROIContourSequence", []):
         num = int(rc.ReferencedROINumber)
-        mask = np.zeros(shape, bool)
+        # even-odd only within one contour plane: two planes that round to the same dose slice must not cancel
+        planes = {}
         for c in getattr(rc, "ContourSequence", []):
             pts = np.asarray(c.ContourData, float).reshape(-1, 3)
             if len(pts) < 3: continue
-            k = int(np.rint((pts[:, 2].mean() - origin[2]) / spacing[2]))
-            if not 0 <= k < nz: continue
-            mask[k] ^= inside(PX, PY, pts[:, :2])
+            z = round(float(pts[:, 2].mean()), 3)
+            planes[z] = planes.get(z, np.zeros((ny, nx), bool)) ^ inside(PX, PY, pts[:, :2])
+        mask = np.zeros(shape, bool)
+        if planes:
+            zs = np.array(sorted(planes))
+            # each dose slice takes its nearest contour plane, inside the structure's extent widened by half a plane
+            # spacing (half a dose slice for a single plane), so a finer dose grid gets no empty slices between planes
+            half = 0.5 * (float(np.median(np.diff(zs))) if len(zs) > 1 else spacing[2])
+            for k in np.nonzero((gz >= zs[0] - half - 1e-6) & (gz <= zs[-1] + half + 1e-6))[0]:
+                mask[k] = planes[float(zs[np.argmin(np.abs(zs - gz[k]))])]
         if not mask.any(): continue
         name = names.get(num, f"ROI {num}")
         kind = kinds.get(num, "")

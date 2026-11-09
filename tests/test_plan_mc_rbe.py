@@ -22,6 +22,21 @@ def test_mcnamara_rbemax_matches_the_values_of_the_paper():
     assert float(rbe.mcnamara(2.5, 15.0)[0]) == pytest.approx(1.05, abs=0.005)
 
 
+def test_mcnamara_rbemin_uses_the_root_of_alpha_beta():
+    # McNamara 2015 eq. 8: RBEmin = 1.1012 - 0.0038703 sqrt(a/b) LETd; a/b 4 Gy gives the root 2
+    _, mn = rbe.mcnamara(np.array([0.0, 2.5, 10.0]), 4.0)
+    assert mn == pytest.approx([1.1012, 1.1012 - 0.0038703 * 2 * 2.5, 1.1012 - 0.0038703 * 2 * 10.0], abs=1e-9)
+    _, mn9 = rbe.mcnamara(10.0, 9.0)
+    assert float(mn9) == pytest.approx(1.1012 - 0.0038703 * 3 * 10.0, abs=1e-9)
+
+
+def test_carabe_scales_with_its_alpha_beta_ratio():
+    # Carabe 2012: RBEmax = 0.843 + 0.154 (2.686 / (a/b)) LETd, RBEmin = 1.09 + 0.006 (2.686 / (a/b)) LETd
+    mx, mn = rbe.carabe(5.0, 2.0)
+    assert float(mx) == pytest.approx(0.843 + 0.154 * 1.343 * 5.0)
+    assert float(mn) == pytest.approx(1.09 + 0.006 * 1.343 * 5.0)
+
+
 def test_wedenberg_slope_matches_table_two():
     # Wedenberg 2013 Table II: k = q / (a/b) per keV/um; RBEmin is 1 (beta does not depend on LET)
     for ab, k in ((2.7, 0.16), (3.1, 0.14), (7.7, 0.057), (15.0, 0.029), (18.0, 0.024)):
@@ -173,9 +188,39 @@ def test_rtstruct_leaves_out_structures_off_the_grid_and_keeps_holes(tmp_path):
     assert ring.sum() == 24 and not ring[2, 2]
 
 
+def contour_planes(path, zs, x0, x1, y0, y1):
+    """A structure set with one PTV rectangle on each contour plane z in `zs`."""
+    from pydicom.dataset import Dataset
+    from pydicom.sequence import Sequence
+    import pydicom
+    box = np.zeros((1, 2, 2), bool); box[:] = True
+    rtstruct.write(path, [("PTV", "PTV", box)], (0.0, 0.0, 0.0), (1.0, 1.0, 1.0))
+    ds = pydicom.dcmread(path)
+    cs = []
+    for z in zs:
+        c = Dataset(); c.ContourGeometricType = "CLOSED_PLANAR"; c.NumberOfContourPoints = 4
+        c.ContourData = [float(v) for v in (x0, y0, z, x1, y0, z, x1, y1, z, x0, y1, z)]
+        cs.append(c)
+    ds.ROIContourSequence[0].ContourSequence = Sequence(cs)
+    ds.save_as(path)
+    return path
+
+
+def test_rtstruct_fills_every_slice_when_contour_planes_and_dose_slices_differ(tmp_path):
+    # contours every 2 mm (z 0..6) on a 3 mm dose grid: planes 2 and 4 both lie nearest to slice 1 and must not cancel
+    p = contour_planes(str(tmp_path / "coarse.dcm"), (0.0, 2.0, 4.0, 6.0), -0.5, 2.5, -0.5, 2.5)
+    (_, _, m), = rtstruct.read(p, (3, 4, 4), (0.0, 0.0, 0.0), (1.0, 1.0, 3.0))
+    assert m.sum(axis=(1, 2)).tolist() == [9, 9, 9]
+    # contours every 3 mm (z 0..6) on a 1 mm dose grid: the slices between planes are filled, none beyond 7.5 mm
+    p = contour_planes(str(tmp_path / "fine.dcm"), (0.0, 3.0, 6.0), -0.5, 2.5, -0.5, 2.5)
+    (_, _, m), = rtstruct.read(p, (10, 4, 4), (0.0, 0.0, 0.0), (1.0, 1.0, 1.0))
+    assert m.sum(axis=(1, 2)).tolist() == [9] * 8 + [0, 0]
+
+
 # ------------------------------------------------------------------ the rbe command of run_patient.py
-def run_with_let(tmp_path, capsys, n_fields=1):
-    """A zoned synthetic run whose field 1 (gantry 0, beam along +y) falls off distally in y with LET rising there."""
+def run_with_let(tmp_path, capsys, n_fields=1, hot_air=False):
+    """A zoned synthetic run whose field 1 (gantry 0, beam along +y) falls off distally in y with LET rising there.
+    `hot_air`: one corner voxel is air in the CT and holds 3 times the target dose, as a noisy voxel outside the body."""
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from plan_mc import run_patient
     from test_plan_mc_probe_fixes import fake_topas
@@ -189,6 +234,13 @@ def run_with_let(tmp_path, capsys, n_fields=1):
     lety = np.array([1.5, 2.0, 3.0, 8.0, 15.0])                                # keV/um, rising distally
     dose = np.broadcast_to(2.0 * prof[None, :, None], SHAPE).copy()
     let = np.broadcast_to(lety[None, :, None], SHAPE).copy()
+    if hot_air:
+        from plan_mc import synthetic
+        from test_plan_mc_run_patient import ORIGIN, SPACING
+        hu = np.zeros(SHAPE); hu[3, 4, 5] = -1000
+        import shutil
+        shutil.rmtree(inp["ct"]); synthetic.write_ct(inp["ct"], hu, ORIGIN, SPACING)
+        dose[3, 4, 5] = 6.0
     fake_topas(out, [dose] * n_fields)
     run = __import__("json").loads((out / "run.json").read_text())
     for m in run["fields"]:
@@ -222,6 +274,19 @@ def test_rbe_command_writes_maps_and_a_report_with_the_disclaimer(tmp_path, caps
         s = res["models"][n]["distal_shift"]["1"]
         assert s["absolute"]["median_mm"] > 0 and s["shape"]["median_mm"] > 0    # RBE rises distally: range extends
     assert sorted(os.listdir(ws / "robin")) == [] and os.listdir(ws / "offen") == []
+
+
+def test_rbe_command_takes_the_maximum_inside_the_body(tmp_path, capsys):
+    # a noisy air voxel at 3 times the target dose must not empty the high dose region nor move the LET threshold
+    run_patient, ws, out, inp, dose, let = run_with_let(tmp_path, capsys, hot_air=True)
+    run_patient.main(["rbe", "--workspace", str(ws), "--name", "run1", "--alpha-beta", "2"])
+    import json
+    res = json.loads((out / "rbe_result.json").read_text())
+    assert res["letd_high_dose_q50_q95"] is not None
+    assert res["models"]["mcnamara"]["rbe_high_dose_mean"] > 1.1
+    assert res["voxels_variable_rbe"] == int((dose >= 0.05 * 2.0).sum())
+    assert res["models"]["mcnamara"]["distal_shift"]["1"]["shape"]["median_mm"] > 0
+    assert "CT" in res["body_mask"]
 
 
 def test_rbe_command_takes_alpha_beta_per_structure(tmp_path, capsys):

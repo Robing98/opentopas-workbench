@@ -103,11 +103,13 @@ def combine_letd(doses, lets):
     return np.divide(num, den, out=np.zeros(np.shape(den)), where=den > 0)
 
 
-def let_mask(dose, threshold=0.05):
+def let_mask(dose, threshold=0.05, dmax=None):
     """Voxels whose LETd is trusted: physical dose at least `threshold` of the maximum. Below, few protons stop or
-    pass and the LET is noise (TG119 run: 99.9 % quantile 41 keV/um above 1 % of the maximum, 11 above 5 %)."""
+    pass and the LET is noise (TG119 run: 99.9 % quantile 41 keV/um above 1 % of the maximum, 11 above 5 %).
+    `dmax` replaces the maximum of the grid, e.g. the maximum inside the body, so one noisy air voxel cannot raise it."""
     d = np.asarray(dose, float)
-    return d >= threshold * d.max() if d.max() > 0 else np.zeros(d.shape, bool)
+    m = float(d.max()) if dmax is None else float(dmax)
+    return d >= threshold * m if m > 0 else np.zeros(d.shape, bool)
 
 
 # ---------------------------------------------------------------- range along a beam

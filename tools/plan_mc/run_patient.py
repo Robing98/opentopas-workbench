@@ -396,7 +396,10 @@ def rbe_run(a):
     dose = sum(doses)
     letd = rbe_models.combine_letd(doses, lets)
     origin, spacing = rbe_grid(run, dose.shape)
-    valid = rbe_models.let_mask(dose, a.let_threshold)
+    # the maximum inside the body: a noisy air or couch voxel would raise the LET threshold and the high dose region
+    body, body_name = body_mask(run, dose, None)
+    dmax = float(dose[body].max()) if body.any() else float(dose.max())
+    valid = rbe_models.let_mask(dose, a.let_threshold, dmax)
     structures = rtstruct.read(a.rtstruct, dose.shape, origin, spacing) if a.rtstruct else []
     if a.rtstruct:
         ab = np.full(dose.shape, a.ab_normal)
@@ -405,11 +408,11 @@ def rbe_run(a):
         ab_text = f"{a.ab_normal:g} Gy im Normalgewebe, {a.ab_target:g} Gy in den Zielvolumen (PTV, CTV, GTV)"
     else:
         ab, ab_text = a.alpha_beta, f"{a.alpha_beta:g} Gy ueberall"
-    hi = valid & (dose >= 0.5 * dose.max())
+    hi = valid & body & (dose >= 0.5 * dmax)
     plan = pl.read_rtplan(run["rtplan"])
     by_number = {f.number: f for f in plan.fields}
     names = ["1.1"] + sorted(rbe_models.MODELS)
-    res = {"alpha_beta": ab_text, "let_threshold": a.let_threshold, "let_scaling": how,
+    res = {"alpha_beta": ab_text, "let_threshold": a.let_threshold, "let_scaling": how, "body_mask": body_name,
            "voxels_variable_rbe": int(valid.sum()),
            "letd_high_dose_q50_q95": [float(v) for v in np.percentile(letd[hi], [50, 95])] if hi.any() else None,
            "models": {}}
@@ -429,9 +432,11 @@ def rbe_run(a):
             # each field's dose weighted by the RBE of the whole plan: the RBE depends on the summed dose and LETd
             for mf, d in zip(run["fields"], doses):
                 f = by_number.get(mf["number"])
-                if f is None: continue
+                if f is None:
+                    print(f"Warnung: Feld {mf['number']} des Laufs fehlt im Plan, keine distale Verschiebung.", file=sys.stderr)
+                    continue
                 _, u = iec.spot_ray(0.0, 0.0, f.gantry, f.couch, f.iso, position=plan.patient_position)
-                m["distal_shift"][str(mf["number"])] = rbe_models.distal_shift(rbe_models.CONSTANT * d, r * d, origin, spacing, u)
+                m["distal_shift"][str(mf["number"])] = rbe_models.distal_shift(rbe_models.CONSTANT * d * body, r * d * body, origin, spacing, u)
         for sname, kind, mask in structures:
             fig = evaluate.dvh_figures(w, mask, 1.0)
             if fig: m["structures"][sname] = {"kind": kind, **{k: fig[k] for k in ("D2", "D50", "D98")}}
@@ -451,8 +456,8 @@ def rbe_report(res, run, names):
              f"{len(run['fields'])} Felder, Dosis je Fraktion. alpha/beta: {res['alpha_beta']}.",
              "LETd: TOPAS ProtonLET, dosisgewichtet, nur Protonen (Primaer- und Sekundaerprotonen), Schritte ueber "
              f"100 keV/um ausgelassen; Skalierung: {', '.join(res['let_scaling'])}. Felder dosisgewichtet kombiniert.",
-             f"Modell-RBE nur in Voxeln mit mindestens {100 * res['let_threshold']:g} % der maximalen Dosis "
-             f"({res['voxels_variable_rbe']} Voxel), sonst 1,1: dort ist das LET Rauschen.", ""]
+             f"Modell-RBE nur in Voxeln mit mindestens {100 * res['let_threshold']:g} % der maximalen Dosis im Koerper "
+             f"(Koerper: {res['body_mask']}; {res['voxels_variable_rbe']} Voxel), sonst 1,1: dort ist das LET Rauschen.", ""]
     q = res["letd_high_dose_q50_q95"]
     if q: lines += [f"LETd im Hochdosisbereich (> 50 % Maximum): Median {q[0]:.2f}, 95 %-Quantil {q[1]:.2f} keV/um.", ""]
     lines += ["| Modell | mittlere RBE (> 50 % Max.) | RBE 5/50/95 % | max. RBE-gewichtete Dosis [Gy(RBE)] |",
