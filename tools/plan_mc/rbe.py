@@ -111,48 +111,70 @@ def let_mask(dose, threshold=0.05):
 
 
 # ---------------------------------------------------------------- range along a beam
-def distal_shift(ref, ev, origin, spacing, direction, level=0.8, min_ray=0.8, step=None):
-    """Shift [mm] of the distal isodose of `ev` against `ref` along the unit vector `direction` (beam travel, DICOM).
+def rays(arrays, origin, spacing, direction, min_ray=0.8, step=None):
+    """Depth profiles of each array along rays parallel to the unit vector `direction` (beam travel, DICOM).
 
-    Rays parallel to the beam run through every voxel where ref >= min_ray x its maximum. On each ray the distal
-    crossing of the absolute dose level x max(ref) is found for both doses, linearly between samples; the shift is
-    ev minus ref (positive: ev reaches deeper). Returns median, 5 and 95 % quantiles and the number of rays, or None.
+    The rays run through every voxel where arrays[0] >= min_ray x its maximum, one ray per voxel width in the plane
+    across the beam, from before that region to the edge of the grid. Yields (t [mm along the beam], [profile of each
+    array]) per ray, linear between voxel centres.
     """
     from scipy.ndimage import map_coordinates
-    ref, ev = np.asarray(ref, float), np.asarray(ev, float)
+    arrays = [np.asarray(a, float) for a in arrays]
+    ref = arrays[0]
     o, s = np.asarray(origin, float), np.asarray(spacing, float)
     u = np.asarray(direction, float); u = u / np.linalg.norm(u)
     a = np.array([1.0, 0, 0]) if abs(u[0]) < 0.9 else np.array([0, 1.0, 0])
     v1 = np.cross(u, a); v1 /= np.linalg.norm(v1); v2 = np.cross(u, v1)
     top = ref.max()
-    if top <= 0: return None
-    L = level * top
+    if top <= 0: return
     z, y, x = np.nonzero(ref >= min_ray * top)
     pts = o + np.stack([x, y, z], 1) * s
     h = float(s.min())
     step = step or h / 10.0
     pu, p1, p2 = pts @ u, pts @ v1, pts @ v2
     k1, k2 = np.unique(np.rint(np.stack([p1, p2], 1) / h).astype(int), axis=0).T
-    smin, smax = pu.min() - 3 * float(np.abs(s).max()), None
-    # how far the dose can reach behind the high dose region: to the edge of the grid
+    smin = pu.min() - 3 * float(np.abs(s).max())
     corners = o + np.array([[i, j, k] for i in (0, ref.shape[2] - 1) for j in (0, ref.shape[1] - 1)
                             for k in (0, ref.shape[0] - 1)]) * s
-    smax = (corners @ u).max()
-    ts = np.arange(smin, smax + step, step)
+    ts = np.arange(smin, (corners @ u).max() + step, step)
     base = k1[:, None] * h * v1 + k2[:, None] * h * v2                      # ray offsets in the plane
-    shifts = []
     for i0 in range(0, len(base), 256):
         b = base[i0:i0 + 256]
         p = b[:, None, :] + ts[None, :, None] * u                           # [ray, t, xyz]
         idx = ((p - o) / s)[..., ::-1].reshape(-1, 3).T                     # z, y, x indices
-        prof = [map_coordinates(c, idx, order=1, mode="constant", cval=0.0).reshape(len(b), len(ts)) for c in (ref, ev)]
-        for r, e in zip(*prof):
-            if r.max() < min_ray * top: continue
-            cr, ce = _distal(ts, r, L), _distal(ts, e, L)
-            if cr is not None and ce is not None: shifts.append(ce - cr)
-    if not shifts: return None
-    q = np.percentile(shifts, [5, 50, 95])
-    return {"median_mm": float(q[1]), "q05_mm": float(q[0]), "q95_mm": float(q[2]), "rays": len(shifts), "level": level}
+        prof = [map_coordinates(c, idx, order=1, mode="constant", cval=0.0).reshape(len(b), len(ts)) for c in arrays]
+        for j in range(len(b)):
+            if prof[0][j].max() >= min_ray * top: yield ts, [pr[j] for pr in prof]
+
+
+def distal_shift(ref, ev, origin, spacing, direction, level=0.8, min_ray=0.8, step=None):
+    """Shift [mm] of the distal falloff of `ev` against `ref` along the unit vector `direction` (beam travel, DICOM).
+
+    On each ray (see rays) two crossings are compared, ev minus ref (positive: ev reaches deeper):
+    "absolute": both at `level` x the ray's maximum of ref, the same dose in Gy(RBE): where the isodose planned with
+    1.1 really lands, so a higher RBE everywhere moves it too;
+    "shape": each at `level` x its own maximum on the ray (R80 of each depth dose), so only a change of the shape of
+    the falloff counts.
+    Returns {mode: median, 5 and 95 % quantiles [mm], rays} and the level, or None without a ray.
+    """
+    got = {"absolute": [], "shape": []}
+    for ts, (r, e) in rays([ref, ev], origin, spacing, direction, min_ray, step):
+        cr = distal_edge(ts, r, level)
+        if cr is None: continue
+        ca, cs = _distal(ts, e, level * r.max()), distal_edge(ts, e, level)
+        if ca is not None: got["absolute"].append(ca - cr)
+        if cs is not None: got["shape"].append(cs - cr)
+    if not got["absolute"] and not got["shape"]: return None
+    out = {"level": level}
+    for k, v in got.items():
+        q = np.percentile(v, [5, 50, 95]) if v else [np.nan] * 3
+        out[k] = {"median_mm": float(q[1]), "q05_mm": float(q[0]), "q95_mm": float(q[2]), "rays": len(v)}
+    return out
+
+
+def distal_edge(t, p, level=0.8):
+    """Distal crossing of `level` x max(p) on a depth profile, or None."""
+    return _distal(t, p, level * p.max()) if p.max() > 0 else None
 
 
 def _distal(t, p, L):

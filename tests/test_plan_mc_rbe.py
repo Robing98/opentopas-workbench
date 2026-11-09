@@ -132,13 +132,22 @@ def falloff(edge, n=60, h=1.0):
 def test_distal_shift_finds_a_known_shift(shift):
     ref, ev = falloff(30.0), falloff(30.0 + shift)
     s = rbe.distal_shift(ref, ev, (0.0, 0.0, 0.0), (1.0, 1.0, 1.0), (0.0, 0.0, 1.0))
-    assert s["median_mm"] == pytest.approx(shift, abs=0.05) and s["rays"] >= 1
+    for mode in ("absolute", "shape"):
+        assert s[mode]["median_mm"] == pytest.approx(shift, abs=0.05) and s[mode]["rays"] == 9
+
+
+def test_distal_shift_absolute_counts_a_higher_dose_and_shape_does_not():
+    ref = falloff(30.0)
+    s = rbe.distal_shift(ref, 1.2 * ref, (0.0, 0.0, 0.0), (1.0, 1.0, 1.0), (0.0, 0.0, 1.0))
+    # falloff of 0.1 per mm: 1.2 x dose reaches 0.8 where ref is 0.8 / 1.2, (0.8 - 0.667) / 0.1 = 1.33 mm deeper
+    assert s["absolute"]["median_mm"] == pytest.approx(4.0 / 3.0, abs=0.05)
+    assert s["shape"]["median_mm"] == pytest.approx(0.0, abs=0.05)
 
 
 def test_distal_shift_looks_along_the_beam_direction():
     ref, ev = falloff(30.0), falloff(32.0)
     back = rbe.distal_shift(ref[::-1], ev[::-1], (0.0, 0.0, 0.0), (1.0, 1.0, 1.0), (0.0, 0.0, -1.0))
-    assert back["median_mm"] == pytest.approx(2.0, abs=0.05)
+    assert back["shape"]["median_mm"] == pytest.approx(2.0, abs=0.05)
     assert rbe.distal_shift(np.zeros((4, 3, 3)), ev[:4], (0, 0, 0), (1, 1, 1), (0, 0, 1)) is None
 
 
@@ -211,7 +220,7 @@ def test_rbe_command_writes_maps_and_a_report_with_the_disclaimer(tmp_path, caps
     res = json.loads((out / "rbe_result.json").read_text())
     for n in ("mcnamara", "wedenberg", "carabe"):
         s = res["models"][n]["distal_shift"]["1"]
-        assert s["median_mm"] > 0                                               # RBE rises distally: range extends
+        assert s["absolute"]["median_mm"] > 0 and s["shape"]["median_mm"] > 0    # RBE rises distally: range extends
     assert sorted(os.listdir(ws / "robin")) == [] and os.listdir(ws / "offen") == []
 
 

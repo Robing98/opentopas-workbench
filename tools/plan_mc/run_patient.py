@@ -465,13 +465,16 @@ def rbe_report(res, run, names):
     if means:
         lines += ["", f"Streuung der drei Modelle (mittlere RBE im Hochdosisbereich): {min(means):.3f} bis {max(means):.3f}, "
                       f"Spanne {max(means) - min(means):.3f}."]
-    lines += ["", "Distale Verschiebung der RBE-gewichteten Dosis gegen 1,1 x Dosis entlang jedes Strahls "
-                  "(80 %-Isodose, Strahlen durch den Bereich ueber 80 % des Feldmaximums; Median, 5 und 95 % in mm, "
-                  "positiv: tiefer):", "", "| Modell | Feld | Median | 5 % | 95 % | Strahlen |", "|---|---|---|---|---|---|"]
+    lines += ["", "Distale Verschiebung der RBE-gewichteten Dosis gegen 1,1 x Dosis entlang jedes Strahls, Median und "
+                  "5 bis 95 % ueber die Strahlen durch den Bereich ueber 80 % des Feldmaximums, in mm, positiv: tiefer. "
+                  "Absolut: bei 80 % des Maximums der 1,1-Dosis auf dem Strahl (wohin die mit 1,1 geplante Isodose "
+                  "reicht). Form: jede Dosis bei 80 % ihres eigenen Maximums (nur die Form des Abfalls).", "",
+              "| Modell | Feld | absolut | Form | Strahlen |", "|---|---|---|---|---|"]
+    cell = lambda v: f"{v['median_mm']:+.2f} ({v['q05_mm']:+.2f} bis {v['q95_mm']:+.2f})" if v["rays"] else "-"
     for n in names[1:]:
         for fnum, s in ms[n]["distal_shift"].items():
-            lines.append(f"| {n} | {fnum} | " + (f"{s['median_mm']:+.2f} | {s['q05_mm']:+.2f} | {s['q95_mm']:+.2f} | {s['rays']} |"
-                                                  if s else "- | - | - | 0 |"))
+            lines.append(f"| {n} | {fnum} | " + (f"{cell(s['absolute'])} | {cell(s['shape'])} | {s['absolute']['rays']} |"
+                                                  if s else "- | - | 0 |"))
     if any(ms[n]["structures"] for n in names):
         lines += ["", "D2 / D50 / D98 je Struktur [Gy(RBE) je Fraktion]:", "",
                   "| Struktur | Art | " + " | ".join(names) + " |", "|---|---|" + "---|" * len(names)]
