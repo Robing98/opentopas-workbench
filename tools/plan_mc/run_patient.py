@@ -10,7 +10,7 @@ Research use only: TOPAS is not approved for clinical use; the results never inf
                                     [--ripple-filter t4 --rifi-distance MM]
     python3 run_patient.py queue    --workspace WS --name NAME
     python3 run_patient.py status   --workspace WS --name NAME
-    python3 run_patient.py evaluate --workspace WS --name NAME [--rbe 1.1] [--normalised-gamma]
+    python3 run_patient.py evaluate --workspace WS --name NAME [--rbe 1.1] [--normalised-gamma] [--rtstruct RS.dcm]
     python3 run_patient.py rbe      --workspace WS --name NAME [--alpha-beta 2] [--let-threshold 0.05] \
                                     [--rtstruct RS.dcm [--ab-normal 2] [--ab-target 10]]
 
@@ -254,9 +254,13 @@ def summed_dose(out, run, model_scale):
     return total, np.sqrt(var)
 
 
-def body_mask(run, dose, ref):
+def body_mask(run, dose, ref, external=None):
     """Voxels inside the patient, and how they were chosen. Air voxels at low statistics would rule the maximum and
-    the uncertainty: TPS dose above 1 % of its maximum, else CT above -900 HU on the TOPAS grid, else the whole grid."""
+    the uncertainty: the external contour of the RT Structure Set (`external`, from read_structures), else TPS dose
+    above 1 % of its maximum, else CT above -900 HU on the TOPAS grid, else the whole grid. The text names no ROI: it
+    goes into the hub figures, and a ROI name is the clinic's free text."""
+    if external is not None:
+        return external[2], f"Aussenkontur des RT Structure Set (ROI nach {external[1]} gewaehlt)"
     if ref is not None: return ref > 0.01 * ref.max(), "TPS-Dosis ueber 1 % ihres Maximums"
     try:
         hu, _, _ = synthetic.read_ct(run["ct"])
@@ -264,6 +268,22 @@ def body_mask(run, dose, ref):
     except (OSError, ValueError):
         pass
     return np.ones(dose.shape, bool), "ganzes Gitter (CT nicht auf dem Dosisgitter)"
+
+
+def read_structures(path, shape, origin, spacing):
+    """Structures [(name, "TARGET", "OAR" or "EXTERNAL", mask)] of the RT Structure Set on the grid and its external
+    contour (name, how it was found, mask) or None. Without `path`: ([], None)."""
+    if not path: return [], None
+    typed = rtstruct.read(path, shape, origin, spacing, types=True)
+    ext = rtstruct.external(typed)
+    if ext is None: warn("RT Structure Set without an external contour (type EXTERNAL or a name such as Body): "
+                         "the body mask falls back to the dose or the CT")
+    return [t[:3] for t in typed], ext
+
+
+def body_line(res):
+    roi = f", ROI \"{res['body_roi']}\"" if res.get("body_roi") else ""
+    return f"{res['body_mask']}{roi}"
 
 
 def kennzahlen(res, run):
@@ -310,7 +330,9 @@ def evaluate_run(a):
             raise SystemExit(f"RT Dose with DoseSummationType {kind or 'missing'}: give the dose of the whole plan")
         if kind == "PLAN": ref = ref / max(1, run["fractions"])
         if ref.shape != dose.shape: raise SystemExit(f"TPS dose grid {ref.shape} differs from the TOPAS grid {dose.shape}")
-    body, body_name = body_mask(run, dose, ref)
+    if a.rtstruct and ref is None: origin, spacing = rbe_grid(run, dose.shape)
+    _, ext = read_structures(a.rtstruct, dose.shape, origin, spacing) if a.rtstruct else ([], None)
+    body, body_name = body_mask(run, dose, ref, ext)
     dmax = float(dose[body].max())
     hi = body & (dose >= 0.5 * dmax)
     unc = float(np.sqrt(np.mean((sd[hi] / dose[hi]) ** 2)))
@@ -318,10 +340,10 @@ def evaluate_run(a):
     lines = ["# TOPAS-Nachrechnung (nur Forschung, keine klinische Entscheidung)", "",
              f"Plan: {label}, {len(run['fields'])} Felder, {run['fractions']} Fraktionen, {run['histories']} Historien je Feld"
              + (", Spotgroessen aus dem Plan." if run.get("spots_from_plan") else "."),
-             f"Koerpermaske: {body_name}.",
+             f"Koerpermaske: {body_name}" + (f", ROI \"{ext[0]}\"." if ext else "."),
              f"Statistische Unsicherheit (1 sigma, rms ueber Voxel der Maske > 50 % Maximum): {100 * unc:.2f} %.",
              f"Maximale physikalische Dosis TOPAS je Fraktion in der Maske: {dmax:.3f} Gy.", ""]
-    res = {"uncertainty_rms": unc, "topas_max_gy": dmax, "body_mask": body_name}
+    res = {"uncertainty_rms": unc, "topas_max_gy": dmax, "body_mask": body_name, "body_roi": ext[0] if ext else None}
     if ref is not None:
         rbe = a.rbe if a.rbe is not None else (1.1 if dose_type == "EFFECTIVE" else 1.0)
         if a.rbe is None and dose_type not in ("EFFECTIVE", "PHYSICAL"):
@@ -396,11 +418,16 @@ def rbe_run(a):
     dose = sum(doses)
     letd = rbe_models.combine_letd(doses, lets)
     origin, spacing = rbe_grid(run, dose.shape)
-    # the maximum inside the body: a noisy air or couch voxel would raise the LET threshold and the high dose region
-    body, body_name = body_mask(run, dose, None)
-    dmax = float(dose[body].max()) if body.any() else float(dose.max())
-    valid = rbe_models.let_mask(dose, a.let_threshold, dmax)
-    structures = rtstruct.read(a.rtstruct, dose.shape, origin, spacing) if a.rtstruct else []
+    structures, ext = read_structures(a.rtstruct, dose.shape, origin, spacing)
+    # the maximum inside the body: a noisy air or couch voxel would raise the LET threshold and the high dose region;
+    # outside the body the LET of air is noise, so the model RBE applies only inside it
+    body, body_name = body_mask(run, dose, None, ext)
+    if not body.any(): raise SystemExit("body mask is empty on the dose grid")
+    dmax = float(dose[body].max())
+    valid = rbe_models.let_mask(dose, a.let_threshold, dmax) & body
+    targets = np.zeros(dose.shape, bool)
+    for _, kind, m in structures:
+        if kind == "TARGET": targets |= m
     if a.rtstruct:
         ab = np.full(dose.shape, a.ab_normal)
         for _, kind, m in structures:
@@ -413,6 +440,7 @@ def rbe_run(a):
     by_number = {f.number: f for f in plan.fields}
     names = ["1.1"] + sorted(rbe_models.MODELS)
     res = {"alpha_beta": ab_text, "let_threshold": a.let_threshold, "let_scaling": how, "body_mask": body_name,
+           "body_roi": ext[0] if ext else None,
            "voxels_variable_rbe": int(valid.sum()),
            "letd_high_dose_q50_q95": [float(v) for v in np.percentile(letd[hi], [50, 95])] if hi.any() else None,
            "models": {}}
@@ -427,7 +455,7 @@ def rbe_run(a):
                                summation="FRACTION")
         m = {"rbe_high_dose_mean": float(r[hi].mean()) if hi.any() else None,
              "rbe_high_dose_q05_q50_q95": [float(v) for v in np.percentile(r[hi], [5, 50, 95])] if hi.any() else None,
-             "max_gy": float(w.max()), "distal_shift": {}, "structures": {}}
+             "max_gy": float(w[body].max()), "distal_shift": {}, "structures": {}}
         if name != "1.1":
             # each field's dose weighted by the RBE of the whole plan: the RBE depends on the summed dose and LETd
             for mf, d in zip(run["fields"], doses):
@@ -439,7 +467,14 @@ def rbe_run(a):
                 m["distal_shift"][str(mf["number"])] = rbe_models.distal_shift(rbe_models.CONSTANT * d * body, r * d * body, origin, spacing, u)
         for sname, kind, mask in structures:
             fig = evaluate.dvh_figures(w, mask, 1.0)
-            if fig: m["structures"][sname] = {"kind": kind, **{k: fig[k] for k in ("D2", "D50", "D98")}}
+            if not fig: continue
+            m["structures"][sname] = v = {"kind": kind, **{k: fig[k] for k in ("D2", "D50", "D98")}}
+            if kind == "OAR":
+                # inside a target its alpha/beta applies: the organ's hottest voxels can be target voxels, so the
+                # organ minus all targets shows the organ's own values
+                v["target_overlap_pct"] = 100.0 * float((mask & targets).sum()) / float(mask.sum())
+                out_fig = evaluate.dvh_figures(w, mask & ~targets, 1.0)
+                v["outside_targets"] = {k: out_fig[k] for k in ("D2", "D50", "D98")} if out_fig else None
         res["models"][name] = m
     lines = rbe_report(res, run, names)
     json.dump(res, open(os.path.join(out, "rbe_result.json"), "w"), indent=1)
@@ -457,7 +492,8 @@ def rbe_report(res, run, names):
              "LETd: TOPAS ProtonLET, dosisgewichtet, nur Protonen (Primaer- und Sekundaerprotonen), Schritte ueber "
              f"100 keV/um ausgelassen; Skalierung: {', '.join(res['let_scaling'])}. Felder dosisgewichtet kombiniert.",
              f"Modell-RBE nur in Voxeln mit mindestens {100 * res['let_threshold']:g} % der maximalen Dosis im Koerper "
-             f"(Koerper: {res['body_mask']}; {res['voxels_variable_rbe']} Voxel), sonst 1,1: dort ist das LET Rauschen.", ""]
+             f"(Koerper: {body_line(res)}; {res['voxels_variable_rbe']} Voxel), sonst 1,1: dort ist das LET Rauschen. "
+             "Maxima und Hochdosisbereich nur im Koerper.", ""]
     q = res["letd_high_dose_q50_q95"]
     if q: lines += [f"LETd im Hochdosisbereich (> 50 % Maximum): Median {q[0]:.2f}, 95 %-Quantil {q[1]:.2f} keV/um.", ""]
     lines += ["| Modell | mittlere RBE (> 50 % Max.) | RBE 5/50/95 % | max. RBE-gewichtete Dosis [Gy(RBE)] |",
@@ -487,6 +523,18 @@ def rbe_report(res, run, names):
             cells = [" / ".join(f"{ms[n]['structures'][s][k]:.3f}" for k in ("D2", "D50", "D98"))
                      if s in ms[n]["structures"] else "-" for n in names]
             lines.append(f"| {s} | {v['kind']} | " + " | ".join(cells) + " |")
+        oars = [s for s, v in ms["1.1"]["structures"].items() if v["kind"] == "OAR"]
+        if oars:
+            lines += ["", "Risikoorgane ohne die Zielvolumen (Organ minus Vereinigung aller PTV, CTV, GTV), D2 / D50 / D98 "
+                          "[Gy(RBE) je Fraktion]: im Zielvolumen gilt dessen alpha/beta, dort liegende Voxel mischen sonst "
+                          "in die Werte des Organs. Ueberlappung: Anteil des Organs im Zielvolumen.", "",
+                      "| Struktur | Ueberlappung | " + " | ".join(names) + " |", "|---|---|" + "---|" * len(names)]
+            for s in oars:
+                cells = []
+                for n in names:
+                    o = ms[n]["structures"].get(s, {}).get("outside_targets")
+                    cells.append(" / ".join(f"{o[k]:.3f}" for k in ("D2", "D50", "D98")) if o else "-")
+                lines.append(f"| {s} | {ms['1.1']['structures'][s]['target_overlap_pct']:.1f} % | " + " | ".join(cells) + " |")
     lines += ["", "Dateien im Laufordner: letd.npy, rbe_*.npy, rbe_dose_*.npy und rbe_dose_*.dcm (RT Dose, DoseType "
                   "EFFECTIVE), rbe_result.json."]
     return lines
@@ -508,7 +556,8 @@ def main(argv=None):
     ap.add_argument("--rbe", type=float, help="evaluate: RBE for the TPS dose (default 1.1 for EFFECTIVE, else 1.0)")
     ap.add_argument("--normalised-gamma", action="store_true", help="evaluate: also gamma with TOPAS scaled to the TPS mean")
     ap.add_argument("--alpha-beta", type=float, default=2.0, help="rbe: alpha/beta [Gy] everywhere without --rtstruct")
-    ap.add_argument("--rtstruct", help="rbe: RT Structure Set for alpha/beta per structure and D2/D50/D98")
+    ap.add_argument("--rtstruct", help="rbe: RT Structure Set for alpha/beta per structure and D2/D50/D98; rbe and "
+                    "evaluate: its external contour (type EXTERNAL, else a name such as Body) is the body mask")
     ap.add_argument("--ab-normal", type=float, default=2.0, help="rbe with --rtstruct: alpha/beta of normal tissue [Gy]")
     ap.add_argument("--ab-target", type=float, default=10.0, help="rbe with --rtstruct: alpha/beta of PTV/CTV/GTV [Gy]")
     ap.add_argument("--let-threshold", type=float, default=0.05, help="rbe: model RBE only above this dose fraction of the max")

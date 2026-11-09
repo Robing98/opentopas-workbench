@@ -218,9 +218,10 @@ def test_rtstruct_fills_every_slice_when_contour_planes_and_dose_slices_differ(t
 
 
 # ------------------------------------------------------------------ the rbe command of run_patient.py
-def run_with_let(tmp_path, capsys, n_fields=1, hot_air=False):
+def run_with_let(tmp_path, capsys, n_fields=1, hot_air=False, hot_tissue=False):
     """A zoned synthetic run whose field 1 (gantry 0, beam along +y) falls off distally in y with LET rising there.
-    `hot_air`: one corner voxel is air in the CT and holds 3 times the target dose, as a noisy voxel outside the body."""
+    `hot_air`: one corner voxel is air in the CT and holds 3 times the target dose, as a noisy voxel outside the body.
+    `hot_tissue`: the same voxel holds that dose but stays water in the CT, so only an external contour leaves it out."""
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from plan_mc import run_patient
     from test_plan_mc_probe_fixes import fake_topas
@@ -241,6 +242,7 @@ def run_with_let(tmp_path, capsys, n_fields=1, hot_air=False):
         import shutil
         shutil.rmtree(inp["ct"]); synthetic.write_ct(inp["ct"], hu, ORIGIN, SPACING)
         dose[3, 4, 5] = 6.0
+    if hot_tissue: dose[3, 4, 5] = 6.0
     fake_topas(out, [dose] * n_fields)
     run = __import__("json").loads((out / "run.json").read_text())
     for m in run["fields"]:
@@ -284,7 +286,8 @@ def test_rbe_command_takes_the_maximum_inside_the_body(tmp_path, capsys):
     res = json.loads((out / "rbe_result.json").read_text())
     assert res["letd_high_dose_q50_q95"] is not None
     assert res["models"]["mcnamara"]["rbe_high_dose_mean"] > 1.1
-    assert res["voxels_variable_rbe"] == int((dose >= 0.05 * 2.0).sum())
+    assert res["voxels_variable_rbe"] == int((dose >= 0.05 * 2.0).sum()) - 1          # the air voxel keeps 1.1
+    assert float(np.load(out / "rbe_mcnamara.npy")[3, 4, 5]) == pytest.approx(1.1)
     assert res["models"]["mcnamara"]["distal_shift"]["1"]["shape"]["median_mm"] > 0
     assert "CT" in res["body_mask"]
 
@@ -310,3 +313,114 @@ def test_rbe_command_refuses_a_run_without_let(tmp_path, capsys):
     (out / "field1_let.bin").unlink()
     with pytest.raises(SystemExit, match="no LET output"):
         run_patient.main(["rbe", "--workspace", str(ws), "--name", "run1"])
+
+
+# ------------------------------------------------------------------ body from the external contour, organs without targets
+def test_external_is_found_by_type_before_name(tmp_path):
+    shape, origin, spacing = (3, 4, 4), (0.0, 0.0, 0.0), (1.0, 1.0, 1.0)
+    big = np.ones(shape, bool)
+    small = np.zeros(shape, bool); small[:, 1:3, 1:3] = True
+    p = rtstruct.write(str(tmp_path / "rs.dcm"), [("Body", "ORGAN", big), ("Haut aussen", "EXTERNAL", small)], origin, spacing)
+    typed = rtstruct.read(p, shape, origin, spacing, types=True)
+    name, how, mask = rtstruct.external(typed)
+    assert (name, how) == ("Haut aussen", "Typ EXTERNAL") and np.array_equal(mask, small)
+    kinds = {n: k for n, k, _ in rtstruct.read(p, shape, origin, spacing)}
+    assert kinds == {"Body": "OAR", "Haut aussen": "EXTERNAL"}
+
+
+@pytest.mark.parametrize("name", ["BODY", "Körper", "KOERPER_2", "Außenkontur", "External", "outline"])
+def test_external_is_found_by_name_without_the_type(tmp_path, name):
+    shape, origin, spacing = (3, 4, 4), (0.0, 0.0, 0.0), (1.0, 1.0, 1.0)
+    box = np.zeros(shape, bool); box[:, 1:3, 1:3] = True
+    p = rtstruct.write(str(tmp_path / "rs.dcm"), [("Rueckenmark", "ORGAN", box), (name, "", box)], origin, spacing)
+    assert rtstruct.external(rtstruct.read(p, shape, origin, spacing, types=True))[:2] == (name, "Name")
+
+
+@pytest.mark.parametrize("name,typ", [("Body", "PTV"), ("Bodyplan", ""), ("Koerper Rest", "ORGAN"), ("Lunge", "ORGAN")])
+def test_no_external_from_a_target_or_another_name(tmp_path, name, typ):
+    shape, origin, spacing = (3, 4, 4), (0.0, 0.0, 0.0), (1.0, 1.0, 1.0)
+    box = np.zeros(shape, bool); box[:, 1:3, 1:3] = True
+    p = rtstruct.write(str(tmp_path / "rs.dcm"), [(name, typ, box)], origin, spacing)
+    assert rtstruct.external(rtstruct.read(p, shape, origin, spacing, types=True)) is None
+
+
+def phantom_structures(tmp_path):
+    """External without the last row in y and column in x (the hot voxel 3, 4, 5 lies outside, inside the CT body),
+    a PTV, and an organ of 12 voxels of which 4 lie in the PTV."""
+    from test_plan_mc_run_patient import ORIGIN, SHAPE, SPACING
+    ext = np.zeros(SHAPE, bool); ext[:, 0:4, 0:5] = True
+    ptv = np.zeros(SHAPE, bool); ptv[1:3, 0:3, 1:4] = True
+    organ = np.zeros(SHAPE, bool); organ[1:3, 1:4, 3:5] = True
+    rs = rtstruct.write(str(tmp_path / "rs.dcm"), [("Aussenkontur", "EXTERNAL", ext), ("PTV", "PTV", ptv),
+                                                   ("Rueckenmark", "ORGAN", organ)], ORIGIN, SPACING)
+    return rs, ext, ptv, organ
+
+
+def test_rbe_command_takes_the_body_from_the_external_contour(tmp_path, capsys):
+    import json
+    run_patient, ws, out, inp, dose, let = run_with_let(tmp_path, capsys, hot_tissue=True)
+    rs, ext, ptv, organ = phantom_structures(tmp_path)
+    run_patient.main(["rbe", "--workspace", str(ws), "--name", "run1", "--rtstruct", rs])
+    res = json.loads((out / "rbe_result.json").read_text())
+    assert res["body_mask"] == "Aussenkontur des RT Structure Set (ROI nach Typ EXTERNAL gewaehlt)"
+    assert res["body_roi"] == "Aussenkontur"
+    # threshold from the maximum inside the external (2 Gy, not the 6 Gy voxel), model RBE only inside it
+    assert res["voxels_variable_rbe"] == int((ext & (dose >= 0.05 * 2.0)).sum())
+    mc = np.load(out / "rbe_mcnamara.npy")
+    assert mc[0, 0, 5] == pytest.approx(1.1) and mc[0, 0, 4] != pytest.approx(1.1)
+    w = np.load(out / "rbe_dose_mcnamara.npy")
+    assert res["models"]["mcnamara"]["max_gy"] == pytest.approx(float(w[ext].max()), rel=1e-5)
+    assert res["models"]["1.1"]["max_gy"] == pytest.approx(2.2, rel=1e-5)
+    assert res["models"]["1.1"]["structures"]["Aussenkontur"]["kind"] == "EXTERNAL"     # the body is no organ
+    rep = (out / "RBE_BERICHT.md").read_text()
+    assert 'ROI "Aussenkontur"' in rep
+
+
+def test_rbe_command_gives_organ_values_without_the_target(tmp_path, capsys):
+    import json
+    from plan_mc import evaluate
+    run_patient, ws, out, inp, dose, let = run_with_let(tmp_path, capsys)
+    rs, ext, ptv, organ = phantom_structures(tmp_path)
+    run_patient.main(["rbe", "--workspace", str(ws), "--name", "run1", "--rtstruct", rs])
+    ms = json.loads((out / "rbe_result.json").read_text())["models"]
+    o = ms["1.1"]["structures"]["Rueckenmark"]
+    assert o["kind"] == "OAR" and o["target_overlap_pct"] == pytest.approx(100 * 4 / 12)
+    # 1.1 by hand: outside the PTV 4 voxels at y 3 (1.2 Gy x 1.1) and 4 at y 1..2 (2 Gy x 1.1)
+    assert o["outside_targets"] == pytest.approx({"D2": 2.2, "D50": 2.2, "D98": 1.32}, rel=1e-5)
+    assert (o["D2"], o["D98"]) == pytest.approx((2.2, 1.32), rel=1e-5)
+    for n in ("mcnamara", "wedenberg", "carabe"):
+        w = np.load(out / f"rbe_dose_{n.replace('.', '_')}.npy")
+        fig = evaluate.dvh_figures(w, organ & ~ptv, 1.0)
+        got = ms[n]["structures"]["Rueckenmark"]["outside_targets"]
+        assert got == pytest.approx({k: fig[k] for k in ("D2", "D50", "D98")}, rel=1e-5)
+        # in the PTV alpha/beta 10 lowers the RBE: the organ's own voxels outside reach a higher D2 than its PTV part
+        assert got["D2"] >= float(w[organ & ptv].max()) * (1 - 1e-6)
+    assert "PTV" in ms["1.1"]["structures"] and "target_overlap_pct" not in ms["1.1"]["structures"]["PTV"]
+    rep = (out / "RBE_BERICHT.md").read_text()
+    assert "Risikoorgane ohne die Zielvolumen" in rep and "| Rueckenmark | 33.3 % |" in rep
+
+
+def test_evaluate_takes_the_body_from_the_external_contour(tmp_path, capsys):
+    import json
+    run_patient, ws, out, inp, dose, let = run_with_let(tmp_path, capsys, hot_tissue=True)
+    rs, ext, ptv, organ = phantom_structures(tmp_path)
+    run_patient.main(["evaluate", "--workspace", str(ws), "--name", "run1"])
+    assert json.loads((out / "result.json").read_text())["topas_max_gy"] == pytest.approx(6.0, rel=1e-5)
+    run_patient.main(["evaluate", "--workspace", str(ws), "--name", "run1", "--rtstruct", rs])
+    res = json.loads((out / "result.json").read_text())
+    assert res["topas_max_gy"] == pytest.approx(2.0, rel=1e-5) and res["body_roi"] == "Aussenkontur"
+    assert 'ROI "Aussenkontur"' in (out / "BERICHT.md").read_text()
+    k = json.loads((ws / "robin" / "plan_mc" / "run1" / "kennzahlen.json").read_text())
+    assert "Aussenkontur" not in json.dumps(k).replace("Aussenkontur des RT", "")
+
+
+def test_rbe_command_without_an_external_falls_back_with_a_warning(tmp_path, capsys):
+    import json
+    run_patient, ws, out, inp, dose, let = run_with_let(tmp_path, capsys)
+    from test_plan_mc_run_patient import ORIGIN, SHAPE, SPACING
+    ptv = np.zeros(SHAPE, bool); ptv[1:3, 0:3, 1:4] = True
+    rs = rtstruct.write(str(tmp_path / "rs.dcm"), [("PTV", "PTV", ptv)], ORIGIN, SPACING)
+    run_patient.main(["rbe", "--workspace", str(ws), "--name", "run1", "--rtstruct", rs])
+    assert "without an external contour" in capsys.readouterr().err
+    res = json.loads((out / "rbe_result.json").read_text())
+    assert "CT" in res["body_mask"] and res["body_roi"] is None

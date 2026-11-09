@@ -5,10 +5,16 @@ Each dose slice inside the structure's z extent takes the contour plane nearest 
 slices need not have the same spacing. Structures without any
 contour on the grid are left out. A structure counts as a target when its RTROIInterpretedType is PTV, CTV or GTV, or,
 without a type, when its name starts with one of them.
+
+The external contour (the body) is the structure of type EXTERNAL, else one named as in EXTERNAL_NAMES (see external).
 """
+import re
+
 import numpy as np
 
 TARGET_TYPES = ("PTV", "CTV", "GTV")
+# names of the body contour without the type EXTERNAL, compared after normalise(); a digit may follow ("Body 2")
+EXTERNAL_NAMES = ("body", "external", "outline", "koerper", "aussenkontur", "koerperkontur")
 
 
 def inside(px, py, poly):
@@ -25,8 +31,34 @@ def inside(px, py, poly):
     return res
 
 
-def read(path, shape, origin, spacing):
-    """[(name, "TARGET" or "OAR", mask [z, y, x])] of the structure set at `path` on the grid (origin, spacing x y z)."""
+def normalise(name):
+    """Lower case, umlauts and sharp s spelled out, everything but letters and digits dropped: "Außenkontur" ->
+    "aussenkontur", "KÖRPER_1" -> "koerper1"."""
+    s = str(name).lower()
+    for a, b in (("ä", "ae"), ("ö", "oe"), ("ü", "ue"), ("ß", "ss")): s = s.replace(a, b)
+    return re.sub(r"[^a-z0-9]", "", s)
+
+
+def is_external_name(name):
+    n = normalise(name)
+    return any(re.fullmatch(re.escape(e) + r"\d*", n) for e in EXTERNAL_NAMES)
+
+
+def external(typed):
+    """The body of a structure set read with read(..., types=True): (name, "Typ EXTERNAL" or "Name", mask), or None.
+    The first structure of type EXTERNAL wins; without one, the first whose name is a body name (any type but a
+    target type, so a PTV named "Body" is never the body)."""
+    for name, _, mask, roi_type in typed:
+        if roi_type == "EXTERNAL": return name, "Typ EXTERNAL", mask
+    for name, _, mask, roi_type in typed:
+        if roi_type not in TARGET_TYPES and is_external_name(name): return name, "Name", mask
+    return None
+
+
+def read(path, shape, origin, spacing, types=False):
+    """[(name, "TARGET", "OAR" or "EXTERNAL", mask [z, y, x])] of the structure set at `path` on the grid (origin,
+    spacing x y z). The body (see external) is "EXTERNAL", not an organ. `types`: each entry also carries the
+    RTROIInterpretedType in upper case ("" without one)."""
     import pydicom
     ds = pydicom.dcmread(path)
     names = {int(r.ROINumber): str(r.ROIName) for r in getattr(ds, "StructureSetROISequence", [])}
@@ -59,8 +91,11 @@ def read(path, shape, origin, spacing):
         name = names.get(num, f"ROI {num}")
         kind = kinds.get(num, "")
         target = kind in TARGET_TYPES or (not kind and name.upper().startswith(TARGET_TYPES))
-        out.append((name, "TARGET" if target else "OAR", mask))
-    return out
+        out.append((name, "TARGET" if target else "OAR", mask, kind))
+    body = external(out)
+    if body:
+        out = [(n, "EXTERNAL" if n == body[0] and m is body[2] else k, m, t) for n, k, m, t in out]
+    return out if types else [o[:3] for o in out]
 
 
 def write(path, structures, origin, spacing, frame_uid=None):
