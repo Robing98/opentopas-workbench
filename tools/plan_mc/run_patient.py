@@ -10,9 +10,9 @@ Research use only: TOPAS is not approved for clinical use; the results never inf
                                     [--ripple-filter t4 --rifi-distance MM]
     python3 run_patient.py queue    --workspace WS --name NAME
     python3 run_patient.py status   --workspace WS --name NAME
-    python3 run_patient.py evaluate --workspace WS --name NAME [--rbe 1.1] [--normalised-gamma] [--rtstruct RS.dcm]
+    python3 run_patient.py evaluate --workspace WS --name NAME [--rbe 1.1] [--normalised-gamma] [--rtstruct RS.dcm|auto]
     python3 run_patient.py rbe      --workspace WS --name NAME [--alpha-beta 2] [--let-threshold 0.05] \
-                                    [--rtstruct RS.dcm [--ab-normal 2] [--ab-target 10]]
+                                    [--rtstruct RS.dcm|auto [--ab-normal 2] [--ab-target 10]]
 
 Everything goes to WS/lokal/patient/plan_mc/NAME/ (WS/patient/plan_mc/NAME/ in a workspace without zones) and nowhere
 else: the Schneider file tuned to the HLUT (hlut.py), one
@@ -125,6 +125,7 @@ def find_structures(structs, plan):
 
 
 def find(a):
+    if not os.path.isdir(a.export): raise SystemExit("find: the export folder does not exist")
     series, plans, doses, structs, other_plans = scan(a.export)
     err = lambda m: print(m, file=sys.stderr)
     err(f"CT series: {len(series)} (slices: {', '.join(str(s['slices']) for s in series.values()) or '-'})")
@@ -297,6 +298,23 @@ def body_mask(run, dose, ref, external=None):
     return np.ones(dose.shape, bool), "ganzes Gitter (CT nicht auf dem Dosisgitter)"
 
 
+def auto_rtstruct(run):
+    """--rtstruct auto: the RT Structure Set of the run's plan (see find_structures), looked for in the plan's folder
+    and, without a hit, in the folder above it, so the export path need not be typed again. Prints no file name."""
+    import pydicom
+    ds = pydicom.dcmread(run["rtplan"], stop_before_pixels=True)
+    plan = {"uid": str(ds.SOPInstanceUID), "frame": str(getattr(ds, "FrameOfReferenceUID", "")),
+            "rs_refs": [str(r.ReferencedSOPInstanceUID) for r in getattr(ds, "ReferencedStructureSetSequence", [])]}
+    here = os.path.dirname(run["rtplan"])
+    for d in (here, os.path.dirname(here)):
+        structs = scan(d)[3]
+        if structs:
+            rs = find_structures(structs, plan)
+            if rs: return rs
+            break
+    raise SystemExit("--rtstruct auto: no single RT Structure Set of the plan beside it; give --rtstruct FILE")
+
+
 def read_structures(path, shape, origin, spacing):
     """Structures [(name, "TARGET", "OAR" or "EXTERNAL", mask)] of the RT Structure Set on the grid and its external
     contour (name, how it was found, mask) or None. Without `path`: ([], None)."""
@@ -357,6 +375,7 @@ def evaluate_run(a):
             raise SystemExit(f"RT Dose with DoseSummationType {kind or 'missing'}: give the dose of the whole plan")
         if kind == "PLAN": ref = ref / max(1, run["fractions"])
         if ref.shape != dose.shape: raise SystemExit(f"TPS dose grid {ref.shape} differs from the TOPAS grid {dose.shape}")
+    if a.rtstruct == "auto": a.rtstruct = auto_rtstruct(run)
     if a.rtstruct and ref is None: origin, spacing = rbe_grid(run, dose.shape)
     _, ext = read_structures(a.rtstruct, dose.shape, origin, spacing) if a.rtstruct else ([], None)
     body, body_name = body_mask(run, dose, ref, ext)
@@ -445,6 +464,7 @@ def rbe_run(a):
     dose = sum(doses)
     letd = rbe_models.combine_letd(doses, lets)
     origin, spacing = rbe_grid(run, dose.shape)
+    if a.rtstruct == "auto": a.rtstruct = auto_rtstruct(run)
     structures, ext = read_structures(a.rtstruct, dose.shape, origin, spacing)
     # the maximum inside the body: a noisy air or couch voxel would raise the LET threshold and the high dose region;
     # outside the body the LET of air is noise, so the model RBE applies only inside it
@@ -584,7 +604,8 @@ def main(argv=None):
     ap.add_argument("--normalised-gamma", action="store_true", help="evaluate: also gamma with TOPAS scaled to the TPS mean")
     ap.add_argument("--alpha-beta", type=float, default=2.0, help="rbe: alpha/beta [Gy] everywhere without --rtstruct")
     ap.add_argument("--rtstruct", help="rbe: RT Structure Set for alpha/beta per structure and D2/D50/D98; rbe and "
-                    "evaluate: its external contour (type EXTERNAL, else a name such as Body) is the body mask")
+                    "evaluate: its external contour (type EXTERNAL, else a name such as Body) is the body mask; "
+                    "auto: the structure set of the run's plan, found beside the plan file")
     ap.add_argument("--ab-normal", type=float, default=2.0, help="rbe with --rtstruct: alpha/beta of normal tissue [Gy]")
     ap.add_argument("--ab-target", type=float, default=10.0, help="rbe with --rtstruct: alpha/beta of PTV/CTV/GTV [Gy]")
     ap.add_argument("--let-threshold", type=float, default=0.05, help="rbe: model RBE only above this dose fraction of the max")

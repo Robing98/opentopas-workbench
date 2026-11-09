@@ -439,3 +439,31 @@ def test_a_second_external_is_no_organ(tmp_path):
     p = rtstruct.write(str(tmp_path / "rs.dcm"), [("Body", "EXTERNAL", big), ("Body alt", "EXTERNAL", small)], origin, spacing)
     assert {n: k for n, k, _ in rtstruct.read(p, shape, origin, spacing)} == {"Body": "EXTERNAL", "Body alt": "EXTERNAL"}
     assert rtstruct.external(rtstruct.read(p, shape, origin, spacing, types=True))[0] == "Body"
+
+
+def test_rtstruct_auto_finds_the_structure_set_beside_the_plan(tmp_path, capsys):
+    import json, pydicom
+    run_patient, ws, out, inp, dose, let = run_with_let(tmp_path, capsys, hot_tissue=True)
+    from test_plan_mc_run_patient import ORIGIN, SHAPE, SPACING
+    frame = str(pydicom.dcmread(inp["rtplan"]).FrameOfReferenceUID)
+    ext = np.zeros(SHAPE, bool); ext[:, 0:4, 0:5] = True
+    rtstruct.write(str(tmp_path / "RS_plan.dcm"), [("Body", "EXTERNAL", ext)], ORIGIN, SPACING, frame_uid=frame)
+    rtstruct.write(str(tmp_path / "RS_other.dcm"), [("Body", "EXTERNAL", ext)], ORIGIN, SPACING)   # other frame
+    run_patient.main(["rbe", "--workspace", str(ws), "--name", "run1", "--rtstruct", "auto"])
+    res = json.loads((out / "rbe_result.json").read_text())
+    assert res["body_roi"] == "Body" and res["models"]["1.1"]["max_gy"] == pytest.approx(2.2, rel=1e-5)
+    assert "RS_plan" not in capsys.readouterr().out
+    run_patient.main(["evaluate", "--workspace", str(ws), "--name", "run1", "--rtstruct", "auto"])
+    assert json.loads((out / "result.json").read_text())["topas_max_gy"] == pytest.approx(2.0, rel=1e-5)
+
+
+def test_rtstruct_auto_without_a_structure_set_stops(tmp_path, capsys):
+    run_patient, ws, out, *_ = run_with_let(tmp_path, capsys)
+    with pytest.raises(SystemExit, match="--rtstruct auto"):
+        run_patient.main(["rbe", "--workspace", str(ws), "--name", "run1", "--rtstruct", "auto"])
+
+
+def test_find_refuses_a_missing_export_folder(tmp_path):
+    from plan_mc import run_patient
+    with pytest.raises(SystemExit, match="does not exist"):
+        run_patient.main(["find", str(tmp_path / "PUT-EXPORT-FOLDER-HERE")])
