@@ -493,3 +493,160 @@ def test_http_file_cache_header(srv, ws):
     def cache_control(q):
         with urllib.request.urlopen(srv + "/file?p=a.png&token=" + wb.TOKEN + q) as r: return r.headers["Cache-Control"]
     assert cache_control("") == "no-store" and cache_control("&v=1730000000.5").startswith("private")
+
+
+# ------------------------------------------------------------------ keep-awake during runs, restart, Ctrl+C
+class Clock:
+    """Stands in for the time module in the server, so a run of minutes takes no real time."""
+    def __init__(self): self.now = 1_000_000.0
+    def time(self): return self.now
+    def sleep(self, s): self.now += s
+    def strftime(self, fmt): return "2026-01-01 00:00:00"
+
+
+@pytest.fixture
+def fake_runs(ws, monkeypatch):
+    """A WSL workbench whose TOPAS runs and keep-awake helper are fakes on a fake clock. Every run lasts 8 minutes."""
+    clock = Clock(); flag = ws / ".workbench" / "keepawake.flag"
+    seen = type("Seen", (), {"helpers": [], "runs": [], "ages": [], "clock": clock, "flag": flag})()
+    class P:
+        def __init__(self, args, **kw):
+            self.args, self.pid, self.ended = args, 4242, False
+            self.end = clock.now + 480
+            (seen.helpers if args[0] == "powershell.exe" else seen.runs).append(self)
+        def poll(self): return 0 if self.ended else None
+        def terminate(self): self.ended = True
+        def wait(self, timeout=None):
+            # the real helper ends once the heartbeat file is older than 120 s; record its age whenever the run is looked at
+            while True:
+                seen.ages.append(clock.now - float(flag.read_text()) if flag.exists() else float("inf"))
+                if clock.now >= self.end: return 0
+                step = self.end - clock.now if timeout is None else timeout
+                clock.now += step
+                if timeout is not None: raise wb.subprocess.TimeoutExpired(self.args, timeout)
+    monkeypatch.setattr(wb, "time", clock)
+    monkeypatch.setattr(wb, "AWAKE", wb.KeepAwake())
+    monkeypatch.setattr(wb.KeepAwake, "platform", staticmethod(lambda: "wsl"))
+    monkeypatch.setattr(wb.subprocess, "Popen", P)
+    monkeypatch.setattr(wb.subprocess, "run", lambda *a, **k: type("R", (), {"stdout": "C:\\ws\\.workbench\\keepawake.flag"})())
+    for key in ("proc", "stop", "closing"): monkeypatch.setitem(wb.STATE, key, None if key == "proc" else False)
+    wb.STATE["cfg"] = {"binaries": [{"name": "fake", "cmd": "/bin/true"}], "lang": "en", "toast": False}
+    (ws / "a.txt").write_text("i:Run/NumberOfHistoriesInRun = 10\n")
+    return seen
+
+
+def queued(n):
+    return [{"id": i, "file": "a.txt", "binary": "fake", "status": "queued"} for i in range(1, n + 1)]
+
+
+def test_keep_awake_heartbeat_stays_fresh_during_a_long_run(fake_runs):
+    wb.STATE["jobs"] = queued(1)
+    wb.worker_step()
+    assert wb.STATE["jobs"][0]["status"] == "done" and wb.STATE["jobs"][0]["seconds"] == 480
+    # the helper looks every 15 s and ends at 120 s, so the file must never get near that age
+    assert len(fake_runs.ages) > 10 and max(fake_runs.ages) < 60
+    assert len(fake_runs.helpers) == 1 and wb.AWAKE.active()
+
+
+@pytest.mark.parametrize("n", [1, 3])
+def test_keep_awake_holds_for_the_whole_queue_and_stops_when_it_is_empty(fake_runs, n):
+    wb.STATE["jobs"] = queued(n)
+    for _ in range(n):
+        wb.worker_step()
+        fake_runs.clock.sleep(0.5)
+    assert [j["status"] for j in wb.STATE["jobs"]] == ["done"] * n and len(fake_runs.runs) == n
+    assert len(fake_runs.helpers) == 1 and wb.AWAKE.active() and max(fake_runs.ages) < 60   # one helper for the busy period
+    wb.worker_step()   # the queue is empty now
+    assert not wb.AWAKE.active() and fake_runs.helpers[0].ended and not fake_runs.flag.exists()
+    wb.worker_step()   # still empty: nothing more happens
+    assert len(fake_runs.helpers) == 1
+    assert (fake_runs.flag.parent / "keepawake.log").read_text().splitlines() == ["2026-01-01 00:00:00 stopped by the workbench"]
+
+
+def test_keep_awake_switched_off_during_a_run_releases_the_helper(fake_runs, monkeypatch):
+    wb.STATE["jobs"] = queued(1)
+    real = wb.tend_awake; calls = []
+    def tend():
+        calls.append(1)
+        if len(calls) == 3: wb.STATE["cfg"]["keep_awake"] = False
+        real()
+    monkeypatch.setattr(wb, "tend_awake", tend)
+    wb.worker_step()
+    assert fake_runs.helpers[0].ended and not fake_runs.flag.exists()
+
+
+def write_jobs(ws, jobs):
+    (ws / ".workbench").mkdir(exist_ok=True)
+    (ws / ".workbench" / "jobs.json").write_text(json.dumps(jobs))
+
+
+def stored_jobs(ws):
+    return json.loads((ws / ".workbench" / "jobs.json").read_text())
+
+
+@pytest.mark.parametrize("n", [1, 3])
+def test_restart_keeps_waiting_jobs_waiting(ws, n):
+    write_jobs(ws, [{"id": 1, "file": "a.txt", "binary": "t", "status": "done"}] +
+                   [{"id": i, "file": "a.txt", "binary": "t", "status": "queued"} for i in range(2, 2 + n)])
+    wb.load_jobs()
+    assert [j["status"] for j in wb.STATE["jobs"]] == ["done"] + ["queued"] * n
+    assert all("note" not in j and "restarts" not in j for j in wb.STATE["jobs"]) and wb.STATE["next_id"] == n + 2
+
+
+def test_restart_requeues_the_running_job_once(ws):
+    write_jobs(ws, [{"id": 7, "file": "a.txt", "binary": "t", "status": "running", "start": "2026-01-01 10:00:00", "t0": 1.0},
+                    {"id": 8, "file": "b.txt", "binary": "t", "status": "queued"}])
+    wb.load_jobs()
+    first, second = wb.STATE["jobs"]
+    assert first["status"] == "queued" and first["restarts"] == 1 and first["note"] == "re-queued after server restart"
+    assert "start" not in first and second == {"id": 8, "file": "b.txt", "binary": "t", "status": "queued"}
+    # on disk at once: a server that ends again before the next save must still find the count
+    assert stored_jobs(ws)[0]["restarts"] == 1 and stored_jobs(ws)[0]["status"] == "queued"
+
+
+def test_restart_gives_up_a_job_that_was_requeued_before(ws):
+    write_jobs(ws, [{"id": 7, "file": "a.txt", "binary": "t", "status": "running"}, {"id": 8, "file": "b.txt", "binary": "t", "status": "queued"}])
+    wb.load_jobs()
+    wb.STATE["jobs"][0]["status"] = "running"; wb.save_jobs()   # the second attempt starts, then the server ends again
+    wb.load_jobs()
+    first, second = wb.STATE["jobs"]
+    assert first["status"] == "aborted" and first["restarts"] == 1 and first["note"].startswith("aborted: the server ended twice")
+    assert second["status"] == "queued" and stored_jobs(ws)[0]["status"] == "aborted"
+    wb.load_jobs()
+    assert wb.STATE["jobs"][0]["status"] == "aborted"   # and it stays so
+
+
+def test_restart_note_reaches_the_api_and_the_mcp_record(srv, ws):
+    from opentopas_workbench import mcp
+    write_jobs(ws, [{"id": 7, "file": "a.txt", "binary": "t", "status": "running"}])
+    wb.load_jobs()
+    job = call(srv + "/api/jobs")[1]["jobs"][0]
+    assert job["status"] == "queued" and job["restarts"] == 1 and job["note"] == "re-queued after server restart"
+    assert mcp.job_brief(job)["note"] == "re-queued after server restart" and mcp.job_brief(job)["restarts"] == 1
+
+
+def test_server_end_leaves_the_running_job_for_the_next_start(fake_runs, ws):
+    wb.STATE["jobs"] = queued(2)
+    wb.STATE["closing"] = True   # main() sets this before it stops the run
+    wb.worker_step()
+    assert [j["status"] for j in wb.STATE["jobs"]] == ["running", "queued"] and "end" not in wb.STATE["jobs"][0]
+    wb.STATE["closing"] = False; wb.STATE["proc"] = None
+    wb.load_jobs()
+    assert [j["status"] for j in wb.STATE["jobs"]] == ["queued", "queued"] and wb.STATE["jobs"][0]["restarts"] == 1
+
+
+def test_first_ctrl_c_during_a_run_only_warns(ws, monkeypatch):
+    monkeypatch.setattr(wb.sys, "stdin", type("Tty", (), {"isatty": lambda self: True})())
+    for key in ("ctrl_c", "term"): monkeypatch.delitem(wb.STATE, key, raising=False)
+    monkeypatch.setitem(wb.STATE, "proc", None)
+    assert wb.ctrl_c_ends(100.0)                 # nothing runs: end at once
+    wb.STATE["proc"] = object()
+    assert not wb.ctrl_c_ends(200.0)             # a run would be lost: ask for a second one
+    assert wb.ctrl_c_ends(202.5)                 # second one in time
+    wb.STATE.pop("ctrl_c")
+    assert not wb.ctrl_c_ends(300.0) and not wb.ctrl_c_ends(310.0)   # too late counts as a first one again
+    wb.STATE["term"] = True
+    assert wb.ctrl_c_ends(400.0)                 # kill or a closing terminal never waits
+    wb.STATE["term"] = False; wb.STATE.pop("ctrl_c")
+    monkeypatch.setattr(wb.sys, "stdin", type("Pipe", (), {"isatty": lambda self: False})())
+    assert wb.ctrl_c_ends(500.0)                 # no terminal, nobody to ask

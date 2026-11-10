@@ -22,6 +22,11 @@ TRASH = "_trash"
 TOKEN = secrets.token_urlsafe(24)
 STATE = {"root": None, "cfg": {}, "lock": threading.Lock(), "jobs": [], "proc": None, "stop": False, "next_id": 1, "rev": 0}
 
+NOTE_REQUEUED = "re-queued after server restart"
+NOTE_ABORTED = "aborted: the server ended twice during this run"
+AWAKE_EVERY = 5   # seconds between two keep-awake steps while a job runs
+CTRL_C_WINDOW = 3   # seconds in which a second Ctrl+C ends the server while a job runs
+
 # ------------------------------------------------------------------ config
 def wb_dir(): return os.path.join(STATE["root"], ".workbench")
 
@@ -72,9 +77,19 @@ def load_jobs():
     try:
         with open(os.path.join(wb_dir(), "jobs.json")) as fh: STATE["jobs"] = json.load(fh)
     except (OSError, ValueError): STATE["jobs"] = []
+    # Waiting jobs keep waiting. The job that ran when the server ended runs once more; if the server ends again during
+    # that second attempt, the job is given up, so a run that takes the server down cannot loop.
+    changed = False
     for j in STATE["jobs"]:
-        if j["status"] in ("running", "queued"): j["status"] = "aborted"
+        if j["status"] != "running": continue
+        changed = True
+        if j.get("restarts", 0) >= 1:
+            j["status"] = "aborted"; j["note"] = NOTE_ABORTED
+        else:
+            j["status"] = "queued"; j["restarts"] = j.get("restarts", 0) + 1; j["note"] = NOTE_REQUEUED
+            for k in ("start", "t0"): j.pop(k, None)
     STATE["next_id"] = max([j["id"] for j in STATE["jobs"]] + [0]) + 1
+    if changed: save_jobs()   # the count must be on disk before the job starts again
 
 
 def save_jobs():
@@ -430,6 +445,11 @@ class KeepAwake:
         if self.proc is not None and self.proc.poll() is None:
             try: self.proc.terminate()
             except OSError: pass
+            if self.flag:   # the Windows helper is ended before it can write its own last line, so the log gets it from here
+                try:
+                    with open(os.path.join(os.path.dirname(self.flag), "keepawake.log"), "a") as fh:
+                        fh.write(time.strftime("%Y-%m-%dT%H:%M:%S") + " stopped by the workbench\n")
+                except OSError: pass
         self.proc = None
 
     def status(self):
@@ -466,18 +486,31 @@ def notify_job(job):
         windows_toast("OpenTOPAS Workbench", f"Queue finished, last run: {name} ({job['status']})")
 
 
+def tend_awake():
+    """One keep-awake step: hold the helper while a job waits or runs, release it once the queue is empty.
+
+    The Windows helper ends by itself when the heartbeat file gets older than 120 s, so this has to be called
+    every few seconds for as long as the queue is busy, also from inside a run."""
+    busy = STATE["proc"] is not None or any(j["status"] in ("queued", "running") for j in STATE["jobs"])
+    if busy and STATE["cfg"].get("keep_awake", True): AWAKE.start(STATE["cfg"].get("keep_display", False))
+    elif AWAKE.active() or AWAKE.flag: AWAKE.stop()
+
+
+def worker_step():
+    """Starts the next waiting job, if none runs, and returns when it has ended."""
+    tend_awake()
+    with STATE["lock"]:
+        if STATE["proc"] is not None: return
+        job = next((j for j in STATE["jobs"] if j["status"] == "queued"), None)
+        if job is None: return
+        job["status"] = "running"; job["start"] = time.strftime("%Y-%m-%d %H:%M:%S"); save_jobs()
+    run_job(job)
+
+
 def job_worker():
     while True:
         time.sleep(0.5)
-        busy = STATE["proc"] is not None or any(j["status"] == "queued" for j in STATE["jobs"])
-        if busy and STATE["cfg"].get("keep_awake", True): AWAKE.start(STATE["cfg"].get("keep_display", False))
-        elif AWAKE.active() or AWAKE.flag: AWAKE.stop()
-        with STATE["lock"]:
-            if STATE["proc"] is not None: continue
-            job = next((j for j in STATE["jobs"] if j["status"] == "queued"), None)
-            if job is None: continue
-            job["status"] = "running"; job["start"] = time.strftime("%Y-%m-%d %H:%M:%S"); save_jobs()
-        run_job(job)
+        worker_step()
 
 
 def run_job(job):
@@ -505,7 +538,10 @@ def run_job(job):
             proc = subprocess.Popen([os.path.expanduser(binary["cmd"]), param], cwd=out, stdout=log, stderr=subprocess.STDOUT,
                                     env=env, start_new_session=True)
             with STATE["lock"]: STATE["proc"] = proc
-            rc = proc.wait()
+            while True:   # this thread is the only one that feeds the keep-awake heartbeat, so it must not block for the whole run
+                try: rc = proc.wait(timeout=AWAKE_EVERY); break
+                except subprocess.TimeoutExpired: tend_awake()
+        if STATE.get("closing"): return   # the server is ending: the record stays "running", so the next start runs the job again
         job["seconds"] = round(time.time() - t0)
         job["outputs"] = sorted(relp(os.path.join(out, f)) for f, mt in snapshot().items()
                                 if before.get(f) != mt and not f.lower().endswith((".stl", ".ply")))
@@ -518,10 +554,11 @@ def run_job(job):
     except Exception as e:  # report everything in the job record
         job["status"] = "failed"; job["error"] = str(e)
     finally:
-        with STATE["lock"]:
-            STATE["proc"] = None; STATE["stop"] = False; job["end"] = time.strftime("%Y-%m-%d %H:%M:%S"); save_jobs()
-        invalidate_cache(soft=True)
-        notify_job(job)
+        if not STATE.get("closing"):
+            with STATE["lock"]:
+                STATE["proc"] = None; STATE["stop"] = False; job["end"] = time.strftime("%Y-%m-%d %H:%M:%S"); save_jobs()
+            invalidate_cache(soft=True)
+            notify_job(job)
 
 
 def enqueue(files, binary, subdir, skip_existing):
@@ -1652,6 +1689,18 @@ def remove_server_file():
         pass
 
 
+def ctrl_c_ends(now):
+    """Whether this Ctrl+C ends the server. While a job runs, the first one only asks for a second one within
+    CTRL_C_WINDOW seconds, since an accidental Ctrl+C would cost the progress of the run. A signal from outside
+    (kill, a closing terminal) and a server without a terminal end at once."""
+    try: tty = sys.stdin.isatty()
+    except (AttributeError, ValueError): tty = False
+    if STATE.get("term") or STATE["proc"] is None or not tty: return True
+    if now - STATE.get("ctrl_c", -1e9) <= CTRL_C_WINDOW: return True
+    STATE["ctrl_c"] = now
+    return False
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] in (["mcp"], ["enqueue"], ["jobs"]):
@@ -1680,13 +1729,20 @@ def main(argv=None):
     print(f"OpenTOPAS Workbench {VERSION}\n  workspace: {STATE['root']}\n  open:      {url}\n  stop:      Ctrl+C", flush=True)
     write_server_file(url)
     # SIGTERM (kill) and SIGHUP (a closing terminal) end like Ctrl+C, so the running job is stopped and server.json goes away
-    def on_term(*_): raise KeyboardInterrupt
+    def on_term(*_): STATE["term"] = True; raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, on_term)
     if hasattr(signal, "SIGHUP"): signal.signal(signal.SIGHUP, on_term)
     try:
         if not a.no_browser: open_browser(url)
-        srv.serve_forever()
+        while True:
+            try:
+                srv.serve_forever(); break
+            except KeyboardInterrupt:
+                if ctrl_c_ends(time.time()): raise
+                print(f"A job is running. Press Ctrl+C again within {CTRL_C_WINDOW} s to stop it and end the workbench. "
+                      "It runs again at the next start; waiting jobs stay in the queue.", flush=True)
     except KeyboardInterrupt:
+        STATE["closing"] = True   # set before the job is stopped, so run_job leaves its record untouched
         stop_current()
     finally:
         remove_server_file()

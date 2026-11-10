@@ -228,7 +228,7 @@ def find_job(wb, job_id):
 
 
 def job_brief(j, full=False):
-    keys = ("id", "file", "binary", "subdir", "status", "queued", "start", "end", "seconds", "rc", "error")
+    keys = ("id", "file", "binary", "subdir", "status", "queued", "start", "end", "seconds", "rc", "error", "restarts", "note")
     out = {k: j[k] for k in keys if j.get(k) not in (None, "")}
     if full:
         if j.get("hints"): out["hints"] = j["hints"]
@@ -668,9 +668,10 @@ def cli_jobs(argv):
     ext = r["external"]
     for x in ext:
         print(f"external pid {x['pid']} {x['file'] or x['cwd']} ({x['program']}), {x.get('elapsed', 0) // 60} min")
-    for j in r["waiting"]: print(f"waiting  #{j['id']} {j['file']} ({j['binary']})")
+    note = lambda j: f", {j['note']}" if j.get("note") else ""
+    for j in r["waiting"]: print(f"waiting  #{j['id']} {j['file']} ({j['binary']}){note(j)}")
     if r["waiting_count"] > len(r["waiting"]): print(f"         ... {r['waiting_count'] - len(r['waiting'])} more waiting")
-    for j in r["finished"]: print(f"{j['status']:<8} #{j['id']} {j['file']} ({j['binary']}) {j.get('end', '')}")
+    for j in r["finished"]: print(f"{j['status']:<8} #{j['id']} {j['file']} ({j['binary']}) {j.get('end', '')}{note(j)}")
     if r.get("queue_eta"): print(f"queue ends about {r['queue_eta']['finish']}")
     if not (r["running"] or ext or r["waiting"] or r["finished"]): print("the queue is empty")
 
