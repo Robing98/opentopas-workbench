@@ -22,6 +22,8 @@ TRASH = "_trash"
 TOKEN = secrets.token_urlsafe(24)
 STATE = {"root": None, "cfg": {}, "lock": threading.Lock(), "jobs": [], "proc": None, "stop": False, "next_id": 1, "rev": 0}
 
+NOTE_REQUEUED = "re-queued after server restart"
+NOTE_ABORTED = "aborted: the server ended twice during this run"
 AWAKE_EVERY = 5   # seconds between two keep-awake steps while a job runs
 
 # ------------------------------------------------------------------ config
@@ -74,9 +76,19 @@ def load_jobs():
     try:
         with open(os.path.join(wb_dir(), "jobs.json")) as fh: STATE["jobs"] = json.load(fh)
     except (OSError, ValueError): STATE["jobs"] = []
+    # Waiting jobs keep waiting. The job that ran when the server ended runs once more; if the server ends again during
+    # that second attempt, the job is given up, so a run that takes the server down cannot loop.
+    changed = False
     for j in STATE["jobs"]:
-        if j["status"] in ("running", "queued"): j["status"] = "aborted"
+        if j["status"] != "running": continue
+        changed = True
+        if j.get("restarts", 0) >= 1:
+            j["status"] = "aborted"; j["note"] = NOTE_ABORTED
+        else:
+            j["status"] = "queued"; j["restarts"] = j.get("restarts", 0) + 1; j["note"] = NOTE_REQUEUED
+            for k in ("start", "t0"): j.pop(k, None)
     STATE["next_id"] = max([j["id"] for j in STATE["jobs"]] + [0]) + 1
+    if changed: save_jobs()   # the count must be on disk before the job starts again
 
 
 def save_jobs():
@@ -528,6 +540,7 @@ def run_job(job):
             while True:   # this thread is the only one that feeds the keep-awake heartbeat, so it must not block for the whole run
                 try: rc = proc.wait(timeout=AWAKE_EVERY); break
                 except subprocess.TimeoutExpired: tend_awake()
+        if STATE.get("closing"): return   # the server is ending: the record stays "running", so the next start runs the job again
         job["seconds"] = round(time.time() - t0)
         job["outputs"] = sorted(relp(os.path.join(out, f)) for f, mt in snapshot().items()
                                 if before.get(f) != mt and not f.lower().endswith((".stl", ".ply")))
@@ -540,10 +553,11 @@ def run_job(job):
     except Exception as e:  # report everything in the job record
         job["status"] = "failed"; job["error"] = str(e)
     finally:
-        with STATE["lock"]:
-            STATE["proc"] = None; STATE["stop"] = False; job["end"] = time.strftime("%Y-%m-%d %H:%M:%S"); save_jobs()
-        invalidate_cache(soft=True)
-        notify_job(job)
+        if not STATE.get("closing"):
+            with STATE["lock"]:
+                STATE["proc"] = None; STATE["stop"] = False; job["end"] = time.strftime("%Y-%m-%d %H:%M:%S"); save_jobs()
+            invalidate_cache(soft=True)
+            notify_job(job)
 
 
 def enqueue(files, binary, subdir, skip_existing):
@@ -1709,6 +1723,7 @@ def main(argv=None):
         if not a.no_browser: open_browser(url)
         srv.serve_forever()
     except KeyboardInterrupt:
+        STATE["closing"] = True   # set before the job is stopped, so run_job leaves its record untouched
         stop_current()
     finally:
         remove_server_file()

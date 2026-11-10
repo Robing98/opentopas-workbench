@@ -9,7 +9,7 @@ A local web UI for [OpenTOPAS](https://github.com/OpenTOPAS/OpenTOPAS) and TOPAS
 ## Features
 
 - **Files**: browse, edit, rename, copy, and trash files in a workspace folder. The editor highlights TOPAS syntax, checks it while you type (missing type prefix, unquoted strings, missing units, vector counts, missing `includeFile` targets), and suggests parameter names.
-- **Runs**: queue parameter files for one or more TOPAS installations. Progress bar with remaining time, live log with highlighted errors, stop button, optional output subfolder. Existing results are detected, also when the cases were run outside the workbench.
+- **Runs**: queue parameter files for one or more TOPAS installations. Progress bar with remaining time, live log with highlighted errors, stop button, optional output subfolder. Existing results are detected, also when the cases were run outside the workbench. The queue survives a restart of the workbench (see [Restart and Ctrl+C](#restart-and-ctrlc)).
 - **Overview**: every result in the workspace in one table, filtered by particle, energy, folder, or file-name tags. Beam data come from the parameter file that wrote the output. R80, BPW80, deviations to a reference (for example the case without filter), a Bragg-Kleeman range check, your own formula columns, CSV export, and an image gallery with full-screen view.
 - **Results**: plot TOPAS CSV scorer output and measured curves (PTW `.mcc`, IBA `.asc`, column files). Overlay curves with normalisation, log axis, drag zoom, hover read-out, and difference or ratio to a reference. Bragg peak metrics (R80, BPW80, D80-D20, ΔR80, filter BPW80). 2D and 3D binnings show as a heat map.
 - **Beam profile**: the monitor planes and 3D dose grids of a folder. x and y profiles (integrated or as a cut through the centroid, linear or logarithmic for the halo) and the 2D map per plane; the envelope, sigma, FWHM, centroid, or halo share along the beam line for several cases at once; energy spectra; lateral dose profiles at a depth picked with a slider, and sigma against depth. Every profile gets a Gaussian core fit (sigma, mean), FWHM, rms, the share outside 3 sigma, and a double Gaussian (core and halo sigma, halo share) where the profile has a halo.
@@ -57,6 +57,16 @@ The browser opens `http://localhost:8765`. Options: `--port`, `--no-browser`.
 On first start the workbench looks for TOPAS binaries in `~/.local/bin/topas4`, `~/Applications/TOPAS/OpenTOPAS-install/bin/topas`, `~/topas/topas/bin/topas`, and `topas` on `PATH`. To add or change one, open **Settings**. Environment variables such as `TOPAS_G4_DATA_DIR` go there too.
 
 Settings, job history, logs, and a cache of parsed files (`index.json`, safe to delete) live in `WORKSPACE/.workbench/`.
+
+## Restart and Ctrl+C
+
+The queue is kept in `WORKSPACE/.workbench/jobs.json` and continues when the workbench starts again, whether it was ended with Ctrl+C, by a closing terminal, or by a shutdown of WSL or the computer:
+
+- Waiting jobs keep waiting and start in their old order.
+- The job that ran when the workbench ended is queued again, once, and starts from the beginning. The queue shows "re-queued after server restart" next to it.
+- If the workbench ends a second time while that job runs, the job is marked "aborted" and the queue goes on with the next one. A run that takes the workbench down can therefore not repeat forever. Queue it again by hand when the cause is gone.
+
+To start with an empty queue, remove the waiting jobs in the Runs tab before you end the workbench, or right after the start.
 
 ## MCP server
 

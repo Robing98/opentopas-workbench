@@ -495,7 +495,7 @@ def test_http_file_cache_header(srv, ws):
     assert cache_control("") == "no-store" and cache_control("&v=1730000000.5").startswith("private")
 
 
-# ------------------------------------------------------------------ keep-awake during runs
+# ------------------------------------------------------------------ keep-awake during runs, restart, Ctrl+C
 class Clock:
     """Stands in for the time module in the server, so a run of minutes takes no real time."""
     def __init__(self): self.now = 1_000_000.0
@@ -529,7 +529,7 @@ def fake_runs(ws, monkeypatch):
     monkeypatch.setattr(wb.KeepAwake, "platform", staticmethod(lambda: "wsl"))
     monkeypatch.setattr(wb.subprocess, "Popen", P)
     monkeypatch.setattr(wb.subprocess, "run", lambda *a, **k: type("R", (), {"stdout": "C:\\ws\\.workbench\\keepawake.flag"})())
-    for key in ("proc", "stop"): monkeypatch.setitem(wb.STATE, key, None if key == "proc" else False)
+    for key in ("proc", "stop", "closing"): monkeypatch.setitem(wb.STATE, key, None if key == "proc" else False)
     wb.STATE["cfg"] = {"binaries": [{"name": "fake", "cmd": "/bin/true"}], "lang": "en", "toast": False}
     (ws / "a.txt").write_text("i:Run/NumberOfHistoriesInRun = 10\n")
     return seen
@@ -573,4 +573,64 @@ def test_keep_awake_switched_off_during_a_run_releases_the_helper(fake_runs, mon
     monkeypatch.setattr(wb, "tend_awake", tend)
     wb.worker_step()
     assert fake_runs.helpers[0].ended and not fake_runs.flag.exists()
+
+
+def write_jobs(ws, jobs):
+    (ws / ".workbench").mkdir(exist_ok=True)
+    (ws / ".workbench" / "jobs.json").write_text(json.dumps(jobs))
+
+
+def stored_jobs(ws):
+    return json.loads((ws / ".workbench" / "jobs.json").read_text())
+
+
+@pytest.mark.parametrize("n", [1, 3])
+def test_restart_keeps_waiting_jobs_waiting(ws, n):
+    write_jobs(ws, [{"id": 1, "file": "a.txt", "binary": "t", "status": "done"}] +
+                   [{"id": i, "file": "a.txt", "binary": "t", "status": "queued"} for i in range(2, 2 + n)])
+    wb.load_jobs()
+    assert [j["status"] for j in wb.STATE["jobs"]] == ["done"] + ["queued"] * n
+    assert all("note" not in j and "restarts" not in j for j in wb.STATE["jobs"]) and wb.STATE["next_id"] == n + 2
+
+
+def test_restart_requeues_the_running_job_once(ws):
+    write_jobs(ws, [{"id": 7, "file": "a.txt", "binary": "t", "status": "running", "start": "2026-01-01 10:00:00", "t0": 1.0},
+                    {"id": 8, "file": "b.txt", "binary": "t", "status": "queued"}])
+    wb.load_jobs()
+    first, second = wb.STATE["jobs"]
+    assert first["status"] == "queued" and first["restarts"] == 1 and first["note"] == "re-queued after server restart"
+    assert "start" not in first and second == {"id": 8, "file": "b.txt", "binary": "t", "status": "queued"}
+    # on disk at once: a server that ends again before the next save must still find the count
+    assert stored_jobs(ws)[0]["restarts"] == 1 and stored_jobs(ws)[0]["status"] == "queued"
+
+
+def test_restart_gives_up_a_job_that_was_requeued_before(ws):
+    write_jobs(ws, [{"id": 7, "file": "a.txt", "binary": "t", "status": "running"}, {"id": 8, "file": "b.txt", "binary": "t", "status": "queued"}])
+    wb.load_jobs()
+    wb.STATE["jobs"][0]["status"] = "running"; wb.save_jobs()   # the second attempt starts, then the server ends again
+    wb.load_jobs()
+    first, second = wb.STATE["jobs"]
+    assert first["status"] == "aborted" and first["restarts"] == 1 and first["note"].startswith("aborted: the server ended twice")
+    assert second["status"] == "queued" and stored_jobs(ws)[0]["status"] == "aborted"
+    wb.load_jobs()
+    assert wb.STATE["jobs"][0]["status"] == "aborted"   # and it stays so
+
+
+def test_restart_note_reaches_the_api_and_the_mcp_record(srv, ws):
+    from opentopas_workbench import mcp
+    write_jobs(ws, [{"id": 7, "file": "a.txt", "binary": "t", "status": "running"}])
+    wb.load_jobs()
+    job = call(srv + "/api/jobs")[1]["jobs"][0]
+    assert job["status"] == "queued" and job["restarts"] == 1 and job["note"] == "re-queued after server restart"
+    assert mcp.job_brief(job)["note"] == "re-queued after server restart" and mcp.job_brief(job)["restarts"] == 1
+
+
+def test_server_end_leaves_the_running_job_for_the_next_start(fake_runs, ws):
+    wb.STATE["jobs"] = queued(2)
+    wb.STATE["closing"] = True   # main() sets this before it stops the run
+    wb.worker_step()
+    assert [j["status"] for j in wb.STATE["jobs"]] == ["running", "queued"] and "end" not in wb.STATE["jobs"][0]
+    wb.STATE["closing"] = False; wb.STATE["proc"] = None
+    wb.load_jobs()
+    assert [j["status"] for j in wb.STATE["jobs"]] == ["queued", "queued"] and wb.STATE["jobs"][0]["restarts"] == 1
 
