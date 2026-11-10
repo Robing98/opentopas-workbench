@@ -25,6 +25,7 @@ STATE = {"root": None, "cfg": {}, "lock": threading.Lock(), "jobs": [], "proc": 
 NOTE_REQUEUED = "re-queued after server restart"
 NOTE_ABORTED = "aborted: the server ended twice during this run"
 AWAKE_EVERY = 5   # seconds between two keep-awake steps while a job runs
+CTRL_C_WINDOW = 3   # seconds in which a second Ctrl+C ends the server while a job runs
 
 # ------------------------------------------------------------------ config
 def wb_dir(): return os.path.join(STATE["root"], ".workbench")
@@ -1688,6 +1689,18 @@ def remove_server_file():
         pass
 
 
+def ctrl_c_ends(now):
+    """Whether this Ctrl+C ends the server. While a job runs, the first one only asks for a second one within
+    CTRL_C_WINDOW seconds, since an accidental Ctrl+C would cost the progress of the run. A signal from outside
+    (kill, a closing terminal) and a server without a terminal end at once."""
+    try: tty = sys.stdin.isatty()
+    except (AttributeError, ValueError): tty = False
+    if STATE.get("term") or STATE["proc"] is None or not tty: return True
+    if now - STATE.get("ctrl_c", -1e9) <= CTRL_C_WINDOW: return True
+    STATE["ctrl_c"] = now
+    return False
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] in (["mcp"], ["enqueue"], ["jobs"]):
@@ -1716,12 +1729,18 @@ def main(argv=None):
     print(f"OpenTOPAS Workbench {VERSION}\n  workspace: {STATE['root']}\n  open:      {url}\n  stop:      Ctrl+C", flush=True)
     write_server_file(url)
     # SIGTERM (kill) and SIGHUP (a closing terminal) end like Ctrl+C, so the running job is stopped and server.json goes away
-    def on_term(*_): raise KeyboardInterrupt
+    def on_term(*_): STATE["term"] = True; raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, on_term)
     if hasattr(signal, "SIGHUP"): signal.signal(signal.SIGHUP, on_term)
     try:
         if not a.no_browser: open_browser(url)
-        srv.serve_forever()
+        while True:
+            try:
+                srv.serve_forever(); break
+            except KeyboardInterrupt:
+                if ctrl_c_ends(time.time()): raise
+                print(f"A job is running. Press Ctrl+C again within {CTRL_C_WINDOW} s to stop it and end the workbench. "
+                      "It runs again at the next start; waiting jobs stay in the queue.", flush=True)
     except KeyboardInterrupt:
         STATE["closing"] = True   # set before the job is stopped, so run_job leaves its record untouched
         stop_current()

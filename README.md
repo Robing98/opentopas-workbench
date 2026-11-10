@@ -68,6 +68,8 @@ The queue is kept in `WORKSPACE/.workbench/jobs.json` and continues when the wor
 
 To start with an empty queue, remove the waiting jobs in the Runs tab before you end the workbench, or right after the start.
 
+While a job runs, the first Ctrl+C in the terminal only prints a warning, and a second one within 3 seconds ends the workbench and stops the job. With no job running, one Ctrl+C is enough. A closing terminal and `kill` end the workbench at once.
+
 ## MCP server
 
 `opentopas-workbench mcp` lets an MCP client such as Claude Code or Claude Desktop drive the workbench: read cases and results, create cases with a generator, queue and stop runs, and read logs. It is a local stdio server (one JSON-RPC message per line) and a thin layer over the HTTP API of a running workbench, so runs it queues show in the Runs tab like any other.

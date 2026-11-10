@@ -14,6 +14,7 @@
 - A workbench now also ends cleanly, stopping the running job and removing `server.json`, when its terminal is closed (SIGHUP).
 - Fix: keep awake ended two minutes into every run. The heartbeat for the Windows helper was not written while a job ran, so the helper released its power requests and a laptop could go to sleep during a long run. The helper now stays for the whole queue and ends when the queue is empty; `.workbench/keepawake.log` then gets a line "stopped by the workbench".
 - Restart: the queue continues after a restart of the workbench. Waiting jobs keep waiting; before, they were marked "aborted" together with the running job. The job that ran when the workbench ended is queued again once, with the note "re-queued after server restart" in the queue, in `opentopas-workbench jobs`, and in the MCP tools (new job fields `restarts` and `note`). If the workbench ends again during that second attempt, the job is marked "aborted".
+- Ctrl+C: while a job runs, the first Ctrl+C only warns, and a second one within 3 seconds ends the workbench. A job stopped this way runs again at the next start. A closing terminal and `kill` end the workbench at once, as before.
 - Fixes: `rifi_kernel_fit.py` also runs with numpy older than 2.0. It called `np.trapezoid`, which exists only from numpy 2.0 on.
 
 ## 0.5.0

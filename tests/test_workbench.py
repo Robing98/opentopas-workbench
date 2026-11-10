@@ -634,3 +634,19 @@ def test_server_end_leaves_the_running_job_for_the_next_start(fake_runs, ws):
     wb.load_jobs()
     assert [j["status"] for j in wb.STATE["jobs"]] == ["queued", "queued"] and wb.STATE["jobs"][0]["restarts"] == 1
 
+
+def test_first_ctrl_c_during_a_run_only_warns(ws, monkeypatch):
+    monkeypatch.setattr(wb.sys, "stdin", type("Tty", (), {"isatty": lambda self: True})())
+    for key in ("ctrl_c", "term"): monkeypatch.delitem(wb.STATE, key, raising=False)
+    monkeypatch.setitem(wb.STATE, "proc", None)
+    assert wb.ctrl_c_ends(100.0)                 # nothing runs: end at once
+    wb.STATE["proc"] = object()
+    assert not wb.ctrl_c_ends(200.0)             # a run would be lost: ask for a second one
+    assert wb.ctrl_c_ends(202.5)                 # second one in time
+    wb.STATE.pop("ctrl_c")
+    assert not wb.ctrl_c_ends(300.0) and not wb.ctrl_c_ends(310.0)   # too late counts as a first one again
+    wb.STATE["term"] = True
+    assert wb.ctrl_c_ends(400.0)                 # kill or a closing terminal never waits
+    wb.STATE["term"] = False; wb.STATE.pop("ctrl_c")
+    monkeypatch.setattr(wb.sys, "stdin", type("Pipe", (), {"isatty": lambda self: False})())
+    assert wb.ctrl_c_ends(500.0)                 # no terminal, nobody to ask
