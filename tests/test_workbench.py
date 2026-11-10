@@ -493,3 +493,84 @@ def test_http_file_cache_header(srv, ws):
     def cache_control(q):
         with urllib.request.urlopen(srv + "/file?p=a.png&token=" + wb.TOKEN + q) as r: return r.headers["Cache-Control"]
     assert cache_control("") == "no-store" and cache_control("&v=1730000000.5").startswith("private")
+
+
+# ------------------------------------------------------------------ keep-awake during runs
+class Clock:
+    """Stands in for the time module in the server, so a run of minutes takes no real time."""
+    def __init__(self): self.now = 1_000_000.0
+    def time(self): return self.now
+    def sleep(self, s): self.now += s
+    def strftime(self, fmt): return "2026-01-01 00:00:00"
+
+
+@pytest.fixture
+def fake_runs(ws, monkeypatch):
+    """A WSL workbench whose TOPAS runs and keep-awake helper are fakes on a fake clock. Every run lasts 8 minutes."""
+    clock = Clock(); flag = ws / ".workbench" / "keepawake.flag"
+    seen = type("Seen", (), {"helpers": [], "runs": [], "ages": [], "clock": clock, "flag": flag})()
+    class P:
+        def __init__(self, args, **kw):
+            self.args, self.pid, self.ended = args, 4242, False
+            self.end = clock.now + 480
+            (seen.helpers if args[0] == "powershell.exe" else seen.runs).append(self)
+        def poll(self): return 0 if self.ended else None
+        def terminate(self): self.ended = True
+        def wait(self, timeout=None):
+            # the real helper ends once the heartbeat file is older than 120 s; record its age whenever the run is looked at
+            while True:
+                seen.ages.append(clock.now - float(flag.read_text()) if flag.exists() else float("inf"))
+                if clock.now >= self.end: return 0
+                step = self.end - clock.now if timeout is None else timeout
+                clock.now += step
+                if timeout is not None: raise wb.subprocess.TimeoutExpired(self.args, timeout)
+    monkeypatch.setattr(wb, "time", clock)
+    monkeypatch.setattr(wb, "AWAKE", wb.KeepAwake())
+    monkeypatch.setattr(wb.KeepAwake, "platform", staticmethod(lambda: "wsl"))
+    monkeypatch.setattr(wb.subprocess, "Popen", P)
+    monkeypatch.setattr(wb.subprocess, "run", lambda *a, **k: type("R", (), {"stdout": "C:\\ws\\.workbench\\keepawake.flag"})())
+    for key in ("proc", "stop"): monkeypatch.setitem(wb.STATE, key, None if key == "proc" else False)
+    wb.STATE["cfg"] = {"binaries": [{"name": "fake", "cmd": "/bin/true"}], "lang": "en", "toast": False}
+    (ws / "a.txt").write_text("i:Run/NumberOfHistoriesInRun = 10\n")
+    return seen
+
+
+def queued(n):
+    return [{"id": i, "file": "a.txt", "binary": "fake", "status": "queued"} for i in range(1, n + 1)]
+
+
+def test_keep_awake_heartbeat_stays_fresh_during_a_long_run(fake_runs):
+    wb.STATE["jobs"] = queued(1)
+    wb.worker_step()
+    assert wb.STATE["jobs"][0]["status"] == "done" and wb.STATE["jobs"][0]["seconds"] == 480
+    # the helper looks every 15 s and ends at 120 s, so the file must never get near that age
+    assert len(fake_runs.ages) > 10 and max(fake_runs.ages) < 60
+    assert len(fake_runs.helpers) == 1 and wb.AWAKE.active()
+
+
+@pytest.mark.parametrize("n", [1, 3])
+def test_keep_awake_holds_for_the_whole_queue_and_stops_when_it_is_empty(fake_runs, n):
+    wb.STATE["jobs"] = queued(n)
+    for _ in range(n):
+        wb.worker_step()
+        fake_runs.clock.sleep(0.5)
+    assert [j["status"] for j in wb.STATE["jobs"]] == ["done"] * n and len(fake_runs.runs) == n
+    assert len(fake_runs.helpers) == 1 and wb.AWAKE.active() and max(fake_runs.ages) < 60   # one helper for the busy period
+    wb.worker_step()   # the queue is empty now
+    assert not wb.AWAKE.active() and fake_runs.helpers[0].ended and not fake_runs.flag.exists()
+    wb.worker_step()   # still empty: nothing more happens
+    assert len(fake_runs.helpers) == 1
+    assert (fake_runs.flag.parent / "keepawake.log").read_text().splitlines() == ["2026-01-01 00:00:00 stopped by the workbench"]
+
+
+def test_keep_awake_switched_off_during_a_run_releases_the_helper(fake_runs, monkeypatch):
+    wb.STATE["jobs"] = queued(1)
+    real = wb.tend_awake; calls = []
+    def tend():
+        calls.append(1)
+        if len(calls) == 3: wb.STATE["cfg"]["keep_awake"] = False
+        real()
+    monkeypatch.setattr(wb, "tend_awake", tend)
+    wb.worker_step()
+    assert fake_runs.helpers[0].ended and not fake_runs.flag.exists()
+

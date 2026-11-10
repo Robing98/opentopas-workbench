@@ -15,7 +15,7 @@ A local web UI for [OpenTOPAS](https://github.com/OpenTOPAS/OpenTOPAS) and TOPAS
 - **Beam profile**: the monitor planes and 3D dose grids of a folder. x and y profiles (integrated or as a cut through the centroid, linear or logarithmic for the halo) and the 2D map per plane; the envelope, sigma, FWHM, centroid, or halo share along the beam line for several cases at once; energy spectra; lateral dose profiles at a depth picked with a slider, and sigma against depth. Every profile gets a Gaussian core fit (sigma, mean), FWHM, rms, the share outside 3 sigma, and a double Gaussian (core and halo sigma, halo share) where the profile has a halo.
 - **Export**: plots as PNG or SVG in a print style, plotted data as CSV, results and images as ZIP. Plot settings can be saved as named views.
 - **Variations**: copy a parameter file with one parameter set to a list of values; output names get a matching suffix.
-- **Notifications and keep-awake**: browser or Windows notification when runs fail or the queue is done; system sleep is blocked while runs are queued, optionally the display stays on as well (see [Long runs on Windows laptops](#long-runs-on-windows-laptops)).
+- **Notifications and keep-awake**: browser or Windows notification when runs fail or the queue is done; system sleep is blocked while runs are queued or running, optionally the display stays on as well (see [Long runs on Windows laptops](#long-runs-on-windows-laptops)).
 - **Generators**: plugins that write parameter sets from a form.
   - `pencil_beam`: any particle from protons to oxygen, an energy list, phantom material, depth dose, and an optional 2D map. Sets `EMRangeMax` for light ions above the default table range.
   - `ripple_filter`: depth-dose studies with 1D, crossed, and 2D ripple filters (pins and pyramids written as binary STL, plus 1D ridges with the same thickness distribution as a 2D filter).
@@ -168,4 +168,4 @@ To keep runs going:
 
 3. Keep the laptop on mains power with the lid open, or set the lid action for mains power to **Do nothing**.
 
-While a run is queued, `powercfg /requests` lists `powershell.exe` under SYSTEM and EXECUTION, and under DISPLAY with the option on.
+The workbench holds the requests for the whole queue, from the first waiting job until the last run has ended. While a run is queued or running, `powercfg /requests` lists `powershell.exe` under SYSTEM and EXECUTION, and under DISPLAY with the option on.

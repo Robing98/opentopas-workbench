@@ -12,6 +12,7 @@
 - Fix: `--port 0` printed and stored port 0 instead of the port the system chose.
 - Fix: on macOS the workbench could take half a minute to start, waiting for a reverse DNS lookup of 127.0.0.1.
 - A workbench now also ends cleanly, stopping the running job and removing `server.json`, when its terminal is closed (SIGHUP).
+- Fix: keep awake ended two minutes into every run. The heartbeat for the Windows helper was not written while a job ran, so the helper released its power requests and a laptop could go to sleep during a long run. The helper now stays for the whole queue and ends when the queue is empty; `.workbench/keepawake.log` then gets a line "stopped by the workbench".
 - Fixes: `rifi_kernel_fit.py` also runs with numpy older than 2.0. It called `np.trapezoid`, which exists only from numpy 2.0 on.
 
 ## 0.5.0

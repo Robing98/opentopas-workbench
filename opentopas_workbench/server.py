@@ -22,6 +22,8 @@ TRASH = "_trash"
 TOKEN = secrets.token_urlsafe(24)
 STATE = {"root": None, "cfg": {}, "lock": threading.Lock(), "jobs": [], "proc": None, "stop": False, "next_id": 1, "rev": 0}
 
+AWAKE_EVERY = 5   # seconds between two keep-awake steps while a job runs
+
 # ------------------------------------------------------------------ config
 def wb_dir(): return os.path.join(STATE["root"], ".workbench")
 
@@ -430,6 +432,11 @@ class KeepAwake:
         if self.proc is not None and self.proc.poll() is None:
             try: self.proc.terminate()
             except OSError: pass
+            if self.flag:   # the Windows helper is ended before it can write its own last line, so the log gets it from here
+                try:
+                    with open(os.path.join(os.path.dirname(self.flag), "keepawake.log"), "a") as fh:
+                        fh.write(time.strftime("%Y-%m-%dT%H:%M:%S") + " stopped by the workbench\n")
+                except OSError: pass
         self.proc = None
 
     def status(self):
@@ -466,18 +473,31 @@ def notify_job(job):
         windows_toast("OpenTOPAS Workbench", f"Queue finished, last run: {name} ({job['status']})")
 
 
+def tend_awake():
+    """One keep-awake step: hold the helper while a job waits or runs, release it once the queue is empty.
+
+    The Windows helper ends by itself when the heartbeat file gets older than 120 s, so this has to be called
+    every few seconds for as long as the queue is busy, also from inside a run."""
+    busy = STATE["proc"] is not None or any(j["status"] in ("queued", "running") for j in STATE["jobs"])
+    if busy and STATE["cfg"].get("keep_awake", True): AWAKE.start(STATE["cfg"].get("keep_display", False))
+    elif AWAKE.active() or AWAKE.flag: AWAKE.stop()
+
+
+def worker_step():
+    """Starts the next waiting job, if none runs, and returns when it has ended."""
+    tend_awake()
+    with STATE["lock"]:
+        if STATE["proc"] is not None: return
+        job = next((j for j in STATE["jobs"] if j["status"] == "queued"), None)
+        if job is None: return
+        job["status"] = "running"; job["start"] = time.strftime("%Y-%m-%d %H:%M:%S"); save_jobs()
+    run_job(job)
+
+
 def job_worker():
     while True:
         time.sleep(0.5)
-        busy = STATE["proc"] is not None or any(j["status"] == "queued" for j in STATE["jobs"])
-        if busy and STATE["cfg"].get("keep_awake", True): AWAKE.start(STATE["cfg"].get("keep_display", False))
-        elif AWAKE.active() or AWAKE.flag: AWAKE.stop()
-        with STATE["lock"]:
-            if STATE["proc"] is not None: continue
-            job = next((j for j in STATE["jobs"] if j["status"] == "queued"), None)
-            if job is None: continue
-            job["status"] = "running"; job["start"] = time.strftime("%Y-%m-%d %H:%M:%S"); save_jobs()
-        run_job(job)
+        worker_step()
 
 
 def run_job(job):
@@ -505,7 +525,9 @@ def run_job(job):
             proc = subprocess.Popen([os.path.expanduser(binary["cmd"]), param], cwd=out, stdout=log, stderr=subprocess.STDOUT,
                                     env=env, start_new_session=True)
             with STATE["lock"]: STATE["proc"] = proc
-            rc = proc.wait()
+            while True:   # this thread is the only one that feeds the keep-awake heartbeat, so it must not block for the whole run
+                try: rc = proc.wait(timeout=AWAKE_EVERY); break
+                except subprocess.TimeoutExpired: tend_awake()
         job["seconds"] = round(time.time() - t0)
         job["outputs"] = sorted(relp(os.path.join(out, f)) for f, mt in snapshot().items()
                                 if before.get(f) != mt and not f.lower().endswith((".stl", ".ply")))
