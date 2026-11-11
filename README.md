@@ -162,7 +162,7 @@ In `tools/` (need numpy, scipy, matplotlib):
 
 - `rifi_kernel_fit.py FOLDER` fits the filter kernel from depth doses with and without filter: the curve with filter is the curve without, convolved with the distribution of water equivalent thickness across one filter period. It reports mean thickness and spread per energy for a Gaussian, uniform, pyramid, and free-form kernel and compares them with the kernel computed from the filter geometry in the TOPAS parameter file. `--show-kernel --stl FILE` analyses the STL of a printed filter without any curves.
 - `rifi_shapes_figure.py shapes` and `rifi_shapes_figure.py convolution WITHOUT WITH` draw the relation between filter shape and kernel, and the depth dose with filter as a sum of shifted copies.
-- `topas2matrad.py` builds a matRad machine file from TOPAS depth doses.
+- `topas2matrad.py` builds a matRad machine file from TOPAS depth doses. With `--filter-distance` the spot broadening of a ripple filter grows with depth as an angular spread at that distance and is added to the lateral kernels; `--filter-wet MIN MAX` with `--open-idd` weights it with the dose of each filter thickness, so the spot widens towards the peak and narrows at its distal edge, at most until the kernel of the template is used up. With a range shifter in the beam, `--sigma-base COLUMN` names the spot size with the range shifter and without the filter, so that only the filter's own share grows from the filter's distance; `--base-distance CM` lets the range shifter's share grow from its own distance.
 
 ## Long runs on Windows laptops
 
