@@ -232,6 +232,7 @@ def job_brief(j, full=False):
     out = {k: j[k] for k in keys if j.get(k) not in (None, "")}
     if full:
         if j.get("hints"): out["hints"] = j["hints"]
+        if j.get("g4_hidden"): out["g4_hidden"] = j["g4_hidden"]
         if j.get("outputs"): out["outputs"] = j["outputs"][:20]
     return out
 

@@ -650,3 +650,200 @@ def test_first_ctrl_c_during_a_run_only_warns(ws, monkeypatch):
     wb.STATE["term"] = False; wb.STATE.pop("ctrl_c")
     monkeypatch.setattr(wb.sys, "stdin", type("Pipe", (), {"isatty": lambda self: False})())
     assert wb.ctrl_c_ends(500.0)                 # no terminal, nobody to ask
+
+
+# ------------------------------------------------------------------ Geant4 warnings
+def g4_block(code="Run10035", origin="G4MTRunManager::InitializeEventLoop()", text="Event modulo is reduced to 1 to distribute events to all threads.",
+             end="*** This is just a warning message. ***", mark="WWWW"):
+    return (f"\n-------- {mark} ------- G4Exception-START -------- {mark} -------\n*** G4Exception : {code}\n      issued by : {origin}\n"
+            f"{text}\n{end}\n-------- {mark} -------- G4Exception-END --------- {mark} -------\n\n")
+
+
+G4_KEPT = [
+    g4_block(code="GeomNav1002", origin="G4Navigator::ComputeStep()", text="Track stuck or not moving."),          # another warning
+    g4_block(code="Run0035", origin="G4RunManager::Initialize()", text="Geometry is not set.",
+             end="*** Fatal Exception *** core dump ***", mark="EEEE"),                                              # an error
+    g4_block(end="*** Fatal Exception *** core dump ***", mark="EEEE"),                                             # the code, but not as a warning
+    g4_block(end="*** Event Must Be Aborted ***"),                                                                  # the code, another severity
+    g4_block(origin="TsSequenceManager::Run()"),                                                                    # the code, another origin
+    g4_block(text="Event modulo is reduced to 1 to distribute events to all threads.\nG4WT3 > a line of a worker"),  # foreign line inside
+]
+
+
+def g4_filtered(text, chunk=None):
+    f = wb.G4Filter(); data = text.encode()
+    parts = [data] if chunk is None else [data[i:i + chunk] for i in range(0, len(data), chunk)]
+    return (b"".join(f.feed(p) for p in parts) + f.finish()).decode(), f.counts
+
+
+def test_g4_filter_drops_only_the_known_warning():
+    text = "head\n" + g4_block() + "Run 1 done\n" + "".join(k + f"line {i}\n" for i, k in enumerate(G4_KEPT)) + g4_block() + g4_block() + "tail\n"
+    out, counts = g4_filtered(text)
+    assert counts == {"Run10035": 3}
+    assert out == "head\nRun 1 done\n" + "".join(k + f"line {i}\n" for i, k in enumerate(G4_KEPT)) + "tail\n"
+    assert "Fatal Exception" in out and "GeomNav1002" in out
+
+
+@pytest.mark.parametrize("n", [1, 3])
+def test_g4_filter_counts(n):
+    out, counts = g4_filtered("a\n" + g4_block() * n + "b\n")
+    assert out == "a\nb\n" and counts == {"Run10035": n}
+
+
+def test_g4_filter_leaves_a_log_without_blocks_alone():
+    text = "a\n\n\nb\r\n\nno line end"
+    assert g4_filtered(text) == (text, {})
+
+
+@pytest.mark.parametrize("chunk", [1, 2, 3, 7, 64, 100, 257])
+def test_g4_filter_block_split_across_chunks(chunk):
+    text = "head\n" + g4_block() + "mid\n" + G4_KEPT[0] + G4_KEPT[5] + g4_block() + "tail"
+    assert g4_filtered(text, chunk) == g4_filtered(text)
+    assert g4_filtered(text, chunk)[1] == {"Run10035": 2}
+
+
+def test_g4_filter_keeps_an_unfinished_block():
+    cut = g4_block().split("*** This is just")[0]
+    assert g4_filtered("a\n" + cut) == ("a\n" + cut, {})                     # the stream ended inside the block
+    out, counts = g4_filtered("a\n" + cut + g4_block() + "b\n")              # a new block starts before the first one ended
+    assert out == "a\n" + cut + "\nb\n" and counts == {"Run10035": 1}   # the empty line before it was already taken for the open block
+    long = g4_block(text="\n".join(f"Event modulo is reduced to {i} to distribute events to all threads." for i in range(40)))
+    assert g4_filtered(long) == (long, {})                                   # too long to be the known warning
+
+
+def test_g4_filter_passes_a_long_line_without_end(monkeypatch):
+    monkeypatch.setattr(wb, "G4_LINE_MAX", 100)
+    f = wb.G4Filter()
+    assert f.feed(b"x" * 101) == b"x" * 101 and f.finish() == b""
+
+
+def test_g4_summary_names_code_and_count():
+    assert wb.g4_summary({}) == ""
+    assert wb.g4_summary({"Run10035": 2624}) == "# Geant4 warning Run10035 (Event modulo reduced to 1) hidden 2624 times\n"
+    assert wb.g4_summary({"Run10035": 2624}, "de") == "# Geant4-Warnung Run10035 (Event modulo reduced to 1) 2624-mal ausgeblendet\n"
+
+
+@pytest.fixture
+def topas_stub(ws, monkeypatch):
+    """A program that prints what a TOPAS run with three short runs prints, and one queued job for it."""
+    body = "Run 0 starts\n" + g4_block() * 3 + G4_KEPT[0] + "History: 10\nExecution done\n"
+    (ws / "out.txt").write_text(body)
+    stub = ws / "stub.sh"; stub.write_text(f'#!/bin/sh\ncat "{ws / "out.txt"}"\n'); stub.chmod(0o755)
+    (ws / "a.txt").write_text("i:Run/NumberOfHistoriesInRun = 10\n")
+    for key in ("proc", "stop", "closing"): monkeypatch.setitem(wb.STATE, key, None if key == "proc" else False)
+    monkeypatch.setattr(wb, "AWAKE", wb.KeepAwake())
+    wb.STATE["cfg"] = {"binaries": [{"name": "stub", "cmd": str(stub)}], "lang": "en", "toast": False, "keep_awake": False}
+    wb.STATE["jobs"] = [{"id": 1, "file": "a.txt", "binary": "stub", "status": "queued"}]
+    return body
+
+
+def test_run_writes_a_filtered_log_with_summary_and_count(topas_stub, ws, srv):
+    wb.worker_step()
+    job = wb.STATE["jobs"][0]
+    log = (ws / ".workbench" / "logs" / "job00001.log").read_text()
+    head, _, rest = log.partition("# cwd: " + str(ws) + "\n")
+    assert rest == "Run 0 starts\n" + G4_KEPT[0] + "History: 10\nExecution done\n# Geant4 warning Run10035 (Event modulo reduced to 1) hidden 3 times\n"
+    assert job["status"] == "done" and job["g4_hidden"] == {"Run10035": 3}
+    assert not any("Run10035" in h for h in job["hints"])
+    from opentopas_workbench import mcp
+    shown = call(srv + "/api/jobs")[1]["jobs"][0]
+    assert shown["g4_hidden"] == {"Run10035": 3} and mcp.job_brief(shown, full=True)["g4_hidden"] == {"Run10035": 3}
+    assert call(srv + "/api/log?p=.workbench/logs/job00001.log")[1]["text"].endswith("hidden 3 times\n")
+
+
+def test_run_with_the_filter_off_writes_the_raw_log(topas_stub, ws, srv):
+    assert call(srv + "/api/config", {"g4_filter": False})[1]["cfg"]["g4_filter"] is False
+    wb.STATE["jobs"][0]["g4_hidden"] = {"Run10035": 9}   # left from an earlier, filtered attempt of the same job
+    wb.worker_step()
+    job = wb.STATE["jobs"][0]
+    log = (ws / ".workbench" / "logs" / "job00001.log").read_text()
+    assert log.endswith(topas_stub) and log.count("Run10035") == 3 and job["status"] == "done" and "g4_hidden" not in job
+    assert call(srv + "/api/log?p=.workbench/logs/job00001.log")[1]["text"].count("Run10035") == 3
+    assert call(srv + "/api/config", {"g4_filter": True})[1]["cfg"]["g4_filter"] is True
+    shown = call(srv + "/api/log?p=.workbench/logs/job00001.log")[1]["text"]                         # an older raw log, shown filtered
+    assert "G4Exception : Run10035" not in shown and "GeomNav1002" in shown and shown.endswith("hidden 3 times\n")
+
+
+def test_filter_setting_defaults_to_on_and_is_stored(ws):
+    wb.load_cfg()
+    assert wb.STATE["cfg"]["g4_filter"] is True and wb.g4_enabled()
+    wb.STATE["cfg"]["g4_filter"] = False; wb.save_cfg(); wb.load_cfg()
+    assert wb.STATE["cfg"]["g4_filter"] is False and not wb.g4_enabled()
+
+
+def test_log_tail_of_an_old_log_reaches_past_the_warnings(ws):
+    log = ws / "old.log"
+    log.write_text("# head\nRun 0 starts\n" + g4_block() * 400 + "Execution done\n")   # about 120 kB of warnings
+    assert wb.log_tail(str(log)) == "# head\nRun 0 starts\nExecution done\n# Geant4 warning Run10035 (Event modulo reduced to 1) hidden 400 times\n"
+    wb.STATE["cfg"]["g4_filter"] = False
+    assert len(wb.log_tail(str(log))) == wb.LOG_TAIL and "Run 0 starts" not in wb.log_tail(str(log))
+
+
+def test_g4_filter_keeps_every_other_byte():
+    assert g4_filtered(g4_block().replace("\n", "\r\n") + "b\r\n") == ("b\r\n", {"Run10035": 1})       # Windows line ends
+    assert g4_filtered("a\n  \t\n" + g4_block().strip("\n") + "\n   \nb\n")[0] == "a\n  \t\n   \nb\n"   # only empty lines go with a block
+    task = g4_block(origin="G4TaskRunManager::InitializeEventLoop()", text="Event modulo is reduced to 1 (was 3) to distribute events to all threads.")
+    assert g4_filtered("a\n" + task + "b\n") == ("a\nb\n", {"Run10035": 1})                             # the wording of the task run manager
+
+
+@pytest.mark.parametrize("chunk", [None, 1, 37, 150, 4096])
+def test_g4_filter_long_line_before_a_block(chunk, monkeypatch):
+    monkeypatch.setattr(wb, "G4_LINE_MAX", 100)
+    text = "x" * 150 + g4_block() + "next\n" + "y" * 300 + "\n" + G4_KEPT[0] + "-------- WWWW ------- G4Exception-START -------- WWWW -------\n" + "z" * 300 + "\nend"
+    out, counts = g4_filtered(text, chunk)
+    assert out == text.replace(g4_block(), "\n") and counts == {"Run10035": 1}   # the line end of the long line stays
+
+
+def test_log_pump_reads_on_when_the_log_cannot_be_written(topas_stub, ws, monkeypatch):
+    """A log that cannot be written must not end the run: the program still gets rid of all its output and ends by itself."""
+    stub = ws / "stub.sh"
+    stub.write_text(f'#!/bin/sh\ni=0\nwhile [ $i -lt 300 ]; do cat "{ws / "out.txt"}"; i=$((i+1)); done\necho finished > "{ws / "finished"}"\n')
+    class Full:
+        def __init__(self, fh): self.fh = fh
+        def write(self, data):
+            if b"Run 0" in data: raise OSError(28, "No space left on device")
+            return self.fh.write(data)
+        def __getattr__(self, k): return getattr(self.fh, k)
+        def __enter__(self): return self
+        def __exit__(self, *a): self.fh.close()
+    real = open
+    monkeypatch.setattr(wb, "open", lambda p, *a, **k: Full(real(p, *a, **k)) if str(p).endswith("job00001.log") and "wb" in a else real(p, *a, **k), raising=False)
+    wb.worker_step()
+    job = wb.STATE["jobs"][0]
+    assert (ws / "finished").exists() and job["status"] == "done" and job["rc"] == 0   # about 220 kB of output, more than a pipe holds
+    assert "No space left" in job["log_error"]
+
+
+def test_log_keeps_the_output_when_the_filter_fails(topas_stub, ws, monkeypatch):
+    (ws / "out.txt").write_text("first\n" + g4_block() + "second\n")
+    def broken(self, data): raise RuntimeError("boom")
+    monkeypatch.setattr(wb.G4Filter, "feed", broken)
+    wb.worker_step()
+    job = wb.STATE["jobs"][0]
+    log = (ws / ".workbench" / "logs" / "job00001.log").read_text()
+    assert "first\n" + g4_block() + "second\n" in log and job["status"] == "done"
+    assert job["log_error"] == "filter: boom" and "g4_hidden" not in job
+
+
+def test_log_pump_counts_nothing_after_the_summary(ws):
+    """Output that arrives after the queue went on is thrown away, so the job field cannot differ from the line in the log."""
+    r, w = os.pipe(); job = {}
+    with open(ws / "pump.log", "wb") as log:
+        pump = wb.LogPump(os.fdopen(r, "rb", 0), log, wb.G4Filter(), job)
+        pump.end()
+        os.write(w, g4_block().encode() + b"late\n"); os.close(w)
+        pump.start(); pump.join(10)
+    assert not pump.is_alive() and job == {} and (ws / "pump.log").read_bytes() == b""
+
+
+def test_summary_starts_on_its_own_line(topas_stub, ws):
+    (ws / "out.txt").write_text(g4_block() + "no line end")
+    wb.worker_step()
+    log = (ws / ".workbench" / "logs" / "job00001.log").read_text()
+    assert log.endswith("no line end\n# Geant4 warning Run10035 (Event modulo reduced to 1) hidden 1 times\n")
+
+
+def test_log_tail_that_begins_inside_a_block(ws):
+    log = ws / "old.log"
+    log.write_text("# head\n" + g4_block() * 3000 + "Execution done\n")   # more warnings than the window reads
+    assert log.stat().st_size > wb.LOG_WINDOW and wb.log_tail(str(log)).startswith("Execution done\n# Geant4 warning Run10035 (Event modulo reduced to 1) hidden 1")
