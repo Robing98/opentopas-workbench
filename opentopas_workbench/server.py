@@ -208,14 +208,151 @@ def lint(text, base_dir=None):
     return issues
 
 
-def total_histories(text):
-    """Sum of i:So/*/NumberOfHistoriesInRun, None if not set in this file."""
-    vals = [int(v) for v in re.findall(r"^\s*i:So/[^/]+/NumberOfHistoriesInRun\s*=\s*(\d+)", text, re.M)]
-    return sum(vals) if vals else None
+# ------------------------------------------------------------------ run plan: histories and runs of an input
+TIME_MS = {"s": 1e3, "ms": 1.0, "us": 1e-3, "mus": 1e-3, "ns": 1e-6, "min": 6e4, "h": 3.6e6}
+MAX_RUNS = 200_000   # sequential times up to which the histories of every run are added up
+PLAN_HINT_RE = re.compile(r"includeFile|Tf/|PhaseSpace", re.I)
+HIST_LITERAL_RE = re.compile(r"^\s*i:So/[^/]+/NumberOfHistoriesInRun\s*=\s*(\d+)\s*(?:#.*)?$", re.M | re.I)
+
+
+def param_map(text, base_dir=None, depth=0):
+    """Parameters of a file and of the files it includes, as {lower-case name: value text}. TOPAS reads the included
+    file first, so the including file wins; names do not depend on case."""
+    out = {}
+    if base_dir is not None and depth < 6:
+        for _, _, rel in includes(text, base_dir):
+            if rel is None: continue
+            try:
+                p = ws_path(rel)
+                with open(p, errors="replace") as fh: out.update(param_map(fh.read(TXT_MAX), os.path.dirname(p), depth + 1))
+            except (OSError, ValueError):
+                pass
+    for raw in text.splitlines():
+        m = PARAM_RE.match(raw.split("#", 1)[0])
+        if m and m.group(1): out[m.group(2).lower()] = m.group(3)
+    return out
+
+
+def _vector(val):
+    """Numbers and unit of a TOPAS vector value 'n v1 v2 ... [unit]', or (None, None)."""
+    toks = (val or "").split()
+    if not toks or not toks[0].isdigit(): return None, None
+    n = int(toks[0]); nums = []
+    for tok in toks[1:1 + n]:
+        v = _num(tok)
+        if v is None: return None, None
+        nums.append(v)
+    return (nums, toks[1 + n] if len(toks) > 1 + n else "") if len(nums) == n else (None, None)
+
+
+def _time_ms(val):
+    toks = (val or "").split()
+    v = _num(toks[0]) if toks else None
+    return None if v is None or len(toks) != 2 or toks[1] not in TIME_MS else v * TIME_MS[toks[1]]
+
+
+def phsp_histories(name, base_dir, original=False):
+    """Histories of a TOPAS phase space file from its header: those that reached the phase space, which is what a source
+    replays, or the original ones when the source includes empty histories. None if the header cannot be read."""
+    if base_dir is None or not name: return None
+    try:
+        with open(resolve(relp(os.path.join(base_dir, name + ".header"))), errors="replace") as fh: head = fh.read(4000)
+    except (OSError, ValueError):
+        return None
+    m = re.search(r"^Number of Original Histories:\s*(\d+)" if original else r"^Number of Original Histories that Reached Phase Space:\s*(\d+)", head, re.M)
+    return int(m.group(1)) if m else None
+
+
+def run_plan(text, base_dir=None, per_run=False):
+    """How much an input simulates: {"hist": histories of all runs, "runs": number of runs, "kind", "threads", "silent"}.
+
+    TOPAS does one run per sequential time and takes, for each run, the largest history count of all sources
+    (TsSourceManager::GetNumberOfHistoriesInRun). kind is "plain" (one run), "steps" (several sequential times, as for
+    spots given as time features), "phsp" (a phase space source) or "random" (random time mode: one history per run).
+    A count that cannot be worked out is None. silent: the input switches the history lines of the log off.
+    With per_run, "per_run" holds the histories of each run."""
+    plan = {"hist": None, "runs": 1, "kind": "plain", "threads": None, "silent": False}
+    if not PLAN_HINT_RE.search(text):   # the usual file: no include, no time feature, no phase space
+        vals = [int(v) for v in HIST_LITERAL_RE.findall(text)]
+        pm = {k: v for k, v in ((m.group(2).lower(), m.group(3)) for m in map(PARAM_RE.match, re.findall(r"^\s*i:Ts/[^\n#]+", text, re.M | re.I)) if m)}
+        plan["hist"] = max(vals) if vals else None
+    else:
+        pm = param_map(text, base_dir)
+        vals = None
+    thr = pm.get("ts/numberofthreads", "1")
+    plan["threads"] = int(thr) if re.fullmatch(r"-?\d+", thr) else None
+    plan["silent"] = pm.get("ts/showhistorycountatinterval", "1") == "0"
+    if vals is not None:
+        if per_run: plan["per_run"] = [plan["hist"]] if plan["hist"] is not None else None
+        return plan
+
+    steps = {}   # time feature name -> (end times in ms, values, repetition in ms), None if it is no step function
+
+    def step_value(tf, t):
+        if tf not in steps:
+            times, unit = _vector(pm.get(f"tf/{tf}/times")); values, _ = _vector(pm.get(f"tf/{tf}/values"))
+            ok = pm.get(f"tf/{tf}/function", "").strip('"').lower() == "step" and times and values and len(times) == len(values) and unit in TIME_MS
+            steps[tf] = ([x * TIME_MS[unit] for x in times], values, _time_ms(pm.get(f"tf/{tf}/repetitioninterval"))) if ok else None
+        if steps[tf] is None: return None
+        times, values, rep = steps[tf]
+        if rep: t = t % rep
+        lo, hi = 0, len(times) - 1   # a value holds until its time is reached; after the last time the last value stays
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if t < times[mid] - 1e-9: hi = mid
+            else: lo = mid + 1
+        return values[lo]
+
+    def integer(expr, t, depth=0):
+        """An integer value at time t: a number, another parameter, a time feature value, or number * one of these."""
+        expr = expr.strip()
+        if re.fullmatch(r"-?\d+", expr): return int(expr)
+        m = re.fullmatch(r"(?:(-?[\d.]+)\s*\*\s*)?([A-Za-z0-9_/\.\-]+)", expr)
+        if not m or depth > 6: return None
+        name = m.group(2).lower(); tf = re.fullmatch(r"tf/(.+)/value", name)
+        v = step_value(tf.group(1), t) if tf else (integer(pm[name], t, depth + 1) if name in pm else None)
+        return None if v is None else int(round(float(m.group(1) or 1) * v))
+
+    flag = lambda name: pm.get(name, "").strip('"').lower() in ("true", "t", "1")
+    sources = sorted({k.split("/")[1] for k in pm if k.startswith("so/") and k.count("/") == 2})
+    phsp = [s for s in sources if pm.get(f"so/{s}/type", "").strip('"').lower() == "phasespace"]
+
+    def histories(s, t):
+        if s in phsp and pm.get(f"so/{s}/phasespacemultipleuse", "1") != "0":
+            n = phsp_histories(pm.get(f"so/{s}/phasespacefilename", "").strip('"'), base_dir, flag(f"so/{s}/phasespaceincludeemptyhistories"))
+            use = integer(pm.get(f"so/{s}/phasespacemultipleuse", "1"), t)
+            return None if n is None or use is None else n * use
+        return integer(pm.get(f"so/{s}/numberofhistoriesinrun", "0"), t)
+
+    if flag("tf/randomizetimedistribution"):
+        vals = [integer(pm.get(f"so/{s}/numberofhistoriesinrandomjob", "0"), 0) for s in sources]
+        plan["kind"] = "random"
+        plan["hist"] = plan["runs"] = max(vals) if vals and None not in vals else None
+        return plan
+    n = integer(pm.get("tf/numberofsequentialtimes", "1"), 0)
+    start = _time_ms(pm.get("tf/timelinestart", "0 s")); end = _time_ms(pm.get("tf/timelineend")) if "tf/timelineend" in pm else start
+    plan["kind"] = "phsp" if phsp else "steps" if (n or 1) > 1 else "plain"
+    if not n or n < 1 or start is None or end is None: plan["runs"] = n if n and n > 0 else None; return plan
+    plan["runs"] = n
+    if not sources or n > MAX_RUNS: return plan
+    runs = []
+    for k in range(n):
+        vals = [histories(s, start + k * (end - start) / n) for s in sources]
+        if None in vals: return plan
+        runs.append(max(vals))
+    plan["hist"] = sum(runs)
+    if per_run: plan["per_run"] = runs
+    return plan
+
+
+def total_histories(text, base_dir=None):
+    """Histories of all runs of an input, None if they cannot be worked out. See run_plan."""
+    return run_plan(text, base_dir)["hist"]
 
 
 ENERGY_TOTAL_RE = re.compile(r"^\s*d:So/[^/]+/BeamEnergy\s*=\s*([\d.eE+\-]+)\s*(\w+)", re.M)
 UNIT_MEV = {"eV": 1e-6, "keV": 1e-3, "MeV": 1, "GeV": 1e3}
+SIZE_KEYS = ("hist", "etot", "runs", "threads", "kind", "silent")
 
 
 def job_size(path, max_age=10.0):
@@ -225,114 +362,279 @@ def job_size(path, max_age=10.0):
     return (info["hist"], info["etot"]) if info else (None, None)
 
 
-LIVE = {}   # job id -> {"samples": [(time, histories)], "cpu": (time, ticks)}
+LIVE = {}   # job id -> what the polls have learned about the running job: its plan, when its first run began, progress samples
 TICK = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
 PAGE_SIZE = os.sysconf("SC_PAGE_SIZE") if hasattr(os, "sysconf") else 4096
 
 
 def proc_usage(pgid):
-    """CPU ticks and resident memory of all processes in a process group (Linux /proc), or None."""
+    """CPU ticks, resident memory and number of threads of all processes in a process group (Linux /proc), or None."""
     if not os.path.isdir("/proc"): return None
-    ticks = rss = 0; found = False
+    ticks = rss = threads = 0; found = False
     for d in os.listdir("/proc"):
         if not d.isdigit(): continue
         try:
             with open(f"/proc/{d}/stat") as fh: st = fh.read()
             f = st[st.rindex(")") + 2:].split()
             if int(f[2]) != pgid: continue        # field 5 (pgrp)
-            ticks += int(f[11]) + int(f[12]); rss += int(f[21]) * PAGE_SIZE; found = True   # utime, stime, rss
+            ticks += int(f[11]) + int(f[12]); rss += int(f[21]) * PAGE_SIZE; threads += int(f[17]); found = True   # utime, stime, rss, num_threads
         except (OSError, ValueError, IndexError):
             continue
-    return (ticks, rss) if found else None
+    return (ticks, rss, threads) if found else None
 
 
-def log_state(path):
-    """Phase of a TOPAS run and the last meaningful log line."""
-    try:
-        with open(path, "rb") as fh:
-            fh.seek(0, 2); size = fh.tell(); fh.seek(max(0, size - 65536)); tail = fh.read().decode("utf-8", "replace")
-    except OSError:
-        return "init", ""
-    lines = [l.strip() for l in tail.splitlines() if l.strip() and not l.startswith("# ")]
-    last = lines[-1][:160] if lines else ""
-    if re.search(r"run sequence complete|Results have been written|Execution done", tail): phase = "output"
-    elif HIST_RE.search(tail.encode()): phase = "run"
-    else: phase = "init"
-    return phase, last
-
-
-def live_info(job):
-    """Live status of the running job: phase, histories per second, CPU cores in use, memory, last log line."""
-    now = time.time(); L = LIVE.setdefault(job["id"], {"samples": [], "cpu": None})
-    phase, last = log_state(ws_path(job["log"])) if job.get("log") else ("init", "")
-    info = {"phase": phase, "last": last, "elapsed": round(now - job.get("t0", now))}
-    done = job.get("done")
-    if done is not None and (not L["samples"] or L["samples"][-1][1] != done): L["samples"].append((now, done))
-    S = [x for x in L["samples"] if x[1] > 0] or L["samples"]
-    if len(S) >= 2 and S[-1][1] > S[0][1]:
-        info["rate"] = (S[-1][1] - S[0][1]) / max(S[-1][0] - S[0][0], 1e-6)
-        if job.get("total"):  # smooth estimate between the history counts TOPAS prints
-            info["est_done"] = min(job["total"], S[-1][1] + info["rate"] * (now - S[-1][0]))
-    proc = STATE.get("proc")
-    if proc is not None and proc.poll() is None:
-        u = proc_usage(proc.pid)
-        if u:
-            if L["cpu"] and now > L["cpu"][0]:
-                info["cores"] = round((u[0] - L["cpu"][1]) / TICK / (now - L["cpu"][0]), 1)
-            elif L.get("cores") is not None:
-                info["cores"] = L["cores"]
-            if L["cpu"] is None or now - L["cpu"][0] > 1.5:
-                L["cpu"] = (now, u[0]); L["cores"] = info.get("cores")
-            info["rss_mb"] = round(u[1] / 1e6)
-    return info
-
-
-def queue_estimate(jobs):
-    """Remaining time of the queue from the finished jobs: seconds per history and MeV (track length grows with energy),
-    or seconds per history when energies are unknown. None until at least one job of the same program has finished."""
-    est = {}
-    for b in {j["binary"] for j in jobs if j["status"] in ("queued", "running")}:
-        done = [j for j in jobs if j["binary"] == b and j["status"] == "done" and j.get("seconds") and j.get("total")][-20:]
-        if not done: continue
-        for j in done:  # jobs from before this version have no energy recorded
-            if "energy" not in j:
-                try: j["energy"] = job_size(ws_path(j["file"]))[1]
-                except ValueError: j["energy"] = None
-        pe = sorted(j["seconds"] / (j["total"] * j["energy"]) for j in done if j.get("energy"))
-        ph = sorted(j["seconds"] / j["total"] for j in done)
-        est[b] = (pe[len(pe) // 2] if pe else None, ph[len(ph) // 2])
-    total, unknown = 0.0, 0
-    for j in jobs:
-        if j["status"] not in ("queued", "running") or j["binary"] not in est: 
-            if j["status"] in ("queued", "running"): unknown += 1
-            continue
-        if j["status"] == "running" and j.get("eta") is not None:
-            total += j["eta"]; continue
-        try: n, e = job_size(ws_path(j["file"]))
-        except ValueError: n, e = None, None
-        if not n: unknown += 1; continue
-        rate_e, rate_h = est[j["binary"]]
-        t = n * e * rate_e if (rate_e and e) else n * rate_h
-        if j["status"] == "running": t = max(0.0, t - (time.time() - j.get("t0", time.time())))
-        total += t
-    if not est: return None
-    return {"seconds": round(total), "unknown": unknown, "finish": time.strftime("%H:%M", time.localtime(time.time() + total))}
-
-
+RUN_HIST_RE = re.compile(rb"Run:\s*(\d+),\s*History:\s*(\d+)")
 HIST_RE = re.compile(rb"History:\s*(\d+)")
-ERR_RE = re.compile(r"(?i)(\berror\b|exception|quitting|exiting|segmentation|abort|unknown parameter)")
-ERR_IGNORE = re.compile(r"(?i)not necessarily an error")
+RUN_MARK_RE = re.compile(rb"Begin processing for Run|TimeFeature updated:|Updating Time Features for time interval")
+END_MARK_RE = re.compile(rb"run sequence complete|Results have been written|Execution done")
 
 
-def log_progress(path):
-    """Highest history number printed by TOPAS in the log (TOPAS prints 'History: N' at ShowHistoryCountAtInterval)."""
+def log_signal(path):
+    """What the end of a log tells about progress: the highest run number with the highest history number printed in it
+    (TOPAS prints 'Begin processing for Run: R, History: N' at Ts/ShowHistoryCountAtInterval, and for history 0 of every
+    run), whether a run has started, whether the run sequence is complete, and the last meaningful line."""
+    sig = {"run": None, "hist": None, "started": False, "complete": False, "last": ""}
     try:
         with open(path, "rb") as fh:
             fh.seek(0, 2); size = fh.tell(); fh.seek(max(0, size - 65536)); tail = fh.read()
     except OSError:
-        return None
-    nums = [int(x) for x in HIST_RE.findall(tail)]
-    return max(nums) if nums else None
+        return sig
+    pairs = [(int(r), int(h)) for r, h in RUN_HIST_RE.findall(tail)]
+    if pairs: sig["run"], sig["hist"] = max(pairs)
+    else:
+        nums = [int(x) for x in HIST_RE.findall(tail)]   # a program that prints the history without the run
+        if nums: sig["hist"] = max(nums)
+    sig["complete"] = bool(END_MARK_RE.search(tail))
+    sig["started"] = sig["hist"] is not None or sig["complete"] or bool(RUN_MARK_RE.search(tail))
+    lines = [l.strip() for l in tail.decode("utf-8", "replace").splitlines() if l.strip() and not l.startswith("# ")]
+    sig["last"] = lines[-1][:160] if lines else ""
+    return sig
+
+
+def job_plan(job):
+    """The run plan of a running job with the histories before each run, worked out once per job."""
+    L = LIVE.setdefault(job["id"], {})
+    if "plan" not in L:
+        plan = {"hist": job.get("total"), "runs": job.get("runs") or 1, "kind": job.get("kind") or "plain", "per_run": None}
+        try:
+            p = ws_path(job["file"])
+            with open(p, errors="replace") as fh: plan = run_plan(fh.read(TXT_MAX), os.path.dirname(p), per_run=True)
+        except (OSError, ValueError):
+            pass
+        per = plan.get("per_run")
+        if per:
+            cum = [0]
+            for n in per: cum.append(cum[-1] + n)
+            plan["cum"] = cum
+        L["plan"] = plan
+    return L["plan"]
+
+
+def live_info(job):
+    """Live status of the running job: phase, progress, histories per second, CPU cores in use, memory, last log line.
+
+    Progress comes from what the run reports: history lines, and for an input with several runs the run number in them
+    or, where Geant4 warns once per run (Run10035), the count of those warnings. "frac" is that measured share and is
+    missing when the run reports nothing. The phase changes to "run" with the first of these signs or when the program
+    has started its worker threads, which it does at the start of the first run."""
+    now = time.time(); L = LIVE.setdefault(job["id"], {})
+    sig = log_signal(ws_path(job["log"])) if job.get("log") else {"run": None, "hist": None, "started": False, "complete": False, "last": ""}
+    plan = job_plan(job)
+    total, runs, cum = plan.get("hist") or job.get("total"), plan.get("runs") or 1, plan.get("cum")
+    info = {"last": sig["last"], "elapsed": round(now - job.get("t0", now)), "runs": runs, "kind": plan.get("kind"), "silent": bool(job.get("silent"))}
+    proc = STATE.get("proc"); u = None
+    if proc is not None and proc.poll() is None: u = proc_usage(proc.pid)
+    warned = (job.get("g4_hidden") or {}).get("Run10035", 0)   # one warning per run that has begun
+    frac = done = step = None
+    if plan.get("kind") == "random":
+        if sig["run"] is not None: done = sig["run"]; step = done + 1
+    elif runs > 1:
+        before = max(sig["run"] or 0, warned - 1, 0)   # runs that have ended
+        if sig["run"] is not None or warned: step = min(before + 1, runs)
+        if cum and before < len(cum): done = cum[before] + (sig["hist"] or 0 if sig["run"] == before else 0)
+        elif step is not None: frac = before / runs
+    else:
+        done = sig["hist"]
+    if done is not None and total: done = min(done, total); frac = done / total
+    if sig["started"] or step is not None or (u and u[2] > 1): L.setdefault("run_t0", now)
+    info["phase"] = "output" if sig["complete"] else "run" if "run_t0" in L else "init"
+    if step is not None and runs > 1: info["step"] = step
+    if done is not None: info["done"] = done
+    if frac is not None:
+        info["frac"] = frac
+        if frac > 0:
+            if "first" not in L: L["first"] = (now, frac)
+            if L.get("lastp", (0, -1))[1] != frac: L["lastp"] = (now, frac)
+            (ta, fa), (tb, fb) = L["first"], L["lastp"]
+            if fb > fa and tb > ta:
+                rate = (fb - fa) / (tb - ta)   # share per second since the first sign, so without the initialisation
+                info["frac"] = min(1.0, fb + rate * (now - tb))   # goes on smoothly between two signs
+                info["eta"] = round((1 - info["frac"]) / rate)
+                if total: info["rate"] = rate * total; info["est_done"] = info["frac"] * total
+            elif frac < 1:
+                info["eta"] = round((now - L.get("run_t0", now)) * (1 - frac) / frac)
+    if "run_t0" in L: info["run_elapsed"] = round(now - L["run_t0"])
+    if u:
+        if L.get("cpu") and now > L["cpu"][0]:
+            info["cores"] = round((u[0] - L["cpu"][1]) / TICK / (now - L["cpu"][0]), 1)
+        elif L.get("cores") is not None:
+            info["cores"] = L["cores"]
+        if L.get("cpu") is None or now - L["cpu"][0] > 1.5:
+            L["cpu"] = (now, u[0]); L["cores"] = info.get("cores")
+        info["rss_mb"] = round(u[1] / 1e6); info["threads"] = u[2]
+    return info
+
+
+# ------------------------------------------------------------------ runtime model and queue overview
+MODEL_JOBS = 40   # finished jobs of one kind that a fit uses
+_MODEL = {"key": None, "fits": {}}
+
+
+def job_measures(j):
+    """(key, runs, weight) of a job for the runtime model. The key holds what must be equal for two jobs to share a fit:
+    program, thread count, and whether the weight is histories x MeV ("e"), histories ("h") or unknown ("").
+    A record from before these fields existed, and a waiting job, are completed from the parameter file."""
+    hist, energy, runs, threads = j.get("total"), j.get("energy"), j.get("runs"), j.get("threads")
+    if "runs" not in j or (j["status"] == "queued" and "total" not in j):
+        try: info = file_info(ws_path(j["file"]), max_age=10.0)
+        except ValueError: info = None
+        if info:
+            if j["status"] == "queued": hist, energy = info.get("hist"), info.get("etot")
+            runs, threads = info.get("runs"), info.get("threads")
+    kind = "e" if hist and energy else "h" if hist else ""
+    return (j["binary"], threads, kind), runs or 1, (hist * energy if kind == "e" else hist or 0)
+
+
+def _solve(A, b):
+    """Solution of a small linear system by elimination, None if it has none."""
+    n = len(b); M = [row[:] + [b[i]] for i, row in enumerate(A)]
+    for c in range(n):
+        p = max(range(c, n), key=lambda r: abs(M[r][c]))
+        if abs(M[p][c]) < 1e-12 * max(1.0, max(abs(v) for row in M for v in row)): return None
+        M[c], M[p] = M[p], M[c]
+        for r in range(n):
+            if r != c:
+                f = M[r][c] / M[c][c]
+                M[r] = [x - f * y for x, y in zip(M[r], M[c])]
+    return [M[i][n] / M[i][i] for i in range(n)]
+
+
+def fit_runtime(rows):
+    """Coefficients (a, b, c) of seconds = a + b x runs + c x weight for rows of (seconds, runs, weight), or None.
+
+    Least squares of the relative error, so a long job does not outweigh the short ones. Every choice of the three terms
+    is tried; one with a negative coefficient is dropped, since no term can make a run shorter, and a term is only added
+    when it brings the error down clearly. With one finished job this is the plain rule of three."""
+    rows = [r for r in rows if r[0] > 0]
+    if not rows: return None
+    has_w = all(r[2] > 0 for r in rows)
+    best = None
+    for cols in ((2,), (0,), (1,), (0, 2), (1, 2), (0, 1), (0, 1, 2)):
+        if (2 in cols and not has_w) or len(rows) < len(cols) + (len(cols) > 1): continue
+        X = [[(1.0, r[1], r[2])[c] / r[0] for c in cols] for r in rows]   # each row divided by its seconds: relative error
+        A = [[sum(x[i] * x[j] for x in X) for j in range(len(cols))] for i in range(len(cols))]
+        sol = _solve(A, [sum(x[i] for x in X) for i in range(len(cols))])
+        if sol is None or min(sol) < 0: continue
+        err = sum((sum(s * v for s, v in zip(sol, x)) - 1) ** 2 for x in X)
+        if best is None or err < best[0] * 0.8 - 1e-12:
+            coef = [0.0, 0.0, 0.0]
+            for c, s in zip(cols, sol): coef[c] = s
+            best = (err, tuple(coef))
+    return best[1] if best else None
+
+
+def runtime_model(finished):
+    """Fits per kind of job from the finished jobs: {key: (a, b, c)}, also under the key without the thread count for a
+    job whose thread count has no finished job yet. Fitted again only when a job has finished."""
+    done = [j for j in finished if j["status"] == "done" and j.get("seconds")]
+    key = (STATE["root"], len(done), done[-1]["id"] if done else None)
+    if _MODEL["key"] == key: return _MODEL["fits"]
+    groups = {}
+    for j in done:
+        k, runs, w = job_measures(j)
+        for kk in (k, (k[0], None, k[2]) if k[1] is not None else None):
+            if kk: groups.setdefault(kk, []).append((j["seconds"], runs, w))
+    fits = {k: f for k, f in ((k, fit_runtime(rows[-MODEL_JOBS:])) for k, rows in groups.items()) if f}
+    _MODEL.update(key=key, fits=fits)
+    return fits
+
+
+def predict_seconds(fits, j):
+    """Expected run time of a job from the model, None when no job of its kind has finished."""
+    k, runs, w = job_measures(j)
+    f = fits.get(k) or fits.get((k[0], None, k[2]))
+    return None if f is None else f[0] + f[1] * runs + f[2] * w
+
+
+def queue_overview(jobs, now=None):
+    """Progress of the queue as a whole and per folder, and per active job its expected time.
+
+    The queue counts from the moment its oldest waiting or running job was queued: jobs that ended after that belong to
+    it. A job's time left is measured when the run reports progress, else it comes from the runtime model and is marked
+    as an estimate; a running job past its estimate counts as overdue and adds nothing. Jobs run one after the other,
+    so a folder ends when its last job does. Returns ({"total": ..., "groups": [...]}, {job id: {...}})."""
+    now = now or time.time()
+    active = [j for j in jobs if j["status"] in ("queued", "running")]
+    if not active: return None, {}
+    since = min(j.get("queued") or j.get("start") or "" for j in active)
+    batch = [j for j in jobs if j["status"] not in ("queued", "running") and (j.get("end") or "") >= since and since]
+    fits = runtime_model([j for j in jobs if j["status"] not in ("queued", "running")])
+    groups, per_job = {}, {}
+    total = {"n": 0, "done": 0, "failed": 0, "used": 0, "left": 0, "unknown": 0, "estimated": 0, "share": 0.0}
+
+    def group(j):
+        name = os.path.dirname(j["file"])
+        g = groups.setdefault(name, {"name": name, "n": 0, "done": 0, "failed": 0, "running": 0, "used": 0, "left": 0,
+                                     "unknown": 0, "estimated": 0, "share": 0.0, "finish": None})
+        return g
+
+    def add(g, **kw):
+        for d in (g, total):
+            for k, v in kw.items(): d[k] += v
+
+    for j in batch:
+        ok = j["status"] == "done"
+        add(group(j), n=1, done=1 if ok else 0, failed=0 if ok else 1, used=j.get("seconds") or 0, share=1.0)
+    ahead = 0.0
+    for j in active:
+        g = group(j); pred = predict_seconds(fits, j); e = {}
+        if pred is not None: e["est"] = round(pred)
+        if j["status"] == "running":
+            el = now - j.get("t0", now); g["running"] += 1
+            if j.get("eta") is not None: left = j["eta"]; share = j.get("progress") or 0.0
+            elif pred is not None:
+                left = max(0.0, pred - el); share = min(el / pred, 0.99) if pred > 0 else 0.0
+                e.update(left=round(left), share=share, estimated=True)
+                if el > pred: e["overdue"] = round(el - pred)
+            else: left = None; share = 0.0
+            add(g, n=1, used=round(el), share=share)
+        else:
+            left = pred; add(g, n=1)
+            if pred is not None: e["estimated"] = True
+        if left is None: add(g, unknown=1)
+        else:
+            add(g, left=left, estimated=1 if e.get("estimated") else 0); ahead += left
+        g["finish"] = now + ahead   # the last job of the folder so far ends here, after everything queued before it
+        if e: per_job[j["id"]] = e
+    for d in list(groups.values()) + [total]:
+        d["left"] = round(d["left"]); d["share"] = round(d["share"] / d["n"], 4) if d["n"] else 0.0
+    for g in groups.values(): g["finish"] = round(g["finish"])
+    total["finish"] = round(now + ahead)
+    order = sorted(groups.values(), key=lambda g: (g["done"] + g["failed"] == g["n"], g["finish"]))
+    return {"total": total, "groups": order}, per_job
+
+
+def queue_estimate(jobs):
+    """Remaining time of the queue: {"seconds", "unknown" (jobs without an estimate), "finish" (clock time)}, None while
+    no active job has an estimate. The short form of queue_overview."""
+    ov, _ = queue_overview(jobs)
+    if not ov or ov["total"]["unknown"] == sum(1 for j in jobs if j["status"] in ("queued", "running")): return None
+    t = ov["total"]
+    return {"seconds": t["left"], "unknown": t["unknown"], "finish": time.strftime("%H:%M", time.localtime(t["finish"]))}
+
+
+ERR_RE = re.compile(r"(?i)(\berror\b|exception|quitting|exiting|segmentation|abort|unknown parameter)")
+ERR_IGNORE = re.compile(r"(?i)not necessarily an error")
 
 
 def log_hints(path, limit=4):
@@ -704,7 +1006,10 @@ def run_job(job):
         def snapshot():
             return {f: os.path.getmtime(os.path.join(out, f)) for f in os.listdir(out) if os.path.isfile(os.path.join(out, f))}
         before = snapshot()
-        job["total"], job["energy"] = job_size(param, max_age=0)   # the file may have been edited right before the start
+        size = file_info(param) or {}   # read again if the file was edited right before the start
+        job["total"], job["energy"] = size.get("hist"), size.get("etot")
+        job["runs"], job["threads"], job["kind"], job["silent"] = size.get("runs"), size.get("threads"), size.get("kind"), bool(size.get("silent"))
+        LIVE.pop(job["id"], None)
         t0 = time.time(); job["t0"] = t0
         flt = G4Filter() if g4_enabled() else None   # switched off, TOPAS writes into the log itself, as it always did
         with STATE["lock"]:
@@ -1320,7 +1625,7 @@ def _pcache():
         txt, data = {}, {}
         try:
             with open(os.path.join(wb_dir(), "index.json")) as fh: raw = json.load(fh)
-            if isinstance(raw, dict) and raw.get("v") == 4:   # older formats are rebuilt once
+            if isinstance(raw, dict) and raw.get("v") == 5:   # older formats are rebuilt once
                 data = dict(raw.get("data") or {})
                 txt = {os.path.join(root, *rel.split("/")): v for rel, v in (raw.get("txt") or {}).items()}
         except (OSError, ValueError, TypeError, AttributeError):
@@ -1336,7 +1641,7 @@ def _pcache_save():
         if not pc["dirty"]: return
         pc["dirty"] = False
         pre = pc["root"] + os.sep
-        out = {"v": 4, "txt": {k[len(pre):].replace(os.sep, "/"): v for k, v in list(pc["txt"].items()) if k.startswith(pre)},
+        out = {"v": 5, "txt": {k[len(pre):].replace(os.sep, "/"): v for k, v in list(pc["txt"].items()) if k.startswith(pre)},
                "data": dict(pc["data"])}
         try:
             os.makedirs(wb_dir(), exist_ok=True)
@@ -1380,7 +1685,9 @@ def file_info(fp, st=None, max_age=0.0):
     info = {"param": is_param, "outs": scorer_outputs(text) if is_param else [],
             "names": sorted(set(NAME_RE.findall(text))) if is_param else [],
             "part": part, "energy": energy, "total": f"{e.group(1)} {e.group(2)}" if (e and is_param) else None,
-            "hist": total_histories(text), "etot": etot * UNIT_MEV.get(e.group(2), 1) if etot is not None else None}
+            "etot": etot * UNIT_MEV.get(e.group(2), 1) if etot is not None else None}
+    plan = run_plan(text, os.path.dirname(fp)) if is_param else {}
+    info.update(hist=plan.get("hist"), runs=plan.get("runs"), threads=plan.get("threads"), kind=plan.get("kind"), silent=bool(plan.get("silent")))
     cache[fp] = [st.st_mtime_ns, st.st_size, info]; _TXT_CHECKED[fp] = now; pc["dirty"] = True
     return info
 
@@ -1657,19 +1964,18 @@ class H(BaseHTTPRequestHandler):
                 for j in alljobs: counts[j["status"]] = counts.get(j["status"], 0) + 1
                 for j in jobs:
                     if j["status"] == "running" and j.get("log"):
-                        done = log_progress(ws_path(j["log"]))
-                        j["done"] = done
-                        j["live"] = live_info(j)
-                        lv = j["live"]
-                        if lv.get("rate") and j.get("total"):  # rate from the history counts, excludes the initialisation time
-                            j["progress"] = lv["est_done"] / j["total"]
-                            j["eta"] = round((j["total"] - lv["est_done"]) / lv["rate"])
-                        elif done and j.get("total"):
-                            el = time.time() - j.get("t0", time.time())
-                            j["progress"] = min(1.0, done / j["total"])
-                            j["eta"] = round(el * (j["total"] - done) / done) if done < j["total"] else 0
-                est = [dict(j) for j in finished[-200:]] + [j for j in jobs if j["status"] in ("queued", "running")]
-                return self.send(200, {"jobs": jobs, "running": running, "awake": AWAKE.status(), "queue_eta": queue_estimate(est),
+                        lv = j["live"] = live_info(j)
+                        j["done"] = lv.get("done")
+                        if lv["phase"] == "output": j["progress"] = 1.0; j["eta"] = 0
+                        elif lv.get("frac") is not None:   # measured from what the run reports
+                            j["progress"] = lv["frac"]
+                            if lv.get("eta") is not None: j["eta"] = lv["eta"]
+                overview, per_job = queue_overview([dict(j) for j in finished[-200:]] + [j for j in jobs if j["status"] in ("queued", "running")])
+                for j in jobs:
+                    if j["id"] in per_job and j["status"] in ("queued", "running"): j["plan"] = per_job[j["id"]]
+                t = overview["total"] if overview else None
+                eta = {"seconds": t["left"], "unknown": t["unknown"], "finish": time.strftime("%H:%M", time.localtime(t["finish"]))} if t and t["unknown"] < len(active) else None
+                return self.send(200, {"jobs": jobs, "running": running, "awake": AWAKE.status(), "queue_eta": eta, "overview": overview, "now": round(time.time()),
                                        "counts": counts, "finished": len(finished), "rev": rev, "external": external_runs()})
             if u.path == "/api/log":
                 p = resolve(q.get("p", ""))
