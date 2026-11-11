@@ -9,7 +9,7 @@ A local web UI for [OpenTOPAS](https://github.com/OpenTOPAS/OpenTOPAS) and TOPAS
 ## Features
 
 - **Files**: browse, edit, rename, copy, and trash files in a workspace folder. The editor highlights TOPAS syntax, checks it while you type (missing type prefix, unquoted strings, missing units, vector counts, missing `includeFile` targets), and suggests parameter names.
-- **Runs**: queue parameter files for one or more TOPAS installations. Progress bar with remaining time, live log with highlighted errors, stop button, optional output subfolder. Existing results are detected, also when the cases were run outside the workbench. The queue survives a restart of the workbench (see [Restart and Ctrl+C](#restart-and-ctrlc)).
+- **Runs**: queue parameter files for one or more TOPAS installations. Progress bar with remaining time, live log with highlighted errors and without a known harmless Geant4 warning that can come thousands of times (see [Geant4 warnings in the log](#geant4-warnings-in-the-log)), stop button, optional output subfolder. Existing results are detected, also when the cases were run outside the workbench. The queue survives a restart of the workbench (see [Restart and Ctrl+C](#restart-and-ctrlc)).
 - **Overview**: every result in the workspace in one table, filtered by particle, energy, folder, or file-name tags. Beam data come from the parameter file that wrote the output. R80, BPW80, deviations to a reference (for example the case without filter), a Bragg-Kleeman range check, your own formula columns, CSV export, and an image gallery with full-screen view.
 - **Results**: plot TOPAS CSV scorer output and measured curves (PTW `.mcc`, IBA `.asc`, column files). Overlay curves with normalisation, log axis, drag zoom, hover read-out, and difference or ratio to a reference. Bragg peak metrics (R80, BPW80, D80-D20, ΔR80, filter BPW80). 2D and 3D binnings show as a heat map.
 - **Beam profile**: the monitor planes and 3D dose grids of a folder. x and y profiles (integrated or as a cut through the centroid, linear or logarithmic for the halo) and the 2D map per plane; the envelope, sigma, FWHM, centroid, or halo share along the beam line for several cases at once; energy spectra; lateral dose profiles at a depth picked with a slider, and sigma against depth. Every profile gets a Gaussian core fit (sigma, mean), FWHM, rms, the share outside 3 sigma, and a double Gaussian (core and halo sigma, halo share) where the profile has a halo.
@@ -69,6 +69,31 @@ The queue is kept in `WORKSPACE/.workbench/jobs.json` and continues when the wor
 To start with an empty queue, remove the waiting jobs in the Runs tab before you end the workbench, or right after the start.
 
 While a job runs, the first Ctrl+C in the terminal only prints a warning, and a second one within 3 seconds ends the workbench and stops the job. With no job running, one Ctrl+C is enough. A closing terminal and `kill` end the workbench at once.
+
+## Geant4 warnings in the log
+
+Geant4 prints the warning below once per run when a run has fewer histories than threads. TOPAS sets the event modulo before every run and has no parameter to turn the warning off, so a case with thousands of short runs, such as spot steps written as time features, fills its log with it:
+
+```
+-------- WWWW ------- G4Exception-START -------- WWWW -------
+*** G4Exception : Run10035
+      issued by : G4MTRunManager::InitializeEventLoop()
+Event modulo is reduced to 1 to distribute events to all threads.
+*** This is just a warning message. ***
+-------- WWWW -------- G4Exception-END --------- WWWW -------
+```
+
+It is harmless. The workbench leaves complete blocks of it, with the empty line before and after, out of the job log, counts them, and ends the log with one line:
+
+```
+# Geant4 warning Run10035 (Event modulo reduced to 1) hidden 2624 times
+```
+
+The Runs tab shows the count under the log, and `/api/jobs` and the MCP tools carry it as the job field `g4_hidden`. Only this warning is on the list. Every other Geant4 warning and every error stays in the log unchanged, and so does a block with this code that is not a plain warning, comes from another place in Geant4, or holds any other line.
+
+For a raw log, clear "Hide known harmless Geant4 warnings in the log" in Settings, or set `"g4_filter": false` in `WORKSPACE/.workbench/config.json`. TOPAS then writes the log itself, as before. The setting holds from the next run on. The log view applies the same filter to logs that were written without it, in the last 500 kB that it reads, and ends with the number it left out of that part; the files stay as they are.
+
+With the filter on, the output of TOPAS passes through the workbench. If the workbench process is killed outright, the run ends at its next output instead of going on without a queue; it is queued again at the next start, as described above. If the log cannot be written, for example on a full disk, the run goes on without a log and the job record names the error as `log_error`.
 
 ## MCP server
 

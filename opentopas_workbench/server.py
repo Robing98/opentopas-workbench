@@ -65,6 +65,7 @@ def load_cfg():
     except (OSError, ValueError): pass
     if not cfg.get("binaries"): cfg["binaries"] = detect_binaries()
     cfg.setdefault("lang", "en")
+    cfg.setdefault("g4_filter", True)   # written to config.json, so the switch for a raw log can be found there
     STATE["cfg"] = cfg
 
 
@@ -344,6 +345,178 @@ def log_hints(path, limit=4):
     return hits[-limit:]
 
 
+# ------------------------------------------------------------------ Geant4 warnings
+# Warnings known to be harmless that Geant4 prints once per run, so thousands of times in a job with many short runs.
+# An entry names the text for the summary line and the only lines its block may hold between the code and the closing
+# "just a warning" line. A block with any other line, another severity, or another origin stays in the log.
+# Run10035: TOPAS sets /run/eventModulo before every run, and Geant4 lowers it when a run has fewer histories than threads.
+G4_HARMLESS = {b"Run10035": {"text": "Event modulo reduced to 1", "lines": (
+    re.compile(rb"\s*issued by : G4(MT|Task)RunManager::InitializeEventLoop\(\)$"),
+    re.compile(rb"Event modulo is reduced to \d+( \(was \d+\))? to distribute events to all threads\.$"))}}
+G4_START = re.compile(rb"-+ WWWW -+ G4Exception-START -+ WWWW -+$")
+G4_END = re.compile(rb"-+ WWWW -+ G4Exception-END -+ WWWW -+$")
+G4_CODE = re.compile(rb"\*\*\* G4Exception : (\S+)$")
+G4_WARNING = b"*** This is just a warning message. ***"
+PUMP_WAIT = 30          # seconds the queue waits, after a run has ended, for the rest of its output
+G4_BLOCK_MAX = 12       # lines; a longer block is not one of the short known warnings and is passed on at once
+G4_LINE_MAX = 65536     # bytes without a line end that are held back before they are passed on unfiltered
+LOG_TAIL = 12000        # characters of a log that the page shows
+LOG_WINDOW = 500_000    # bytes read instead when that end holds a warning block, as in a log written without the filter
+
+
+class G4Filter:
+    """Drops complete blocks of the known harmless Geant4 warnings from a stream and counts them per code.
+
+    Output arrives in arbitrary chunks, so lines are put together first and a warning block is held back until its
+    end line shows whether it may go. Geant4 puts an empty line before and after a block; both go with it."""
+
+    def __init__(self):
+        self.counts = {}
+        self.part = b""          # the start of a line whose end has not arrived
+        self.held = []           # an empty line that may belong to a block, or the lines of an open block
+        self.block = False
+        self.skip_blank = False  # the empty line after a dropped block is still to come
+        self.long = False        # the start of the current line was passed on unfiltered, its end is still to come
+
+    def feed(self, data):
+        lines = (self.part + data).split(b"\n")
+        self.part = lines.pop()
+        out = []
+        if self.long and lines:   # the rest of a line that is no warning line: it goes on as it is, with its line end
+            out.append(lines.pop(0) + b"\n"); self.long = False
+        for l in lines: self._line(l + b"\n", out)
+        if self.long or len(self.part) > G4_LINE_MAX:   # no line of a known block is that long, so nothing is held back for it
+            out.extend(self.held); out.append(self.part)
+            self.held = []; self.part = b""; self.block = False; self.skip_blank = False; self.long = True
+        return b"".join(out)
+
+    def _line(self, raw, out):
+        s = raw.rstrip(b"\r\n")
+        if self.block:
+            if G4_START.match(s):   # the open block never ended: it stays, and this line opens the next one
+                out.extend(self.held); self.held = [raw]
+                return
+            self.held.append(raw)
+            if G4_END.match(s): self._close(out)
+            elif len(self.held) > G4_BLOCK_MAX: out.extend(self.held); self.held = []; self.block = False
+            return
+        if self.skip_blank:
+            self.skip_blank = False
+            if not s: return
+        if G4_START.match(s):
+            self.held.append(raw); self.block = True
+            return
+        out.extend(self.held); self.held = []
+        if s: out.append(raw)
+        else: self.held.append(raw)
+
+    def _close(self, out):
+        lines = [l.rstrip(b"\r\n") for l in self.held]
+        inner = lines[(0 if G4_START.match(lines[0]) else 1) + 1:-1]
+        code = G4_CODE.match(inner[0]) if inner else None
+        known = G4_HARMLESS.get(code.group(1)) if code else None
+        if known and len(inner) >= 3 and inner[-1] == G4_WARNING and all(any(p.match(l) for p in known["lines"]) for l in inner[1:-1]):
+            key = code.group(1).decode()
+            self.counts[key] = self.counts.get(key, 0) + 1
+            self.skip_blank = True
+        else:
+            out.extend(self.held)
+        self.held = []; self.block = False
+
+    def finish(self):
+        """What is still held back when the stream ends: an unfinished block or line stays in the log."""
+        out = b"".join(self.held) + self.part
+        self.held = []; self.part = b""; self.block = False; self.skip_blank = False; self.long = False
+        return out
+
+
+def g4_summary(counts, lang="en"):
+    """One line per hidden warning code for the end of a log. It starts with '# ' like the head lines of a log."""
+    form = "# Geant4-Warnung {c} ({t}) {n}-mal ausgeblendet\n" if lang == "de" else "# Geant4 warning {c} ({t}) hidden {n} times\n"
+    return "".join(form.format(c=c, t=G4_HARMLESS[c.encode()]["text"], n=n) for c, n in sorted(counts.items()))
+
+
+def g4_enabled(): return STATE["cfg"].get("g4_filter", True) is not False
+
+
+class LogPump(threading.Thread):
+    """Copies the output of a run into its log through the filter, until the output ends.
+
+    It reads on whatever happens: a pipe that nobody reads would stop TOPAS, and a closed one would end it. So after a
+    failed write, or once the queue has gone on without it, the rest of the output is read and thrown away."""
+
+    def __init__(self, src, log, flt, job):
+        super().__init__(daemon=True)
+        self.src, self.log, self.flt, self.job = src, log, flt, job
+        self.lock = threading.Lock()   # the run thread ends the log while this thread may still write
+        self.ended = False
+        self.last = b"\n"
+        self.error = None
+        self.raw = None          # why the filter was given up; the output then goes into the log as it comes
+
+    def _write(self, data):
+        if not data or self.ended or self.error: return
+        try: self.log.write(data); self.log.flush(); self.last = data[-1:]
+        except (OSError, ValueError) as e: self.error = str(e)
+
+    def run(self):
+        try:
+            while True:
+                data = os.read(self.src.fileno(), 65536)
+                if not data: break
+                with self.lock:
+                    if self.ended: continue   # the log has its summary line: the count must not move past it
+                    n = sum(self.flt.counts.values())
+                    if self.raw: out = data
+                    else:
+                        try: out = self.flt.feed(data)
+                        except Exception as e:   # a defect in the filter must not cost the log: what it held goes on with the rest
+                            out = b"".join(self.flt.held) + self.flt.part + data
+                            self.flt.held = []; self.flt.part = b""; self.raw = f"filter: {e}"
+                    self._write(out)
+                    if sum(self.flt.counts.values()) != n:
+                        with STATE["lock"]: self.job["g4_hidden"] = dict(self.flt.counts)   # the record is saved under this lock
+        except (OSError, ValueError):
+            pass
+        finally:
+            self.end()
+            try: self.src.close()
+            except OSError: pass
+
+    def end(self):
+        """Writes what the filter still holds and the summary line, once. Called by the run thread when the output outlives the run."""
+        with self.lock:
+            if self.ended: return
+            rest = self.flt.finish()
+            summary = g4_summary(self.flt.counts, STATE["cfg"].get("lang", "en")).encode()
+            if summary and not (rest or self.last).endswith(b"\n"): rest += b"\n"
+            self._write(rest + summary)
+            self.ended = True
+
+
+def log_tail(path):
+    """The end of a log for the page. With the filter on, the known warnings are also left out of a log written without it,
+    as far as the last LOG_WINDOW bytes reach."""
+    def read(n):
+        with open(path, "rb") as fh:
+            fh.seek(0, 2); size = fh.tell(); fh.seek(max(0, size - n))
+            return fh.read(), size > n
+    raw, cut = read(LOG_TAIL)
+    if g4_enabled() and b"G4Exception" in raw:   # a log written with the filter seldom gets here, so the usual poll stays a short read
+        raw, cut = read(LOG_WINDOW)
+        if cut: raw = raw[raw.find(b"\n") + 1:]
+        if cut:   # a window that begins inside a block would leave the end of that block standing
+            pos = 0
+            for l in raw.split(b"\n", G4_BLOCK_MAX)[:G4_BLOCK_MAX]:
+                pos += len(l) + 1
+                if G4_START.match(l.rstrip(b"\r")): break
+                if G4_END.match(l.rstrip(b"\r")): raw = raw[pos:].lstrip(b"\r\n"); break
+        flt = G4Filter(); raw = flt.feed(raw) + flt.finish()
+        # the file has no summary line, so the view says what it left out of the part it read; else it could come out empty
+        raw = raw[-LOG_TAIL:] + (b"" if raw.endswith(b"\n") or not raw else b"\n") + g4_summary(flt.counts, STATE["cfg"].get("lang", "en")).encode()
+    return raw.decode("utf-8", "replace")[-LOG_TAIL:]
+
+
 OUT_EXT = (".csv", ".bin", ".binheader", ".root", ".xml", ".phsp", ".header", ".dcm")
 
 
@@ -533,14 +706,24 @@ def run_job(job):
         before = snapshot()
         job["total"], job["energy"] = job_size(param, max_age=0)   # the file may have been edited right before the start
         t0 = time.time(); job["t0"] = t0
-        with open(resolve(job["log"]), "w") as log:
-            log.write(f"# {job['start']}  {binary['cmd']} {param}\n# cwd: {out}\n"); log.flush()
-            proc = subprocess.Popen([os.path.expanduser(binary["cmd"]), param], cwd=out, stdout=log, stderr=subprocess.STDOUT,
-                                    env=env, start_new_session=True)
+        flt = G4Filter() if g4_enabled() else None   # switched off, TOPAS writes into the log itself, as it always did
+        with STATE["lock"]:
+            for k in ("g4_hidden", "log_error"): job.pop(k, None)
+        with open(resolve(job["log"]), "wb") as log:
+            log.write(f"# {job['start']}  {binary['cmd']} {param}\n# cwd: {out}\n".encode("utf-8", "replace")); log.flush()
+            proc = subprocess.Popen([os.path.expanduser(binary["cmd"]), param], cwd=out, stdout=subprocess.PIPE if flt else log,
+                                    stderr=subprocess.STDOUT, env=env, start_new_session=True)
             with STATE["lock"]: STATE["proc"] = proc
+            pump = None
+            if flt and getattr(proc, "stdout", None) is not None:
+                pump = LogPump(proc.stdout, log, flt, job); pump.start()
             while True:   # this thread is the only one that feeds the keep-awake heartbeat, so it must not block for the whole run
                 try: rc = proc.wait(timeout=AWAKE_EVERY); break
                 except subprocess.TimeoutExpired: tend_awake()
+            # the output ends with the run; a child that outlives it and keeps the pipe open must not hold up the queue
+            if pump is not None and not STATE.get("closing"):
+                pump.join(PUMP_WAIT); pump.end()
+                if pump.error or pump.raw: job["log_error"] = pump.error or pump.raw
         if STATE.get("closing"): return   # the server is ending: the record stays "running", so the next start runs the job again
         job["seconds"] = round(time.time() - t0)
         job["outputs"] = sorted(relp(os.path.join(out, f)) for f, mt in snapshot().items()
@@ -550,7 +733,7 @@ def run_job(job):
         job["hints"] = log_hints(resolve(job["log"]))
         if job["status"] == "failed" and not job["hints"]:
             with open(resolve(job["log"]), errors="replace") as fh:
-                job["hints"] = [l.rstrip() for l in fh.readlines()[-3:] if l.strip()]
+                job["hints"] = [l.rstrip() for l in [l for l in fh.readlines() if not l.startswith("# Geant4")][-3:] if l.strip()]
     except Exception as e:  # report everything in the job record
         job["status"] = "failed"; job["error"] = str(e)
     finally:
@@ -1490,7 +1673,7 @@ class H(BaseHTTPRequestHandler):
                                        "counts": counts, "finished": len(finished), "rev": rev, "external": external_runs()})
             if u.path == "/api/log":
                 p = resolve(q.get("p", ""))
-                with open(p, errors="replace") as fh: fh.seek(0, 2); size = fh.tell(); fh.seek(max(0, size - 12000)); return self.send(200, {"text": fh.read()})
+                return self.send(200, {"text": log_tail(p)})
             if u.path == "/api/csv":
                 col = q.get("collapse"); sl = q.get("slice")
                 res = read_any(resolve(q.get("p", "")), int(q.get("stat", 0) or 0),
@@ -1608,6 +1791,7 @@ class H(BaseHTTPRequestHandler):
                 if "keep_awake" in b: cfg["keep_awake"] = bool(b["keep_awake"])
                 if "keep_display" in b: cfg["keep_display"] = bool(b["keep_display"])
                 if "toast" in b: cfg["toast"] = bool(b["toast"])
+                if "g4_filter" in b: cfg["g4_filter"] = bool(b["g4_filter"])
                 for k in ("exclude", "include"):
                     if k in b: cfg[k] = [str(x).strip() for x in b[k] if str(x).strip()][:200]; invalidate_cache()
                 if "binaries" in b:
