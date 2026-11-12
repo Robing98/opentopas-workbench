@@ -1050,3 +1050,25 @@ def test_mcp_overview_brief(ws, clock):
     assert b["total"]["n"] == 5 and b["total"]["left"] == 360 and b["total"]["estimated_jobs"] == 4
     assert b["total"]["finish"] == time.strftime("%Y-%m-%d %H:%M", time.localtime(T0 + 360))
     assert json.dumps(b)   # plain JSON for the MCP client
+
+
+@pytest.mark.parametrize("log_text,counts", [("Physics tables built\n", (9, 12)),
+                                             ("G4WT0 > Begin processing for Run: 7, History: 0\n", (0, 0))])
+def test_live_info_never_past_the_end_when_signs_outrun_the_plan(ws, clock, log_text, counts):
+    # more Run10035 warnings, or a higher run number, than the plan has runs: the plan is wrong, the job is not done
+    job = step_job(ws, [100, 100, 100, 100], log_text=log_text)
+    for c in counts:
+        if c: job["g4_hidden"] = {"Run10035": c}
+        clock["t"] += 10
+        lv = wb.live_info(job)
+        assert 0 <= lv["frac"] < 1 and lv["step"] == 4 and lv.get("eta", 0) >= 0
+
+
+def test_jobs_folder_line():
+    from opentopas_workbench import mcp
+    g = {"folder": "a", "n": 1, "done": 0, "failed": 0, "left": 0, "unknown": 1, "finish": "2026-11-12 20:00"}
+    assert mcp.folder_line(g) == "folder   a: 0 of 1, 1 without estimate"   # no end time "now" for an unknown job
+    g.update(unknown=0, left=600, finish="2026-11-12 20:10")
+    assert mcp.folder_line(g) == "folder   a: 0 of 1, ends about 20:10"
+    g.update(overdue=125, folder="")
+    assert mcp.folder_line(g) == "folder   .: 0 of 1, overdue by 2 min"

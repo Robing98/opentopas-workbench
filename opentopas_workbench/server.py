@@ -450,7 +450,8 @@ def live_info(job):
     if plan.get("kind") == "random":
         if sig["run"] is not None: done = sig["run"]; step = done + 1
     elif runs > 1:
-        before = max(sig["run"] or 0, warned - 1, 0)   # runs that have ended
+        # runs that have ended; never all of them before the end mark, even when the signs outrun a wrong plan
+        before = min(max(sig["run"] or 0, warned - 1, 0), runs - 1)
         if sig["run"] is not None or warned: step = min(before + 1, runs)
         if step is None: pass   # no sign yet: nothing is measured, not even zero
         elif cum and before < len(cum): done = cum[before] + (sig["hist"] or 0 if sig["run"] == before else 0)

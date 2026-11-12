@@ -660,6 +660,14 @@ def cli_enqueue(argv):
     for f in r["skipped_with_results"]: print(f"skipped  {f}  (results exist)")
 
 
+def folder_line(g):
+    """One folder of the queue overview for `jobs`. A job without an estimate adds nothing to the time left, so a
+    folder with one has no end time worth naming."""
+    when = (f", overdue by {g['overdue'] // 60} min" if g.get("overdue") else f", {g['unknown']} without estimate" if g.get("unknown")
+            else f", ends about {g['finish'][11:]}" if g.get("finish") else "")
+    return f"folder   {g['folder'] or '.'}: {g['done'] + g['failed']} of {g['n']}{when}"
+
+
 def cli_jobs(argv):
     """opentopas-workbench jobs: the queue of the running workbench."""
     ap = argparse.ArgumentParser(prog="opentopas-workbench jobs", description="Show the run queue of the workbench.")
@@ -690,9 +698,7 @@ def cli_jobs(argv):
     tot = (ov or {}).get("total") or {}
     if tot.get("overdue") and not tot.get("left"): print(f"queue overdue by {tot['overdue'] // 60} min")
     elif r.get("queue_eta"): print(f"queue ends about {r['queue_eta']['finish']}")
-    for g in (ov or {}).get("folders", []):
-        when = f", overdue by {g['overdue'] // 60} min" if g.get("overdue") else f", ends about {g['finish'][11:]}" if g.get("finish") else ""
-        print(f"folder   {g['folder'] or '.'}: {g['done'] + g['failed']} of {g['n']}{when}")
+    for g in (ov or {}).get("folders", []): print(folder_line(g))
     if not (r["running"] or ext or r["waiting"] or r["finished"]): print("the queue is empty")
 
 
