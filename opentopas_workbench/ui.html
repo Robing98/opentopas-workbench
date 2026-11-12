@@ -140,6 +140,8 @@ kbd{font:12.5px ui-monospace,Consolas,monospace;padding:1px 6px;border:1px solid
   td.f{white-space:normal;overflow-wrap:break-word}
   main{padding:10px}
   .card{padding:10px}
+  .qg{grid-template-columns:1fr auto;gap:4px 10px}.qg .bar{grid-column:1/-1}.qg .e{grid-column:1/-1;text-align:left}
+  td .bar{width:48px}
 }
 @media (max-width:520px){header h1{display:none}}
 </style>
@@ -725,7 +727,7 @@ function endTxt(g){return g.finish==null?t("q_group_done"):isLate(g)?`${t("q_ove
 function jobShare(x){return x.progress!=null?{v:x.progress,est:false}:x.plan&&x.plan.share!=null?{v:x.plan.share,est:true}:null}
 function jobLeft(x){const p=x.plan||{};return x.eta!=null&&x.progress!=null?`${t("eta")} ${fmtDur(x.eta)}`:p.overdue?`<span class="late">${t("q_overdue")} ${fmtDur(p.overdue)}</span>`:p.left!=null?`${t("eta")} ≈ ${fmtDur(p.left)}`:""}
 function groupRow(g,all){const fin=g.done+g.failed,name=all?t("q_all"):g.name||t("q_root");
- return `<div class="qg${all?" all":""}" title="${esc(name)}"><span class="n">${all||!g.name?esc(name):pathHtml(name)}</span><span>${fin} ${t("q_of")} ${g.n}${g.failed?` <span class="st-failed">(${g.failed} ${t("st_failed")})</span>`:""}</span><span class="bar${g.estimated?" est":""}"${g.estimated?` title="${esc(t("q_est_tip"))}"`:""}><i style="width:${(g.share*100).toFixed(1)}%"></i></span><span class="e${isLate(g)?" late":""}">${g.unknown&&g.finish!=null?`${g.unknown} ${t("q_unknown")}`:esc(endTxt(g))}${g.used&&g.finish!=null&&!g.unknown?` · ${fmtDur(g.used)} + ≈ ${fmtDur(g.left)}`:g.used?` · ${fmtDur(g.used)}`:""}</span></div>`}
+ return `<div class="qg${all?" all":""}" title="${esc(name)}"><span class="n">${all||!g.name?esc(name):pathHtml(name)}</span><span>${fin} ${t("q_of")} ${g.n}${g.failed?` <span class="st-failed">(${g.failed} ${t("st_failed")})</span>`:""}</span><span class="bar${g.estimated?" est":""}"${g.estimated?` title="${esc(t("q_est_tip"))}"`:""}><i style="width:${(g.share*100).toFixed(1)}%"></i></span><span class="e${isLate(g)?" late":""}">${g.unknown&&g.finish!=null?`${g.unknown} ${t("q_unknown")}`:esc(endTxt(g))}${g.used&&g.finish!=null&&!g.unknown&&g.left>=1?` · ${fmtDur(g.used)} + ≈ ${fmtDur(g.left)}`:g.used?` · ${fmtDur(g.used)}`:""}</span></div>`}
 function renderGroups(){const o=JOBS&&JOBS.overview,box=$("qGroups");const html=o&&o.total.n>1?groupRow(o.total,true)+(o.groups.length>1||o.groups[0].name?o.groups.map(g=>groupRow(g)).join(""):""):"";
  if(Q.html.groups!==html){Q.html.groups=html;box.innerHTML=html}}
 function sec(txt){return `<tr class="qsec"><td colspan="6">${esc(txt)}</td></tr>`}

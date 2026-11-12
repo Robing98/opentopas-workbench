@@ -9,7 +9,7 @@ A local web UI for [OpenTOPAS](https://github.com/OpenTOPAS/OpenTOPAS) and TOPAS
 ## Features
 
 - **Files**: browse, edit, rename, copy, and trash files in a workspace folder. The editor highlights TOPAS syntax, checks it while you type (missing type prefix, unquoted strings, missing units, vector counts, missing `includeFile` targets), and suggests parameter names.
-- **Runs**: queue parameter files for one or more TOPAS installations. Progress bar with remaining time, live log with highlighted errors and without a known harmless Geant4 warning that can come thousands of times (see [Geant4 warnings in the log](#geant4-warnings-in-the-log)), stop button, optional output subfolder. Existing results are detected, also when the cases were run outside the workbench. The queue survives a restart of the workbench (see [Restart and Ctrl+C](#restart-and-ctrlc)).
+- **Runs**: queue parameter files for one or more TOPAS installations. Progress per run and per spot step, end time per job and for the queue as a whole and per folder (see [Progress and end times](#progress-and-end-times)), live log with highlighted errors and without a known harmless Geant4 warning that can come thousands of times (see [Geant4 warnings in the log](#geant4-warnings-in-the-log)), stop button, optional output subfolder. Existing results are detected, also when the cases were run outside the workbench. The queue survives a restart of the workbench (see [Restart and Ctrl+C](#restart-and-ctrlc)).
 - **Overview**: every result in the workspace in one table, filtered by particle, energy, folder, or file-name tags. Beam data come from the parameter file that wrote the output. R80, BPW80, deviations to a reference (for example the case without filter), a Bragg-Kleeman range check, your own formula columns, CSV export, and an image gallery with full-screen view.
 - **Results**: plot TOPAS CSV scorer output and measured curves (PTW `.mcc`, IBA `.asc`, column files). Overlay curves with normalisation, log axis, drag zoom, hover read-out, and difference or ratio to a reference. Bragg peak metrics (R80, BPW80, D80-D20, ΔR80, filter BPW80). 2D and 3D binnings show as a heat map.
 - **Beam profile**: the monitor planes and 3D dose grids of a folder. x and y profiles (integrated or as a cut through the centroid, linear or logarithmic for the halo) and the 2D map per plane; the envelope, sigma, FWHM, centroid, or halo share along the beam line for several cases at once; energy spectra; lateral dose profiles at a depth picked with a slider, and sigma against depth. Every profile gets a Gaussian core fit (sigma, mean), FWHM, rms, the share outside 3 sigma, and a double Gaussian (core and halo sigma, halo share) where the profile has a halo.
@@ -69,6 +69,22 @@ The queue is kept in `WORKSPACE/.workbench/jobs.json` and continues when the wor
 To start with an empty queue, remove the waiting jobs in the Runs tab before you end the workbench, or right after the start.
 
 While a job runs, the first Ctrl+C in the terminal only prints a warning, and a second one within 3 seconds ends the workbench and stops the job. With no job running, one Ctrl+C is enough. A closing terminal and `kill` end the workbench at once.
+
+## Progress and end times
+
+The Runs tab shows for every job how far it is and when it should end, and for the queue the same in total and per folder, for example "arc/phantom/laeufe: 17 of 25, ends about 01:34".
+
+- Size of a job: the histories and the number of runs come from the parameter file, including its `includeFile` chain. Histories given by a time feature (`i:So/Beam/NumberOfHistoriesInRun = Tf/Spot/Value`) are summed over the sequential times, so a spot-step input counts one run per spot. For a phase space source, the histories come from the header of the phase space file beside the input.
+- Progress: from the history lines that TOPAS prints at `i:Ts/ShowHistoryCountAtInterval`, with the run they belong to. Where Geant4 warns once per run (Run10035, see below), the count of those warnings also tells how many runs have begun. The phase changes to "Simulation" when the first run begins.
+- Time left: from the measured rate. Before a rate exists, or for a run that prints no progress, from a runtime model fitted to finished jobs of the same program, thread count, kind of input, and folder. Such a time is marked "≈" and its bar is striped. A job that runs past its estimate shows "overdue by" instead of an end time in the past.
+
+A run prints its progress only with `i:Ts/ShowHistoryCountAtInterval` set above 0. The generators of the workbench set it. For parameter files written elsewhere, add:
+
+```
+i:Ts/ShowHistoryCountAtInterval = 50000
+```
+
+For a single run, use about the histories divided by 200. For spot steps written as time features, use a large value such as 1000000: TOPAS then prints one line at the start of each run, which is enough to count the steps without filling the log.
 
 ## Geant4 warnings in the log
 

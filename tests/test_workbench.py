@@ -1039,3 +1039,14 @@ def test_http_jobs_sends_plan_overview_and_live_status(srv, ws, clock):
     assert by[3]["plan"] == {"est": 100, "left": 60, "share": 0.4, "estimated": True} and by[4]["plan"]["est"] == 100
     assert by[3]["live"]["phase"] == "init" and by[3]["live"]["runs"] == 1 and "plan" not in by[2]
     assert r["queue_eta"]["seconds"] == 360 and r["queue_eta"]["finish"] == time.strftime("%H:%M", time.localtime(T0 + 360))
+
+
+def test_mcp_overview_brief(ws, clock):
+    from opentopas_workbench import mcp
+    assert mcp.overview_brief(None) is None
+    ov, _ = wb.queue_overview(queue_jobs(ws, 3))
+    b = mcp.overview_brief(ov)
+    assert [g["folder"] for g in b["folders"]] == ["arc", "pdd"] and "folder" not in b["total"]
+    assert b["total"]["n"] == 5 and b["total"]["left"] == 360 and b["total"]["estimated_jobs"] == 4
+    assert b["total"]["finish"] == time.strftime("%Y-%m-%d %H:%M", time.localtime(T0 + 360))
+    assert json.dumps(b)   # plain JSON for the MCP client

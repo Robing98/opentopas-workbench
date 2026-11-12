@@ -363,8 +363,21 @@ def t_queue_status(wb, a):
     finished = [job_brief(j, full=True) for j in jobs if j["status"] not in ("queued", "running")]
     return {"running": running, "waiting_count": len(waiting), "waiting": waiting[:20],
             "finished": list(reversed(finished))[:n], "external": r.get("external", []), "counts": r["counts"],
-            "queue_eta": r.get("queue_eta"),
+            "queue_eta": r.get("queue_eta"), "overview": overview_brief(r.get("overview")),
             "keep_awake": r.get("awake")}
+
+
+def overview_brief(ov):
+    """Queue progress in total and per folder, with clock times instead of epoch seconds."""
+    if not ov: return None
+    def one(g):
+        out = {k: g[k] for k in ("n", "done", "failed", "used", "left", "unknown", "overdue") if g.get(k) is not None}
+        if g.get("name") is not None: out["folder"] = g["name"]
+        out["share"] = round(g.get("share") or 0.0, 3)
+        if g.get("finish") is not None: out["finish"] = time.strftime("%Y-%m-%d %H:%M", time.localtime(g["finish"]))
+        if g.get("estimated"): out["estimated_jobs"] = g["estimated"]
+        return out
+    return {"total": one(ov["total"]), "folders": [one(g) for g in ov["groups"]]}
 
 
 def t_job_log(wb, a):
@@ -673,7 +686,13 @@ def cli_jobs(argv):
     for j in r["waiting"]: print(f"waiting  #{j['id']} {j['file']} ({j['binary']}){note(j)}")
     if r["waiting_count"] > len(r["waiting"]): print(f"         ... {r['waiting_count'] - len(r['waiting'])} more waiting")
     for j in r["finished"]: print(f"{j['status']:<8} #{j['id']} {j['file']} ({j['binary']}) {j.get('end', '')}{note(j)}")
-    if r.get("queue_eta"): print(f"queue ends about {r['queue_eta']['finish']}")
+    ov = r.get("overview")
+    tot = (ov or {}).get("total") or {}
+    if tot.get("overdue") and not tot.get("left"): print(f"queue overdue by {tot['overdue'] // 60} min")
+    elif r.get("queue_eta"): print(f"queue ends about {r['queue_eta']['finish']}")
+    for g in (ov or {}).get("folders", []):
+        when = f", overdue by {g['overdue'] // 60} min" if g.get("overdue") else f", ends about {g['finish'][11:]}" if g.get("finish") else ""
+        print(f"folder   {g['folder'] or '.'}: {g['done'] + g['failed']} of {g['n']}{when}")
     if not (r["running"] or ext or r["waiting"] or r["finished"]): print("the queue is empty")
 
 
