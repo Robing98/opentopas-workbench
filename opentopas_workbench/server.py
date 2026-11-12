@@ -362,6 +362,7 @@ def job_size(path, max_age=10.0):
     return (info["hist"], info["etot"]) if info else (None, None)
 
 
+LIVE_CAP = 0.99   # share that a running job reaches at most between two signs of progress: only its end makes it 1
 LIVE = {}   # job id -> what the polls have learned about the running job: its plan, when its first run began, progress samples
 TICK = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
 PAGE_SIZE = os.sysconf("SC_PAGE_SIZE") if hasattr(os, "sysconf") else 4096
@@ -451,13 +452,15 @@ def live_info(job):
     elif runs > 1:
         before = max(sig["run"] or 0, warned - 1, 0)   # runs that have ended
         if sig["run"] is not None or warned: step = min(before + 1, runs)
-        if cum and before < len(cum): done = cum[before] + (sig["hist"] or 0 if sig["run"] == before else 0)
-        elif step is not None: frac = before / runs
+        if step is None: pass   # no sign yet: nothing is measured, not even zero
+        elif cum and before < len(cum): done = cum[before] + (sig["hist"] or 0 if sig["run"] == before else 0)
+        else: frac = before / runs
     else:
         done = sig["hist"]
     if done is not None and total: done = min(done, total); frac = done / total
     if sig["started"] or step is not None or (u and u[2] > 1): L.setdefault("run_t0", now)
     info["phase"] = "output" if sig["complete"] else "run" if "run_t0" in L else "init"
+    if info["phase"] == "init": L["init_seen"] = True
     if step is not None and runs > 1: info["step"] = step
     if done is not None: info["done"] = done
     if frac is not None:
@@ -468,11 +471,14 @@ def live_info(job):
             (ta, fa), (tb, fb) = L["first"], L["lastp"]
             if fb > fa and tb > ta:
                 rate = (fb - fa) / (tb - ta)   # share per second since the first sign, so without the initialisation
-                info["frac"] = min(1.0, fb + rate * (now - tb))   # goes on smoothly between two signs
+                info["frac"] = max(fb, min(LIVE_CAP, fb + rate * (now - tb)))   # goes on smoothly between two signs
                 info["eta"] = round((1 - info["frac"]) / rate)
                 if total: info["rate"] = rate * total; info["est_done"] = info["frac"] * total
             elif frac < 1:
-                info["eta"] = round((now - L.get("run_t0", now)) * (1 - frac) / frac)
+                # one sign only: the share against the time it took. The start of the first run is known only when a
+                # poll saw the initialisation before it; else the whole time of the job counts, which errs on the long side.
+                span = now - (L["run_t0"] if L.get("init_seen") else job.get("t0", now))
+                if span > 0: info["eta"] = round(span * (1 - frac) / frac)
     if "run_t0" in L: info["run_elapsed"] = round(now - L["run_t0"])
     if u:
         if L.get("cpu") and now > L["cpu"][0]:
@@ -492,7 +498,8 @@ _MODEL = {"key": None, "fits": {}}
 
 def job_measures(j):
     """(key, runs, weight) of a job for the runtime model. The key holds what must be equal for two jobs to share a fit:
-    program, thread count, and whether the weight is histories x MeV ("e"), histories ("h") or unknown ("").
+    program, thread count, whether the weight is histories x MeV ("e"), histories ("h") or unknown (""), and the folder,
+    since the inputs of one study share geometry and physics.
     A record from before these fields existed, and a waiting job, are completed from the parameter file."""
     hist, energy, runs, threads = j.get("total"), j.get("energy"), j.get("runs"), j.get("threads")
     if "runs" not in j or (j["status"] == "queued" and "total" not in j):
@@ -502,7 +509,15 @@ def job_measures(j):
             if j["status"] == "queued": hist, energy = info.get("hist"), info.get("etot")
             runs, threads = info.get("runs"), info.get("threads")
     kind = "e" if hist and energy else "h" if hist else ""
-    return (j["binary"], threads, kind), runs or 1, (hist * energy if kind == "e" else hist or 0)
+    return (j["binary"], threads, kind, os.path.dirname(j["file"])), runs or 1, (hist * energy if kind == "e" else hist or 0)
+
+
+def model_keys(k):
+    """The key of a job and its wider forms, the closest first: the same folder with any thread count, then any folder.
+    A job whose histories are unknown is not compared across folders: nothing but the folder says how large it is."""
+    keys = [k, (k[0], None, k[2], k[3])]
+    if k[2]: keys += [(k[0], k[1], k[2], None), (k[0], None, k[2], None)]
+    return list(dict.fromkeys(keys))
 
 
 def _solve(A, b):
@@ -540,20 +555,22 @@ def fit_runtime(rows):
             coef = [0.0, 0.0, 0.0]
             for c, s in zip(cols, sol): coef[c] = s
             best = (err, tuple(coef))
-    return best[1] if best else None
+    if not best: return None
+    ratios = sorted(r[0] / (best[1][0] + best[1][1] * r[1] + best[1][2] * r[2]) for r in rows)
+    mid = ratios[len(ratios) // 2] if len(ratios) % 2 else (ratios[len(ratios) // 2 - 1] + ratios[len(ratios) // 2]) / 2
+    return tuple(c * mid for c in best[1])   # half of the jobs took longer than the fit says, half took less
 
 
 def runtime_model(finished):
-    """Fits per kind of job from the finished jobs: {key: (a, b, c)}, also under the key without the thread count for a
-    job whose thread count has no finished job yet. Fitted again only when a job has finished."""
+    """Fits per kind of job from the finished jobs: {key: (a, b, c)}, also under the wider keys of model_keys for a job
+    whose folder or thread count has no finished job yet. Fitted again only when a job has finished."""
     done = [j for j in finished if j["status"] == "done" and j.get("seconds")]
     key = (STATE["root"], len(done), done[-1]["id"] if done else None)
     if _MODEL["key"] == key: return _MODEL["fits"]
     groups = {}
     for j in done:
         k, runs, w = job_measures(j)
-        for kk in (k, (k[0], None, k[2]) if k[1] is not None else None):
-            if kk: groups.setdefault(kk, []).append((j["seconds"], runs, w))
+        for kk in model_keys(k): groups.setdefault(kk, []).append((j["seconds"], runs, w))
     fits = {k: f for k, f in ((k, fit_runtime(rows[-MODEL_JOBS:])) for k, rows in groups.items()) if f}
     _MODEL.update(key=key, fits=fits)
     return fits
@@ -562,7 +579,7 @@ def runtime_model(finished):
 def predict_seconds(fits, j):
     """Expected run time of a job from the model, None when no job of its kind has finished."""
     k, runs, w = job_measures(j)
-    f = fits.get(k) or fits.get((k[0], None, k[2]))
+    f = next((fits[kk] for kk in model_keys(k) if kk in fits), None)
     return None if f is None else f[0] + f[1] * runs + f[2] * w
 
 
@@ -580,12 +597,12 @@ def queue_overview(jobs, now=None):
     batch = [j for j in jobs if j["status"] not in ("queued", "running") and (j.get("end") or "") >= since and since]
     fits = runtime_model([j for j in jobs if j["status"] not in ("queued", "running")])
     groups, per_job = {}, {}
-    total = {"n": 0, "done": 0, "failed": 0, "used": 0, "left": 0, "unknown": 0, "estimated": 0, "share": 0.0}
+    total = {"n": 0, "done": 0, "failed": 0, "used": 0, "left": 0, "unknown": 0, "estimated": 0, "share": 0.0, "overdue": 0}
 
     def group(j):
         name = os.path.dirname(j["file"])
         g = groups.setdefault(name, {"name": name, "n": 0, "done": 0, "failed": 0, "running": 0, "used": 0, "left": 0,
-                                     "unknown": 0, "estimated": 0, "share": 0.0, "finish": None})
+                                     "unknown": 0, "estimated": 0, "share": 0.0, "overdue": 0, "finish": None})
         return g
 
     def add(g, **kw):
@@ -605,7 +622,7 @@ def queue_overview(jobs, now=None):
             elif pred is not None:
                 left = max(0.0, pred - el); share = min(el / pred, 0.99) if pred > 0 else 0.0
                 e.update(left=round(left), share=share, estimated=True)
-                if el > pred: e["overdue"] = round(el - pred)
+                if el > pred: e["overdue"] = round(el - pred); add(g, overdue=e["overdue"])
             else: left = None; share = 0.0
             add(g, n=1, used=round(el), share=share)
         else:
@@ -618,9 +635,10 @@ def queue_overview(jobs, now=None):
         if e: per_job[j["id"]] = e
     for d in list(groups.values()) + [total]:
         d["left"] = round(d["left"]); d["share"] = round(d["share"] / d["n"], 4) if d["n"] else 0.0
-    for g in groups.values(): g["finish"] = round(g["finish"])
+    for g in groups.values():   # a folder whose jobs have all ended has no end time ahead
+        if g["finish"] is not None: g["finish"] = round(g["finish"])
     total["finish"] = round(now + ahead)
-    order = sorted(groups.values(), key=lambda g: (g["done"] + g["failed"] == g["n"], g["finish"]))
+    order = sorted(groups.values(), key=lambda g: (g["finish"] is None, g["finish"] or 0, g["name"]))
     return {"total": total, "groups": order}, per_job
 
 

@@ -196,9 +196,10 @@ def test_progress_and_hints(tmp_path):
     log = tmp_path / "job.log"
     log.write_text("G4WT1 > Begin processing for Run: 0, History: 1000\nG4WT0 > Begin processing for Run: 0, History: 3000\n"
                    "This is not necessarily an error.\nTopas is exiting due to a serious error.\n")
-    assert wb.log_progress(str(log)) == 3000
+    sig = wb.log_signal(str(log))
+    assert (sig["run"], sig["hist"], sig["started"], sig["complete"]) == (0, 3000, True, False)
     assert wb.log_hints(str(log)) == ["Topas is exiting due to a serious error."]
-    assert wb.total_histories("i:So/A/NumberOfHistoriesInRun = 10\ni:So/B/NumberOfHistoriesInRun = 5\n") == 15
+    assert wb.total_histories("i:So/A/NumberOfHistoriesInRun = 10\ni:So/B/NumberOfHistoriesInRun = 5\n") == 10   # a run takes the largest count of its sources
 
 
 def test_read_measured_formats(tmp_path):
@@ -310,12 +311,12 @@ def test_http_views_zip_variants(srv, ws):
 def test_queue_estimate(ws):
     for name, e in (("a.txt", 100), ("b.txt", 200), ("c.txt", 100)):
         (ws / name).write_text(f"d:So/D/BeamEnergy = {e} MeV\ni:So/D/NumberOfHistoriesInRun = 1000\n")
-    jobs = [{"file": "a.txt", "binary": "t", "status": "done", "seconds": 100, "total": 1000, "energy": 100.0},
-            {"file": "b.txt", "binary": "t", "status": "queued"},
-            {"file": "c.txt", "binary": "t", "status": "queued"}]
+    jobs = [{"id": 1, "file": "a.txt", "binary": "t", "status": "done", "seconds": 100, "total": 1000, "energy": 100.0},
+            {"id": 2, "file": "b.txt", "binary": "t", "status": "queued"},
+            {"id": 3, "file": "c.txt", "binary": "t", "status": "queued"}]
     est = wb.queue_estimate(jobs)
     assert est["seconds"] == 300 and est["unknown"] == 0   # 200 MeV takes twice as long as 100 MeV
-    assert wb.queue_estimate([{"file": "b.txt", "binary": "t", "status": "queued"}]) is None
+    assert wb.queue_estimate([{"id": 2, "file": "b.txt", "binary": "t", "status": "queued"}]) is None
 
 
 def test_scan_include_exclude(ws):
@@ -385,7 +386,7 @@ def test_parsed_facts_survive_a_restart(ws, monkeypatch):
     (ws / "c").mkdir()
     for k in range(3): (ws / "c" / f"case{k}.txt").write_text(PARAM + f's:Sc/A/OutputFile = "o{k}"\n')
     assert len(wb.list_params()["files"]) == 3
-    with open(ws / ".workbench" / "index.json") as fh: assert json.load(fh)["v"] == 4
+    with open(ws / ".workbench" / "index.json") as fh: assert json.load(fh)["v"] == 5
     wb._PC["root"] = None; wb.invalidate_cache()   # what a new process sees
     opened = []
     monkeypatch.setattr(wb, "open", lambda f, *a, **k: (opened.append(str(f)), open(f, *a, **k))[1], raising=False)
@@ -847,3 +848,194 @@ def test_log_tail_that_begins_inside_a_block(ws):
     log = ws / "old.log"
     log.write_text("# head\n" + g4_block() * 3000 + "Execution done\n")   # more warnings than the window reads
     assert log.stat().st_size > wb.LOG_WINDOW and wb.log_tail(str(log)).startswith("Execution done\n# Geant4 warning Run10035 (Event modulo reduced to 1) hidden 1")
+
+
+# ------------------------------------------------------------------ run plan, live progress, runtime model, queue overview
+T0 = 1_800_000_000.0   # the frozen clock of these tests
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    c = {"t": T0}
+    monkeypatch.setattr(wb.time, "time", lambda: c["t"])
+    wb.LIVE.clear(); wb._MODEL.update(key=None, fits={})
+    yield c
+    wb.LIVE.clear(); wb._MODEL.update(key=None, fits={})
+
+
+def stamp(t): return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t))
+
+
+def steps_input(values, extra=""):
+    n = len(values)
+    return (f"i:Tf/NumberOfSequentialTimes = {n}\nd:Tf/TimelineEnd = {n} ms\ns:Tf/Spot/Function = \"Step\"\n"
+            f"dv:Tf/Spot/Times = {n} {' '.join(str(k + 1) for k in range(n))} ms\n"
+            f"iv:Tf/Spot/Values = {n} {' '.join(map(str, values))}\n"
+            "i:So/Beam/NumberOfHistoriesInRun = Tf/Spot/Value\n" + extra)
+
+
+@pytest.mark.parametrize("values,kind", [([500], "plain"), ([100, 200, 300], "steps")])
+def test_run_plan_adds_up_the_spots_of_a_time_feature(values, kind):
+    plan = wb.run_plan(steps_input(values, "i:Ts/NumberOfThreads = 4\ni:Ts/ShowHistoryCountAtInterval = 0\n"), per_run=True)
+    assert (plan["hist"], plan["runs"], plan["kind"]) == (sum(values), len(values), kind)
+    assert plan["per_run"] == values and plan["threads"] == 4 and plan["silent"] is True
+
+
+def test_run_plan_of_a_plain_input_and_of_several_sources():
+    plan = wb.run_plan("i:So/A/NumberOfHistoriesInRun = 10\ni:So/B/NumberOfHistoriesInRun = 5\ni:Ts/ShowHistoryCountAtInterval = 100\n")
+    assert plan == {"hist": 10, "runs": 1, "kind": "plain", "threads": 1, "silent": False}
+    assert wb.run_plan('s:Ge/X/Type = "TsBox"\n')["hist"] is None
+
+
+def test_run_plan_follows_an_include_chain(ws):
+    (ws / "sub").mkdir()
+    (ws / "sub" / "base.txt").write_text("i:So/Beam/NumberOfHistoriesInRun = 7\ni:Ts/NumberOfThreads = 8\n")
+    (ws / "sub" / "mid.txt").write_text("includeFile = base.txt\ni:So/Beam/NumberOfHistoriesInRun = 70\n")
+    top = "includeFile = sub/mid.txt\ni:Ts/NumberOfThreads = 2\n"
+    plan = wb.run_plan(top, str(ws))
+    assert (plan["hist"], plan["threads"], plan["kind"]) == (70, 2, "plain")   # the including file wins
+    assert wb.run_plan("includeFile = sub/gone.txt\n", str(ws))["hist"] is None
+
+
+def test_run_plan_reads_the_phase_space_header(ws):
+    (ws / "beam.header").write_text("TOPAS ASCII Phase Space\n\nNumber of Original Histories: 1000\n"
+                                    "Number of Original Histories that Reached Phase Space: 800\nNumber of Scored Particles: 900\n")
+    src = 's:So/P/Type = "PhaseSpace"\ns:So/P/PhaseSpaceFileName = "beam"\n'
+    assert wb.run_plan(src, str(ws))["hist"] == 800 and wb.run_plan(src, str(ws))["kind"] == "phsp"
+    assert wb.run_plan(src + "i:So/P/PhaseSpaceMultipleUse = 3\n", str(ws))["hist"] == 2400
+    assert wb.run_plan(src + 'b:So/P/PhaseSpaceIncludeEmptyHistories = "True"\n', str(ws))["hist"] == 1000
+    assert wb.run_plan(src.replace("beam", "missing"), str(ws))["hist"] is None   # no header: unknown, not zero
+
+
+def test_run_plan_random_time_mode():
+    plan = wb.run_plan(steps_input([100, 200, 300], 'b:Tf/RandomizeTimeDistribution = "True"\ni:So/Beam/NumberOfHistoriesInRandomJob = 5000\n'))
+    assert (plan["kind"], plan["hist"], plan["runs"]) == ("random", 5000, 5000)
+
+
+def test_log_signal(tmp_path):
+    log = tmp_path / "job.log"
+    assert wb.log_signal(str(log)) == {"run": None, "hist": None, "started": False, "complete": False, "last": ""}
+    log.write_text("# header\nPhysics tables built\n")
+    sig = wb.log_signal(str(log))
+    assert sig["started"] is False and sig["last"] == "Physics tables built"
+    log.write_text("G4WT0 > Begin processing for Run: 0, History: 0\nG4WT1 > Begin processing for Run: 2, History: 0\n"
+                   "G4WT0 > Begin processing for Run: 1, History: 40\n")
+    sig = wb.log_signal(str(log))
+    assert (sig["run"], sig["hist"], sig["started"], sig["complete"]) == (2, 0, True, False)
+    log.write_text("Physics tables built\nTOPAS run sequence complete.\n")   # a silent run: only its end shows
+    sig = wb.log_signal(str(log))
+    assert sig["run"] is None and sig["started"] and sig["complete"]
+
+
+def step_job(ws, values, warned=None, log_text="Physics tables built\n"):
+    (ws / "steps.txt").write_text(steps_input(values, "i:Ts/ShowHistoryCountAtInterval = 0\n"))
+    (ws / "job.log").write_text(log_text)
+    job = {"id": 7, "file": "steps.txt", "binary": "t", "status": "running", "log": "job.log", "t0": T0 - 60,
+           "total": sum(values), "runs": len(values), "kind": "steps", "silent": True}
+    if warned: job["g4_hidden"] = {"Run10035": warned}
+    return job
+
+
+def test_live_info_counts_steps_from_the_run_warnings(ws, clock):
+    job = step_job(ws, [100, 200, 300])
+    lv = wb.live_info(job)
+    assert lv["phase"] == "init" and "frac" not in lv and "eta" not in lv and lv["runs"] == 3 and lv["silent"] is True
+    clock["t"] += 10; job["g4_hidden"] = {"Run10035": 2}   # the second run has begun: the first 100 histories are done
+    lv = wb.live_info(job)
+    assert lv["phase"] == "run" and lv["step"] == 2 and lv["done"] == 100 and lv["frac"] == pytest.approx(1 / 6)
+    assert "eta" not in lv   # the first sign at the moment it shows gives no rate yet, and never an end "now"
+    clock["t"] += 20; job["g4_hidden"] = {"Run10035": 3}
+    lv = wb.live_info(job)
+    assert lv["step"] == 3 and lv["done"] == 300 and lv["frac"] == pytest.approx(0.5)
+    assert lv["eta"] == 30 and lv["rate"] == pytest.approx(10.0)   # 200 histories in 20 s, 300 left
+    clock["t"] += 1000   # no further sign: the share stays below 1 and the end stays ahead
+    lv = wb.live_info(job)
+    assert lv["frac"] == wb.LIVE_CAP and lv["eta"] >= 0 and lv["phase"] == "run"
+
+
+def test_live_info_with_one_step_and_with_run_numbers_in_the_log(ws, clock):
+    job = step_job(ws, [500], log_text="G4WT0 > Begin processing for Run: 0, History: 250\n")
+    lv = wb.live_info(job)   # first poll finds the run under way: the whole time of the job counts
+    assert lv["phase"] == "run" and "step" not in lv and lv["done"] == 250 and lv["eta"] == 60
+    wb.LIVE.clear()
+    job = step_job(ws, [100, 200, 300], log_text="G4WT0 > Begin processing for Run: 0, History: 0\nG4WT0 > Begin processing for Run: 1, History: 0\n")
+    lv = wb.live_info(job)
+    assert lv["step"] == 2 and lv["done"] == 100
+    (ws / "job.log").write_text("TOPAS run sequence complete.\n")
+    assert wb.live_info(job)["phase"] == "output"
+
+
+def test_fit_runtime():
+    assert wb.fit_runtime([]) is None
+    a, b, c = wb.fit_runtime([(100, 1, 1000)])   # one job: the rule of three on the weight
+    assert (a, b) == (0, 0) and c == pytest.approx(0.1)
+    rows = [(30 + 2 * r + 0.01 * w, r, w) for r, w in ((1, 1000), (10, 1000), (50, 8000), (200, 3000), (400, 20000), (5, 500))]
+    a, b, c = wb.fit_runtime(rows)
+    assert (a, b, c) == pytest.approx((30, 2, 0.01), rel=1e-6)
+    a, b, c = wb.fit_runtime([(10 + 3 * r, r, 0) for r in (1, 5, 20, 80)])   # no histories known: time from the runs alone
+    assert c == 0 and (a, b) == pytest.approx((10, 3), rel=1e-6)
+    assert min(wb.fit_runtime([(100, 1, 1000), (90, 5, 1000), (40, 9, 1000)])) >= 0   # no term may shorten a run
+
+
+def queue_jobs(ws, n_wait):
+    """One finished and one running job in arc/, n_wait waiting ones in pdd/, all of the same size; a finished job of
+    an earlier queue that must not count."""
+    for d in ("arc", "pdd"): (ws / d).mkdir(exist_ok=True)
+    names = ["arc/a.txt", "arc/b.txt"] + [f"pdd/w{k}.txt" for k in range(n_wait)] + ["arc/old.txt"]
+    for name in names: (ws / name).write_text("d:So/D/BeamEnergy = 100 MeV\ni:So/D/NumberOfHistoriesInRun = 1000\n")
+    size = {"binary": "t", "total": 1000, "energy": 100.0, "runs": 1, "threads": 1}
+    jobs = [dict(size, id=1, file="arc/old.txt", status="done", seconds=100, queued=stamp(T0 - 9000), end=stamp(T0 - 8000)),
+            dict(size, id=2, file="arc/a.txt", status="done", seconds=100, queued=stamp(T0 - 500), end=stamp(T0 - 250)),
+            dict(size, id=3, file="arc/b.txt", status="running", queued=stamp(T0 - 500), t0=T0 - 40)]
+    return jobs + [{"id": 4 + k, "file": f"pdd/w{k}.txt", "binary": "t", "status": "queued", "queued": stamp(T0 - 400)} for k in range(n_wait)]
+
+
+@pytest.mark.parametrize("n_wait", [1, 3])
+def test_queue_overview_per_folder(ws, clock, n_wait):
+    ov, per = wb.queue_overview(queue_jobs(ws, n_wait))
+    tot = ov["total"]
+    assert (tot["n"], tot["done"], tot["failed"], tot["unknown"]) == (2 + n_wait, 1, 0, 0)   # the old queue's job is left out
+    assert tot["left"] == 60 + 100 * n_wait and tot["finish"] == T0 + tot["left"] and tot["overdue"] == 0
+    arc, pdd = ov["groups"]   # the folder that ends first comes first
+    assert (arc["name"], arc["n"], arc["done"], arc["running"], arc["finish"]) == ("arc", 2, 1, 1, T0 + 60)
+    assert (pdd["name"], pdd["n"], pdd["done"], pdd["finish"]) == ("pdd", n_wait, 0, T0 + 60 + 100 * n_wait)
+    assert arc["share"] == pytest.approx(0.7) and pdd["share"] == 0
+    assert per[3] == {"est": 100, "left": 60, "share": 0.4, "estimated": True}
+    assert all(per[4 + k] == {"est": 100, "estimated": True} for k in range(n_wait))
+
+
+def test_queue_overview_overdue_and_measured(ws, clock):
+    jobs = queue_jobs(ws, 1)
+    jobs[2]["t0"] = T0 - 130   # past its estimate of 100 s
+    ov, per = wb.queue_overview(jobs)
+    assert per[3]["overdue"] == 30 and per[3]["left"] == 0 and ov["total"]["overdue"] == 30
+    assert ov["total"]["finish"] == T0 + 100 and all(g["finish"] >= T0 for g in ov["groups"])   # never before now
+    jobs[2].update(eta=15, progress=0.9)   # the run reports progress: measured, not estimated
+    ov, per = wb.queue_overview(jobs)
+    assert "overdue" not in per[3] and "estimated" not in per[3] and ov["total"]["left"] == 115 and ov["total"]["estimated"] == 1
+    for j in jobs[3:]: j["status"] = "done"; j["seconds"] = 90; j["end"] = stamp(T0 - 10)
+    jobs[2]["t0"] = T0 - 500; del jobs[2]["eta"]
+    ov, per = wb.queue_overview(jobs)   # only the overdue job is left: the end is now, and the overdue time is named
+    assert ov["total"]["finish"] == T0 and ov["total"]["overdue"] > 0
+    done = [g for g in ov["groups"] if g["name"] == "pdd"][0]
+    assert done["finish"] is None and ov["groups"][-1] is done
+    assert wb.queue_overview([j for j in jobs if j["status"] == "done"]) == (None, {})
+
+
+def test_queue_overview_without_a_finished_job(ws, clock):
+    jobs = [j for j in queue_jobs(ws, 3) if j["status"] != "done"]
+    ov, per = wb.queue_overview(jobs)
+    assert ov["total"]["unknown"] == 4 and ov["total"]["left"] == 0 and per == {}
+
+
+def test_http_jobs_sends_plan_overview_and_live_status(srv, ws, clock):
+    jobs = queue_jobs(ws, 3)
+    (ws / "job.log").write_text("Physics tables built\n"); jobs[2]["log"] = "job.log"
+    wb.STATE["jobs"] = jobs
+    r = call(srv + "/api/jobs")[1]
+    assert r["now"] == T0 and r["overview"]["total"]["finish"] == T0 + 360
+    assert [(g["name"], g["n"], g["done"]) for g in r["overview"]["groups"]] == [("arc", 2, 1), ("pdd", 3, 0)]
+    by = {j["id"]: j for j in r["jobs"]}
+    assert by[3]["plan"] == {"est": 100, "left": 60, "share": 0.4, "estimated": True} and by[4]["plan"]["est"] == 100
+    assert by[3]["live"]["phase"] == "init" and by[3]["live"]["runs"] == 1 and "plan" not in by[2]
+    assert r["queue_eta"]["seconds"] == 360 and r["queue_eta"]["finish"] == time.strftime("%H:%M", time.localtime(T0 + 360))
