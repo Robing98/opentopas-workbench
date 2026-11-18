@@ -140,6 +140,29 @@ def test_filter_must_lie_behind_the_monitors(bad):
 def test_element_positions_are_checked():
     with pytest.raises(ValueError): nz.generate(values(positions="132, 128, 124"))
     with pytest.raises(ValueError): nz.generate(values(positions="112, 116, 120, 124, 128, 132"))
+    with pytest.raises(ValueError): nz.generate(values(models=["wire"], positions="132, 128, 124, 120, 112.6, 112"))
+
+
+def test_automatic_monitor_planes_never_collide():
+    for at in (109.91, 109.95, 110.0, 110.05, 110.09):
+        nz.generate(values(variants=["t4"], filter_pos=str(at), mon_auto=True))
+
+
+@pytest.mark.parametrize("at", [108.0, 60.0])
+def test_pins_move_too(at):
+    t = dict(nz.generate(values(variants=["pin4"], filter_pos=str(at))))
+    case = next(v for k, v in t.items() if k.endswith(".txt"))
+    assert re.search(r"d:Ge/Pins/TransZ\s*=\s*([\d.]+) cm", case).group(1) == f"{at:.3f}"
+
+
+def test_hit_spread_reaches_the_source_and_matches_kinematics():
+    # independent check: kinetic energies of p +- FWHM/2, from p = sqrt(T^2 + 2 T m)
+    m, T = 938.272, 132.0
+    p = math.sqrt(T * T + 2 * T * m); f = nz.momentum_fwhm("p", T) / 100
+    tk = lambda q: math.sqrt(q * q + m * m) - m
+    sigma = (tk(p * (1 + f / 2)) - tk(p * (1 - f / 2))) / T / 2.3548 * 100
+    got = float(re.search(r"BeamEnergySpread\s*=\s*([\d.]+)", text()).group(1))
+    assert got == pytest.approx(sigma, rel=2e-3)
 
 
 def test_hit_momentum_spread():

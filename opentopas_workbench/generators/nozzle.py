@@ -71,7 +71,8 @@ FIELDS = [
     {"key": "wire_half", "type": "number", "default": 40,
      "label": {"en": "Wire model: radius of the wired area [mm]", "de": "Drahtmodell: Radius der bespannten Fläche [mm]"}},
     {"key": "hv_planes", "type": "number", "default": 2,
-     "label": {"en": "Wire model: high voltage planes per MWPC", "de": "Drahtmodell: Hochspannungsebenen je MWPC"}},
+     "label": {"en": "Wire model: high voltage planes per MWPC (mean tungsten 3.9 um with 0, 4.2 um with 2; method 2 has 3 um)",
+               "de": "Drahtmodell: Hochspannungsebenen je MWPC (mittleres Wolfram 3,9 µm bei 0, 4,2 µm bei 2; Methode 2 hat 3 µm)"}},
     {"key": "histories", "type": "number", "label": {"en": "Histories", "de": "Historien"}, "default": 100000},
     {"key": "spread", "type": "text", "default": "hit",
      "label": {"en": "Energy spread [%, sigma], or \"hit\" for the HIT momentum spread", "de": "Energiebreite [%, Sigma], oder \"hit\" für die HIT-Impulsbreite"}},
@@ -98,7 +99,8 @@ def numbers(text, what):
 def element_positions(text):
     pos = numbers(text, "element positions")
     if len(pos) != len(ELEMENTS): raise ValueError(f"give {len(ELEMENTS)} positions: {', '.join(ELEMENTS)}")
-    if any(b >= a for a, b in zip(pos, pos[1:])): raise ValueError("element positions must fall from the window to MWPC 2")
+    # 1 cm between neighbours: an MWPC of the wire model is about 8 mm deep (4 wire planes 2 mm apart and its water)
+    if any(a - b < 1.0 for a, b in zip(pos, pos[1:])): raise ValueError("element positions must fall from the window to MWPC 2, at least 1 cm apart")
     if pos[-1] <= 1 or pos[0] * 10 + 30 > WORLD_HZ: raise ValueError("element positions must lie between 1 and 142 cm")
     return pos
 
@@ -280,6 +282,9 @@ u:So/Demo/BeamEnergySpread         = {spread:.5f}
 s:So/Demo/BeamPositionDistribution = "Gaussian"
 d:So/Demo/BeamPositionSpreadX      = {float(v["sigma"]):g} mm
 d:So/Demo/BeamPositionSpreadY      = {float(v["sigma"]):g} mm
+s:So/Demo/BeamPositionCutoffShape  = "Ellipse"
+d:So/Demo/BeamPositionCutoffX      = {5 * float(v["sigma"]):g} mm
+d:So/Demo/BeamPositionCutoffY      = {5 * float(v["sigma"]):g} mm
 {angular(float(v.get("divergence") or 0))}i:So/Demo/NumberOfHistoriesInRun   = {hist}
 s:Sc/IDD/Quantity   = "DoseToMedium"
 s:Sc/IDD/Component  = "Phantom"
@@ -315,7 +320,10 @@ s:Sc/PHSP/OutputFile = "PHSP_{name}"
 b:Sc/PHSP/KillAfterPhaseSpace = "{"True" if v["phsp"] == "only" else "False"}"
 '''
     auto = [pos[0] + 0.5, pos[-1] - 0.5] + ([at_cm + 1.5, at_cm - 3.5] if variant != "rifi0" else []) + [0.0]
-    s += MON.block(v, name, auto, a * e_u, WORLD_HXY, WORLD_HZ)
+    kept = []                                                   # an automatic plane within 1 mm of another one is dropped
+    for p in auto:
+        if all(abs(p - q) >= 0.1 for q in kept): kept.append(p)
+    s += MON.block(v, name, kept, a * e_u, WORLD_HXY, WORLD_HZ)
     return name + ".txt", s
 
 
