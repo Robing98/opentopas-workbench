@@ -152,3 +152,36 @@ def test_discover_pairs_across_folders(tmp_path):
     for v in ("pyr4", "pin4e"): (sub / f"IDD_x_p063_{v}.csv").write_text("")
     pairs = kf.discover(str(sub), None, "rifi0", None)
     assert sorted(p[2] for p in pairs) == ["pin4e", "pyr4"] and all(p[0].endswith("IDD_x_p063_rifi0.csv") for p in pairs)
+
+
+# ------------------------------------------------------------------ binary plates, stacks and crossed pairs
+@pytest.mark.parametrize("variant,levels,step", [("bin4", 2, 2.0), ("stk4", 4, 1.0), ("stk4x3", 8, 0.5)])
+def test_binary_stacks_give_equally_frequent_thickness_steps(tmp_path, variant, levels, step):
+    v = {f["key"]: f.get("default") for f in rf.FIELDS}
+    v.update(energies="100", variants=[variant])
+    for name, content in rf.generate(v):
+        (tmp_path / name).write_text(content)
+    text = (tmp_path / f"mess_p100_{variant}.txt").read_text()
+    assert text.count('"TsRidgeFilter"') == len(rf.shape_plates(variant, 1.5))
+    args = type("A", (), {"pin": None, "stl": None, "heightmap": None, "ridge": None, "spr": 1.0, "stl_units": 1.0})()
+    t, w, mean, sd, _ = kf.true_kernel(kf.topas_info(str(tmp_path / f"IDD_mess_p100_{variant}.csv")), args)
+    plates = len(rf.shape_plates(variant, 1.5))
+    expect = plates * rf.BASE + step * np.arange(levels)                # PMMA mm, spr 1 here
+    # 0.1 mm window: steps are 0.5 mm or more, and the tool's 0.02 mm histogram bins drift a little per convolution
+    for e in expect:                                                    # each thickness carries 1/levels of the area
+        assert w[np.abs(t - e) < 0.1].sum() == pytest.approx(1 / levels, abs=0.01)
+    assert mean == pytest.approx(expect.mean(), abs=0.01)
+
+
+def test_pairs_are_two_crossed_t2_or_t4_triangles():
+    block = rf.variant_block("pair4", 1.5)
+    assert block.count('"TsRidgeFilter"') == 2 and "RotZ     = 90 deg" in block
+    assert rf.variant_block("t2", 1.5).split("d:Ge/RiFi1/RotZ")[1] in block   # the first plate is exactly t2
+    assert rf.shape_plates("pair4", 1.5) == [rf.triangle(2.0, 1.5)] * 2
+    assert rf.shape_plates("pair4v", 1.5) == [rf.triangle(4.0, 1.5)] * 2
+
+
+def test_shape_variant_names_are_checked():
+    for bad in ("bin4v", "pair4x3", "stk"):
+        with pytest.raises(ValueError):
+            rf.shape_plates(bad, 1.5)
