@@ -264,7 +264,11 @@ def test_laminate_plates_stand_apart_by_the_gap():
     tz = [float(x) for x in re.findall(r"TransZ\s*=\s*([\d.]+) cm", block)]
     assert tz == pytest.approx([80.0, 78.9, 77.8])                     # 1 mm plates, 10 mm air between
     assert [float(x) for x in re.findall(r"Width\s+= ([\d.]+) mm", block)] == pytest.approx([1.125, 0.75, 0.375])
-    assert "RotY" not in block and "TransX" not in block
+    assert "RotY" not in block
+    assert [float(x) for x in re.findall(r"TransX\s*=\s*(\S+) mm", block)] == pytest.approx([0.1875, 0.375])   # the first plate needs none
+    for d in re.findall(r"Displacement = \d+ ([-\d. ]+) mm", block):  # symmetric, or ridges leave the envelope box
+        d = [float(x) for x in d.split()]
+        assert min(d) == pytest.approx(-max(d))
     contact = rf.variant_block("stp4s0", 1.5)
     assert [float(x) for x in re.findall(r"TransZ\s*=\s*([\d.]+) cm", contact)] == pytest.approx([80.0, 79.9, 79.8])
     xb = rf.variant_block("xb4s10", 1.5)
@@ -279,7 +283,7 @@ def test_tilt_slides_the_downstream_plates_by_tilt_times_distance(tmp_path):
     the 3 mm share are (q - 0.33) / 1.5 = 3 % each, the 1 and 2 mm share 47 % each."""
     block = rf.variant_block("stp4s10n15", 1.5)
     assert re.findall(r"RotY\s*=\s*(\S+) mrad", block) == ["15", "15", "15"]
-    assert [float(x) for x in re.findall(r"TransX\s*=\s*(\S+) mm", block)] == pytest.approx([0.0, -0.165, -0.33])
+    assert [float(x) for x in re.findall(r"TransX\s*=\s*(\S+) mm", block)] == pytest.approx([0.0, 0.1875 - 0.165, 0.375 - 0.33])
     t, w, mean, _, _ = kernel_of("stp4s10n15", tmp_path)
     assert [w[np.abs(t - k) < 0.05].sum() for k in range(4)] == pytest.approx([0.25] * 4, abs=0.005)
     t, w, mean, _, _ = kernel_of("stp4s10n-15", tmp_path)
