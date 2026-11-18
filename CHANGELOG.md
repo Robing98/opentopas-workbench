@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Generator `nozzle`: the horizontal HIT nozzle in front of a water phantom, built from public values (Parodi et al. 2012, Tessonnier et al. 2015). Vacuum window, MWPC 1, IC 1 to 3, MWPC 2 as water layers, as tungsten on water, or with single tungsten wires; a ripple filter of any `ripple_filter` variant at any distance, in PMMA of 1.20 g/cm3 and I = 74 eV; the HIT momentum spread by energy; depth dose and lateral fluence at the isocenter; optionally a phase space at the end of the monitors.
 - Beam profile monitors: the `pencil_beam` and `ripple_filter` generators can add thin scoring planes in a parallel world at a list of positions or before and after every component, each with a 2D fluence map (bin width and extent as options), an optional split into protons, electrons, and other particles, and an energy spectrum.
 - Beam profile tab: x and y profiles (linear and logarithmic) and the 2D map per monitor plane, the envelope along the beam line for several cases, spectra, lateral dose profiles from 3D dose grids at a chosen depth, and sigma against depth. Fits: Gaussian core sigma, FWHM, centroid, rms, share outside 3 sigma, and a double Gaussian for the halo. Export as PNG, SVG, and CSV. New API: `/api/beam/scan`, `/api/beam/monitor`, `/api/beam/envelope`, `/api/beam/spectrum`, `/api/beam/dose`. Keys 1 to 7 switch tabs.
 - Fix: 2D and 3D maps in the Results tab drew no heat map, since the color scale function was missing.
