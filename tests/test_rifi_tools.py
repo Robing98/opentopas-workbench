@@ -246,3 +246,53 @@ def test_ridge_pitch_defaults_to_the_width():
     disp = re.search(r"Displacement = \d+ ([-\d. ]+) mm", rf.variant_block("t4", 1.5)).group(1).split()
     assert np.diff([float(x) for x in disp]) == pytest.approx(1.5)
     assert kf.pitch("3 -1.5 0 1.5 mm") == pytest.approx(1.5) and kf.pitch("1 0 mm") is None
+
+
+# ------------------------------------------------------------------ gap and tilt: laminate and crossed plates
+@pytest.mark.parametrize("variant", ["stp4s10", "xb4s10"])
+def test_separate_plates_give_the_same_four_steps_as_the_staircase(tmp_path, variant):
+    """Three aligned plates of 75/50/25 % cover, or two crossed binary plates without base, read 0, 1, 2, 3 mm."""
+    t, w, mean, _, _ = kernel_of(variant, tmp_path)
+    for k in range(4):
+        assert w[np.abs(t - k) < 0.05].sum() == pytest.approx(0.25, abs=0.005)
+    # crossed plates convolve, and each convolution moves the tool's 0.02 mm bins by one half bin
+    assert mean == pytest.approx(1.5, abs=0.005 if variant.startswith("stp") else 0.03)
+
+
+def test_laminate_plates_stand_apart_by_the_gap():
+    block = rf.variant_block("stp4s10", 1.5)
+    tz = [float(x) for x in re.findall(r"TransZ\s*=\s*([\d.]+) cm", block)]
+    assert tz == pytest.approx([80.0, 78.9, 77.8])                     # 1 mm plates, 10 mm air between
+    assert [float(x) for x in re.findall(r"Width\s+= ([\d.]+) mm", block)] == pytest.approx([1.125, 0.75, 0.375])
+    assert "RotY" not in block and "TransX" not in block
+    contact = rf.variant_block("stp4s0", 1.5)
+    assert [float(x) for x in re.findall(r"TransZ\s*=\s*([\d.]+) cm", contact)] == pytest.approx([80.0, 79.9, 79.8])
+    xb = rf.variant_block("xb4s10", 1.5)
+    assert [float(x) for x in re.findall(r"TransZ\s*=\s*([\d.]+) cm", xb)] == pytest.approx([80.0, 78.85])  # 2 mm, 10 mm air, 1 mm
+
+
+def test_tilt_slides_the_downstream_plates_by_tilt_times_distance(tmp_path):
+    """15 mrad over 11 and 22 mm moves plates 2 and 3 by 0.165 and 0.33 mm against plate 1.
+
+    The plates share their right edge. Slid back (+15) they stay inside the plate before them and the kernel keeps its
+    four quarters; slid forward (-15) they overhang the open quarter: worked by hand with q = 0.375 mm, the open and
+    the 3 mm share are (q - 0.33) / 1.5 = 3 % each, the 1 and 2 mm share 47 % each."""
+    block = rf.variant_block("stp4s10n15", 1.5)
+    assert re.findall(r"RotY\s*=\s*(\S+) mrad", block) == ["15", "15", "15"]
+    assert [float(x) for x in re.findall(r"TransX\s*=\s*(\S+) mm", block)] == pytest.approx([0.0, -0.165, -0.33])
+    t, w, mean, _, _ = kernel_of("stp4s10n15", tmp_path)
+    assert [w[np.abs(t - k) < 0.05].sum() for k in range(4)] == pytest.approx([0.25] * 4, abs=0.005)
+    t, w, mean, _, _ = kernel_of("stp4s10n-15", tmp_path)
+    assert mean == pytest.approx(1.5, abs=0.005)                       # material does not change, only where it sits
+    assert [w[np.abs(t - k) < 0.05].sum() for k in range(4)] == pytest.approx([0.03, 0.47, 0.47, 0.03], abs=0.005)
+    tx, wx, _, _, _ = kernel_of("xb4s10n15", tmp_path)
+    for k in range(4):                                                 # crossed: a slide across the stripes changes nothing
+        assert wx[np.abs(tx - k) < 0.05].sum() == pytest.approx(0.25, abs=0.005)
+
+
+def test_untilted_staircase_variants_keep_their_files():
+    assert "RotY" not in rf.variant_block("stp4", 1.5) and "TransX" not in rf.variant_block("stp4g", 1.5)
+    assert re.findall(r"RotY\s*=\s*(\S+) mrad", rf.variant_block("stp4n15", 1.5)) == ["15"]
+    for bad in ("xb4", "stp4x", "xb4s"):
+        with pytest.raises(ValueError):
+            rf.variant_block(bad, 1.5)
