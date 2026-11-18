@@ -467,7 +467,7 @@ def main():
             d0 = d0 + rng.normal(0, a.noise / 100, d0.size); d1 = d1 + rng.normal(0, a.noise / 100, d1.size)
         d0s = smooth(d0) if not a.coarse else d0                 # the curve that gets shifted: light smoothing against noise
         m0, m1 = metrics(z0, smooth(d0)), metrics(z1, smooth(d1))
-        geo = repr([(r["x"].tolist(), r["z"].tolist(), r["rotz"], r["width"], r["material"]) for r in i1.get("ridges", [])]) + \
+        geo = repr([(r["x"].tolist(), r["z"].tolist(), r["rotz"], r["width"], r.get("pitch"), r["material"]) for r in i1.get("ridges", [])]) + \
               repr([(c["file"], c["units"], c["material"]) for c in i1.get("cads", [])])
         key = (geo, a.pin, a.stl, a.ridge, a.heightmap)            # same geometry, same true kernel
         if key not in truth_cache: truth_cache[key] = true_kernel(i1, a)

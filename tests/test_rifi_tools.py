@@ -229,6 +229,16 @@ def test_staircase_has_four_equal_steps_and_an_open_lowest_one(tmp_path, variant
     xs = [float(x) for x in re.search(r"XPoints = \d+ ([\d. ]+) mm", block).group(1).split()]
     assert all(b > a for a, b in zip(xs, xs[1:])) and xs[-1] == pytest.approx(0.75 * period)
     assert abs(disp[0]) == pytest.approx(60.0, abs=period)              # 12 cm wide like the other filters
+    assert len(disp) == int(round(120 / period)) + 1
+
+
+@pytest.mark.parametrize("lam", [1.5, 1.4, 1.2, 1.0025])
+def test_staircase_width_is_written_on_the_xpoints_grid(lam):
+    """The width closes the profile: written with a float tail it would sit an ulp past the last XPoint."""
+    block = rf.variant_block("stp4", lam)
+    width = re.search(r"Width\s+= (\S+) mm", block).group(1)
+    last = re.search(r"XPoints = \d+ ([\d. ]+) mm", block).group(1).split()[-1]
+    assert float(width) == float(last) and len(width.split(".")[-1]) <= 3, (width, last)
 
 
 def test_ridge_pitch_defaults_to_the_width():

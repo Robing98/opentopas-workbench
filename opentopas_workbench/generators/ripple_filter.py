@@ -128,7 +128,7 @@ def staircase(height, lam):
     q, step = round(lam / 4, 3), height / 4
     xs = [0, q - EDGE, q, 2 * q - EDGE, 2 * q, 3 * q]
     zs = [step, step, 2 * step, 2 * step, 3 * step, 3 * step]
-    return xs, zs, 3 * q
+    return xs, zs, round(3 * q, 3)
 
 
 def shape_plates(v, lam):
