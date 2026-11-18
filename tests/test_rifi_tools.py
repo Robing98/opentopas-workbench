@@ -1,5 +1,5 @@
 """Tests for the ripple filter tools: kernel geometry, STL thickness, 1D equivalents, and the kernel fit."""
-import importlib.util, os, struct, sys
+import importlib.util, re, os, struct, sys
 
 import pytest
 
@@ -173,12 +173,39 @@ def test_binary_stacks_give_equally_frequent_thickness_steps(tmp_path, variant, 
     assert mean == pytest.approx(expect.mean(), abs=0.01)
 
 
-def test_pairs_are_two_crossed_t2_or_t4_triangles():
-    block = rf.variant_block("pair4", 1.5)
-    assert block.count('"TsRidgeFilter"') == 2 and "RotZ     = 90 deg" in block
-    assert rf.variant_block("t2", 1.5).split("d:Ge/RiFi1/RotZ")[1] in block   # the first plate is exactly t2
-    assert rf.shape_plates("pair4", 1.5) == [rf.triangle(2.0, 1.5)] * 2
-    assert rf.shape_plates("pair4v", 1.5) == [rf.triangle(4.0, 1.5)] * 2
+def kernel_of(variant, tmp_path):
+    v = {f["key"]: f.get("default") for f in rf.FIELDS}
+    v.update(energies="100", variants=[variant])
+    for name, content in rf.generate(v):
+        (tmp_path / name).write_text(content)
+    args = type("A", (), {"pin": None, "stl": None, "heightmap": None, "ridge": None, "spr": 1.0, "stl_units": 1.0})()
+    return kf.true_kernel(kf.topas_info(str(tmp_path / f"IDD_mess_p100_{variant}.csv")), args)
+
+
+@pytest.mark.parametrize("pair,height", [("pair4", 2.0), ("pair4v", 4.0)])
+def test_pairs_are_two_crossed_triangles(tmp_path, pair, height):
+    k2 = kernel_of(pair, tmp_path)
+    t = kf.ridge_samples([0, 0.01, 0.71, 0.79, 1.49, 1.5], [0.3, 0.3, height, height, 0.3, 0.3], 1.5)   # one triangle
+    # two independent copies of the triangle: mean doubles, spread grows by sqrt 2
+    assert k2[2] == pytest.approx(2 * t.mean(), abs=0.01) and k2[3] == pytest.approx(np.sqrt(2) * t.std(), abs=0.01)
+
+
+@pytest.mark.parametrize("variant,plates", [("bin4", [(80.0, 0)]), ("stk4", [(80.0, 0), (78.3, 90)]),
+                                            ("stk4x3", [(80.0, 0), (78.3, 90), (76.6, 45)]),
+                                            ("pair4", [(80.0, 0), (78.3, 90)])])
+def test_plate_positions_and_rotations(variant, plates):
+    block = rf.variant_block(variant, 1.5)
+    tz = [float(x) for x in re.findall(r"TransZ\s*=\s*([\d.]+) cm", block)]
+    rot = [float(x) for x in re.findall(r"RotZ\s*=\s*([\d.]+) deg", block)]
+    assert list(zip(tz, rot)) == plates
+
+
+@pytest.mark.parametrize("lam", [1.5, 1.0, 1.0025, 2.005, 2.009, 0.8, 3.0])
+def test_binary_xpoints_rise_strictly_as_written(lam):
+    block = rf.variant_block("stk4x3", lam)
+    for line in re.findall(r"XPoints = \d+ ([\d. ]+) mm", block):
+        xs = [float(x) for x in line.split()]
+        assert all(b > a for a, b in zip(xs, xs[1:])), (lam, xs)
 
 
 def test_shape_variant_names_are_checked():
