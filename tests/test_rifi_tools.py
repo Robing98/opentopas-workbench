@@ -212,3 +212,27 @@ def test_shape_variant_names_are_checked():
     for bad in ("bin4v", "pair4x3", "stk"):
         with pytest.raises(ValueError):
             rf.shape_plates(bad, 1.5)
+
+
+@pytest.mark.parametrize("variant,height,period", [("stp4", 4.0, 1.5), ("stp3", 3.0, 1.5), ("stp4g", 4.0, 6.0)])
+def test_staircase_has_four_equal_steps_and_an_open_lowest_one(tmp_path, variant, height, period):
+    """The open step is a gap between ridges, so a quarter of the area carries no material at all (no base plate)."""
+    t, w, mean, _, _ = kernel_of(variant, tmp_path)
+    step = height / 4
+    for k in range(4):
+        assert w[np.abs(t - k * step) < 0.05].sum() == pytest.approx(0.25, abs=0.005)
+    assert mean == pytest.approx(1.5 * step, abs=0.005)                 # 3/8 of the design height
+    block = rf.variant_block(variant, 1.5)
+    disp = [float(x) for x in re.search(r"Displacement = \d+ ([-\d. ]+) mm", block).group(1).split()]
+    assert np.diff(disp) == pytest.approx(period)
+    assert float(re.search(r"Width\s+= ([\d.]+) mm", block).group(1)) == pytest.approx(0.75 * period)
+    xs = [float(x) for x in re.search(r"XPoints = \d+ ([\d. ]+) mm", block).group(1).split()]
+    assert all(b > a for a, b in zip(xs, xs[1:])) and xs[-1] == pytest.approx(0.75 * period)
+    assert abs(disp[0]) == pytest.approx(60.0, abs=period)              # 12 cm wide like the other filters
+
+
+def test_ridge_pitch_defaults_to_the_width():
+    """The ridges of the older variants stand edge to edge, as before the pitch existed."""
+    disp = re.search(r"Displacement = \d+ ([-\d. ]+) mm", rf.variant_block("t4", 1.5)).group(1).split()
+    assert np.diff([float(x) for x in disp]) == pytest.approx(1.5)
+    assert kf.pitch("3 -1.5 0 1.5 mm") == pytest.approx(1.5) and kf.pitch("1 0 mm") is None

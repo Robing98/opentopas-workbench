@@ -8,6 +8,9 @@ Binary filters: plates with two thicknesses, half of each period thick ("bin"). 
 from plate to plate ("stk", 2 plates crossed = 4 equally frequent thicknesses, "x3" = 3 plates = 8) samples the same
 uniform kernel as a triangle in coarser steps. "pair" is two equal triangles of half the height crossed, "pair...v" two of
 the full height (Weber and Kraft's double filter, as rifi2).
+Staircases ("stp"): one piece with four equally wide steps of a quarter of the height each, the lowest step open (no
+base plate), as a laminate of three plates covering 75, 50 and 25 % of each period. Same 4-step kernel as "stk" without
+the second base plate. "stp...g" has a coarse period of 6 mm (a test plate cut by hand or a simple laser).
 Phantom surface at the isocentre, filters 80 cm upstream.
 """
 import importlib.util, math, os, re, struct
@@ -48,10 +51,15 @@ VARIANTS = {
     "stk4x3": {"en": "3 binary plates, steps 2 + 1 + 0.5 mm", "de": "3 Binärplatten, Stufen 2 + 1 + 0,5 mm"},
     "pair4": {"en": "2 triangles 2 mm crossed", "de": "2 Dreiecke 2 mm gekreuzt"},
     "pair4v": {"en": "2 triangles 4 mm crossed", "de": "2 Dreiecke 4 mm gekreuzt"},
+    "stp4": {"en": "staircase 4 steps of 1 mm, open lowest step", "de": "Treppe 4 Stufen je 1 mm, unterste offen"},
+    "stp3": {"en": "staircase 4 steps of 0.75 mm, open lowest step", "de": "Treppe 4 Stufen je 0,75 mm, unterste offen"},
+    "stp4g": {"en": "staircase 4 steps of 1 mm, coarse period 6 mm", "de": "Treppe 4 Stufen je 1 mm, grobe Periode 6 mm"},
 }
 PIN_BASE, PIN_TOP_HALF, PIN_RINGS = 0.1, 0.04, 8     # mm, mm, segments of the pin flank
 PIN_RE = re.compile(r"^(pin|pyr)(\d+(?:\.\d+)?)(e?)$")
 SHAPE_RE = re.compile(r"^(bin|stk|pair)(\d+(?:\.\d+)?)(x3|v)?$")
+STAIR_RE = re.compile(r"^stp(\d+(?:\.\d+)?)(g?)$")
+COARSE = 6.0        # mm, period of the coarse staircase "stp...g"
 BASE = 0.3          # mm, base plate of the 1D triangles and binary plates
 EDGE = 0.001        # mm, flank of a binary step: TsRidgeFilter needs XPoints that rise strictly
 # Plates behind the first one: (TransZ cm, RotZ deg). The third plate turns by 45 deg, not 90: at 0 deg it would line
@@ -81,8 +89,10 @@ def range_mm(ion, e_u):
     return 0.022 * e_u ** 1.77 * a / z ** 2
 
 
-def ridge(name, xs, zs, width, n, tz, rotz=0):
-    disp = " ".join(f"{(i - n // 2) * width:.2f}" for i in range(n + 1))
+def ridge(name, xs, zs, width, n, tz, rotz=0, pitch=None):
+    """A TsRidgeFilter of n + 1 ridges. With pitch > width the ridges stand apart and the gaps hold no material."""
+    pitch = pitch or width
+    disp = " ".join(f"{(i - n // 2) * pitch:.3f}" for i in range(n + 1))
     return f'''
 s:Ge/{name}/Type     = "TsRidgeFilter"
 s:Ge/{name}/Parent   = "World"
@@ -110,6 +120,17 @@ def binary(step, lam):
     return [0, half - EDGE, half, end - EDGE, end], [BASE, BASE, BASE + step, BASE + step, BASE]
 
 
+def staircase(height, lam):
+    """One ridge of a staircase with four equal steps, the lowest one open: (XPoints, ZPoints, ridge width).
+
+    The ridge covers the upper three steps (3/4 of the period); the open quarter is the gap to the next ridge, so
+    there is no base plate. TOPAS closes the profile at 0 on both ends, and both ends here are vertical."""
+    q, step = round(lam / 4, 3), height / 4
+    xs = [0, q - EDGE, q, 2 * q - EDGE, 2 * q, 3 * q]
+    zs = [step, step, 2 * step, 2 * step, 3 * step, 3 * step]
+    return xs, zs, 3 * q
+
+
 def shape_plates(v, lam):
     """Profiles (XPoints, ZPoints) of the plates of a bin/stk/pair variant, first plate first."""
     m = SHAPE_RE.match(v)
@@ -128,6 +149,11 @@ def variant_block(v, lam):
     if v == "rifi2": return ridge("RiFi1", *grev, 1.0, 120, 80.0) + ridge("RiFi2", *grev, 1.0, 120, 78.3, 90)
     if v.startswith("t"):
         return ridge("RiFi1", *triangle(float(v[1:]), lam), lam, int(120 / lam), 80.0)
+    m = STAIR_RE.match(v)
+    if m:
+        p = COARSE if m.group(2) else lam
+        xs, zs, w = staircase(float(m.group(1)), p)
+        return ridge("RiFi1", xs, zs, w, int(120 / p), 80.0, pitch=4 * round(p / 4, 3))
     if SHAPE_RE.match(v):
         return "".join(ridge(f"RiFi{i + 1}", xs, zs, lam, int(120 / lam), tz, rot)
                        for i, ((xs, zs), (tz, rot)) in enumerate(zip(shape_plates(v, lam), STACK)))
