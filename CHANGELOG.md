@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- `ripple_filter` generator: new variants `bin4` (binary plate, step 2 mm, half of each period thick), `stk4` (two binary plates crossed, steps 2 and 1 mm, four equally frequent thicknesses), `stk4x3` (a third plate with step 0.5 mm, turned 45 degrees, eight thicknesses), `pair4` (two `t2` triangles crossed) and `pair4v` (two `t4` triangles crossed). `rifi_kernel_fit.py` reads their true kernel from the parameter file as before.
 - Beam profile monitors: the `pencil_beam` and `ripple_filter` generators can add thin scoring planes in a parallel world at a list of positions or before and after every component, each with a 2D fluence map (bin width and extent as options), an optional split into protons, electrons, and other particles, and an energy spectrum.
 - Beam profile tab: x and y profiles (linear and logarithmic) and the 2D map per monitor plane, the envelope along the beam line for several cases, spectra, lateral dose profiles from 3D dose grids at a chosen depth, and sigma against depth. Fits: Gaussian core sigma, FWHM, centroid, rms, share outside 3 sigma, and a double Gaussian for the halo. Export as PNG, SVG, and CSV. New API: `/api/beam/scan`, `/api/beam/monitor`, `/api/beam/envelope`, `/api/beam/spectrum`, `/api/beam/dose`. Keys 1 to 7 switch tabs.
 - Fix: 2D and 3D maps in the Results tab drew no heat map, since the color scale function was missing.
