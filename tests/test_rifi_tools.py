@@ -1,5 +1,5 @@
 """Tests for the ripple filter tools: kernel geometry, STL thickness, 1D equivalents, and the kernel fit."""
-import importlib.util, os, struct, sys
+import importlib.util, re, os, struct, sys
 
 import pytest
 
@@ -152,3 +152,63 @@ def test_discover_pairs_across_folders(tmp_path):
     for v in ("pyr4", "pin4e"): (sub / f"IDD_x_p063_{v}.csv").write_text("")
     pairs = kf.discover(str(sub), None, "rifi0", None)
     assert sorted(p[2] for p in pairs) == ["pin4e", "pyr4"] and all(p[0].endswith("IDD_x_p063_rifi0.csv") for p in pairs)
+
+
+# ------------------------------------------------------------------ binary plates, stacks and crossed pairs
+@pytest.mark.parametrize("variant,levels,step", [("bin4", 2, 2.0), ("stk4", 4, 1.0), ("stk4x3", 8, 0.5)])
+def test_binary_stacks_give_equally_frequent_thickness_steps(tmp_path, variant, levels, step):
+    v = {f["key"]: f.get("default") for f in rf.FIELDS}
+    v.update(energies="100", variants=[variant])
+    for name, content in rf.generate(v):
+        (tmp_path / name).write_text(content)
+    text = (tmp_path / f"mess_p100_{variant}.txt").read_text()
+    assert text.count('"TsRidgeFilter"') == len(rf.shape_plates(variant, 1.5))
+    args = type("A", (), {"pin": None, "stl": None, "heightmap": None, "ridge": None, "spr": 1.0, "stl_units": 1.0})()
+    t, w, mean, sd, _ = kf.true_kernel(kf.topas_info(str(tmp_path / f"IDD_mess_p100_{variant}.csv")), args)
+    plates = len(rf.shape_plates(variant, 1.5))
+    expect = plates * rf.BASE + step * np.arange(levels)                # PMMA mm, spr 1 here
+    # 0.1 mm window: steps are 0.5 mm or more, and the tool's 0.02 mm histogram bins drift a little per convolution
+    for e in expect:                                                    # each thickness carries 1/levels of the area
+        assert w[np.abs(t - e) < 0.1].sum() == pytest.approx(1 / levels, abs=0.01)
+    assert mean == pytest.approx(expect.mean(), abs=0.01)
+
+
+def kernel_of(variant, tmp_path):
+    v = {f["key"]: f.get("default") for f in rf.FIELDS}
+    v.update(energies="100", variants=[variant])
+    for name, content in rf.generate(v):
+        (tmp_path / name).write_text(content)
+    args = type("A", (), {"pin": None, "stl": None, "heightmap": None, "ridge": None, "spr": 1.0, "stl_units": 1.0})()
+    return kf.true_kernel(kf.topas_info(str(tmp_path / f"IDD_mess_p100_{variant}.csv")), args)
+
+
+@pytest.mark.parametrize("pair,height", [("pair4", 2.0), ("pair4v", 4.0)])
+def test_pairs_are_two_crossed_triangles(tmp_path, pair, height):
+    k2 = kernel_of(pair, tmp_path)
+    t = kf.ridge_samples([0, 0.01, 0.71, 0.79, 1.49, 1.5], [0.3, 0.3, height, height, 0.3, 0.3], 1.5)   # one triangle
+    # two independent copies of the triangle: mean doubles, spread grows by sqrt 2
+    assert k2[2] == pytest.approx(2 * t.mean(), abs=0.01) and k2[3] == pytest.approx(np.sqrt(2) * t.std(), abs=0.01)
+
+
+@pytest.mark.parametrize("variant,plates", [("bin4", [(80.0, 0)]), ("stk4", [(80.0, 0), (78.3, 90)]),
+                                            ("stk4x3", [(80.0, 0), (78.3, 90), (76.6, 45)]),
+                                            ("pair4", [(80.0, 0), (78.3, 90)])])
+def test_plate_positions_and_rotations(variant, plates):
+    block = rf.variant_block(variant, 1.5)
+    tz = [float(x) for x in re.findall(r"TransZ\s*=\s*([\d.]+) cm", block)]
+    rot = [float(x) for x in re.findall(r"RotZ\s*=\s*([\d.]+) deg", block)]
+    assert list(zip(tz, rot)) == plates
+
+
+@pytest.mark.parametrize("lam", [1.5, 1.0, 1.0025, 2.005, 2.009, 0.8, 3.0])
+def test_binary_xpoints_rise_strictly_as_written(lam):
+    block = rf.variant_block("stk4x3", lam)
+    for line in re.findall(r"XPoints = \d+ ([\d. ]+) mm", block):
+        xs = [float(x) for x in line.split()]
+        assert all(b > a for a, b in zip(xs, xs[1:])), (lam, xs)
+
+
+def test_shape_variant_names_are_checked():
+    for bad in ("bin4v", "pair4x3", "stk"):
+        with pytest.raises(ValueError):
+            rf.shape_plates(bad, 1.5)
