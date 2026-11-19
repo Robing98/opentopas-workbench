@@ -99,7 +99,7 @@ def test_resolve_blocks_symlink_escape(ws, tmp_path_factory):
 
 
 # ------------------------------------------------------------------ generators
-@pytest.mark.parametrize("name", ["pencil_beam", "ripple_filter"])
+@pytest.mark.parametrize("name", ["pencil_beam", "ripple_filter", "nozzle"])
 def test_generators_produce_clean_files(name):
     mod = load_gen(name)
     assert {"NAME", "DESCRIPTION", "FIELDS", "generate"} <= set(dir(mod))
