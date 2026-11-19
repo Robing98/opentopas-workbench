@@ -152,6 +152,7 @@ kbd{font:12.5px ui-monospace,Consolas,monospace;padding:1px 6px;border:1px solid
     <button role="tab" data-tab="explorer"><span data-i18n="tab_explorer"></span></button>
     <button role="tab" data-tab="results"><span data-i18n="tab_results"></span></button>
     <button role="tab" data-tab="beam"><span data-i18n="tab_beam"></span></button>
+    <button role="tab" data-tab="machines"><span data-i18n="tab_machines"></span></button>
     <span class="sep" aria-hidden="true"></span>
     <button role="tab" data-tab="settings"><span data-i18n="tab_settings"></span></button>
   </nav>
@@ -339,6 +340,38 @@ kbd{font:12.5px ui-monospace,Consolas,monospace;padding:1px 6px;border:1px solid
   </div>
 </section>
 
+<!-- MATRAD MACHINES: base data files read where they lie, nothing is copied -->
+<section id="machines" class="tab">
+  <div class="split">
+    <div class="card">
+      <h2 data-i18n="mc_files"></h2>
+      <div class="row"><input id="mcDir" style="flex:1" data-i18n-ph="mc_dir_ph" aria-label="folder"><button id="mcLoad" data-i18n="mc_load"></button><button id="mcDefault" data-i18n="mc_default"></button></div>
+      <div class="scroll"><table><thead><tr><th>A</th><th>B</th><th data-i18n="mc_file"></th><th data-i18n="mc_rad"></th><th data-i18n="mc_type"></th><th data-i18n="mc_n"></th><th data-i18n="mc_erange"></th><th data-i18n="mc_depths"></th><th data-i18n="mc_format"></th></tr></thead><tbody id="mcBody"></tbody></table></div>
+      <p class="mute" data-i18n="mc_hint"></p>
+    </div>
+    <div class="card">
+      <h2 id="mcTitle" data-i18n="tab_machines"></h2>
+      <div class="row">
+        <label><span data-i18n="view"></span> <select id="mcView"><option value="idd" data-i18n="mc_v_idd"></option><option value="depth" data-i18n="mc_v_depth"></option><option value="energy" data-i18n="mc_v_energy"></option><option value="tree" data-i18n="mc_v_tree"></option><option value="cmp" data-i18n="mc_v_cmp"></option></select></label>
+        <label id="mcFieldL"><span data-i18n="mc_field"></span> <select id="mcField"></select></label>
+        <label id="mcQtyL"><span data-i18n="bp_qty"></span> <select id="mcQty"></select></label>
+        <label id="mcCmpL"><span data-i18n="mc_show"></span> <select id="mcCmp"><option value="curves" data-i18n="mc_c_curves"></option><option value="diff" data-i18n="mc_c_diff"></option><option value="shift" data-i18n="mc_c_shift"></option></select></label>
+        <label id="mcNormL"><span data-i18n="mc_norm"></span> <select id="mcNorm"><option value="max" data-i18n="mc_n_max"></option><option value="abs" data-i18n="mc_n_abs"></option></select></label>
+        <label id="mcOffL" data-i18n-title="mc_offset_tip"><input type="checkbox" id="mcOff" checked> <span data-i18n="mc_offset"></span></label>
+      </div>
+      <div class="row" id="mcERow"><label style="flex:1;display:flex;gap:8px;align-items:flex-start"><span data-i18n="mc_energies"></span> <select id="mcE" multiple size="5" style="flex:1;min-width:160px"></select></label>
+        <span style="display:flex;flex-direction:column;gap:4px"><button id="mcESpread" data-i18n="mc_e_spread"></button><button id="mcENone" data-i18n="select_none"></button></span></div>
+      <div class="row" id="mcExport">
+        <span class="spacer"></span>
+        <span class="mute" data-i18n="export"></span><button id="mcPng">PNG</button><select id="mcScale" aria-label="scale"><option value="1">1×</option><option value="2" selected>2×</option><option value="3">3×</option></select><button id="mcSvg">SVG</button><button id="mcCsv" data-i18n="exp_data"></button>
+        <label><input type="checkbox" id="mcLight" checked> <span data-i18n="exp_light"></span></label>
+      </div>
+      <div class="plotwrap" id="mcWrap"><canvas id="mcPlot" width="1200" height="560" aria-label="machine plot"></canvas><div id="mcEmpty" class="plholder"></div></div>
+      <div id="mcInfo"></div>
+    </div>
+  </div>
+</section>
+
 <!-- GENERATORS -->
 <section id="gen" class="tab">
   <div class="card">
@@ -451,6 +484,26 @@ Object.assign(I18N.en,{tab_beam:"Beam profile",bp_cases:"Cases with monitors",bp
  bp_depth:"Depth",bp_pos:"Position before the isocenter [cm]",bp_lat:"lateral",bp_integrated:"integrated over",bp_per_bin:"per bin",bp_share:"share [%]",
  bp_pick:"Tick cases on the left.",bp_no_data:"No data for this selection.",bp_no_dose:"No 3D dose grid for the selected cases.",bp_missing:"Missing for",bp_map_one:"The map shows the first selected case.",
  bp_sigma1:"σ1 core",bp_sigma2:"σ2 halo",bp_halo_dg:"halo DG",bp_halo3s:"outside 3σ",bp_peak:"peak",bp_mean:"mean",bp_under:"underflow",bp_over:"overflow"});
+Object.assign(I18N.de,{tab_machines:"Maschinen",mc_files:"matRad-Maschinen",mc_dir_ph:"Ordner mit Maschinendateien (.mat), z. B. %USERPROFILE%\\matRad\\machines",mc_load:"Laden",mc_default:"Standard",
+ mc_file:"Datei",mc_rad:"Strahl",mc_type:"Datentyp",mc_n:"Energien",mc_erange:"Energiebereich",mc_depths:"Tiefenraster",mc_format:"Format",
+ mc_hint:"Klick auf eine Zeile wählt Maschine A, die Spalte B eine zweite zum Vergleich. Die Dateien werden nur gelesen, an ihrem Ort; nichts wird in den Arbeitsordner kopiert. Braucht numpy und scipy, für v7.3-Dateien h5py.",
+ mc_none:"Keine .mat-Dateien in diesem Ordner.",mc_pick:"Links eine Maschine wählen.",mc_pick_b:"Für den Vergleich in Spalte B eine zweite Maschine wählen.",mc_pick_e:"Energien auswählen.",
+ mc_v_idd:"Tiefendosis",mc_v_depth:"Größe über der Tiefe",mc_v_energy:"Über der Energie",mc_v_tree:"Alle Felder",mc_v_cmp:"Vergleich A / B",
+ mc_field:"Feld",mc_show:"Zeigen",mc_c_curves:"Kurven",mc_c_diff:"Differenz B − A [%]",mc_c_shift:"R80- und Peakverschiebung",mc_norm:"Skala",mc_n_max:"normiert auf Maximum",mc_n_abs:"absolut",
+ mc_offset:"Offset addieren",mc_offset_tip:"Wassertiefe = depths + offset, wie in matRads Dosisberechnung",mc_energies:"Energien",mc_e_spread:"5 verteilt",
+ mc_depth:"Tiefe [mm]",mc_wdepth:"Wassertiefe [mm]",mc_energy:"Energie",mc_r80:"R80",mc_peak:"Peak",mc_bpw80:"BPW80",mc_dfo:"D80–D20",mc_pe:"Peak/Eingang",mc_entry:"Eingang Z(0)",
+ mc_nearest:"nächste Energie in B",mc_shift_r80:"ΔR80 B − A",mc_shift_peak:"ΔPeak B − A",mc_meta:"meta",mc_data:"data({i}), {e}",mc_other:"weitere Felder",mc_metrics_note:"Kennzahlen aus Z, in Wassertiefe (depths + offset).",
+ mc_saved_dir:"Ordner gespeichert."});
+Object.assign(I18N.en,{tab_machines:"Machines",mc_files:"matRad machines",mc_dir_ph:"Folder with machine files (.mat), e.g. %USERPROFILE%\\matRad\\machines",mc_load:"Load",mc_default:"Default",
+ mc_file:"File",mc_rad:"Beam",mc_type:"Data type",mc_n:"Energies",mc_erange:"Energy range",mc_depths:"Depth grid",mc_format:"Format",
+ mc_hint:"Click a row to pick machine A, column B picks a second one to compare. The files are only read, where they lie; nothing is copied into the workspace. Needs numpy and scipy, and h5py for v7.3 files.",
+ mc_none:"No .mat files in this folder.",mc_pick:"Pick a machine on the left.",mc_pick_b:"Pick a second machine in column B to compare.",mc_pick_e:"Select energies.",
+ mc_v_idd:"Depth dose",mc_v_depth:"Quantity over depth",mc_v_energy:"Over energy",mc_v_tree:"All fields",mc_v_cmp:"Compare A / B",
+ mc_field:"Field",mc_show:"Show",mc_c_curves:"Curves",mc_c_diff:"Difference B − A [%]",mc_c_shift:"R80 and peak shift",mc_norm:"Scale",mc_n_max:"normalised to maximum",mc_n_abs:"absolute",
+ mc_offset:"Add offset",mc_offset_tip:"Water depth = depths + offset, as in matRad's dose engine",mc_energies:"Energies",mc_e_spread:"5 spread",
+ mc_depth:"Depth [mm]",mc_wdepth:"Water depth [mm]",mc_energy:"Energy",mc_r80:"R80",mc_peak:"Peak",mc_bpw80:"BPW80",mc_dfo:"D80–D20",mc_pe:"Peak/entrance",mc_entry:"Entrance Z(0)",
+ mc_nearest:"nearest energy in B",mc_shift_r80:"ΔR80 B − A",mc_shift_peak:"Δpeak B − A",mc_meta:"meta",mc_data:"data({i}), {e}",mc_other:"other fields",mc_metrics_note:"Metrics from Z, in water depth (depths + offset).",
+ mc_saved_dir:"Folder saved."});
 let LANG=document.documentElement.lang||"de";
 const $=id=>document.getElementById(id);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -500,7 +553,7 @@ function multiSelect(tbody,onChange){
  tbody.addEventListener("click",e=>{if(e.target.matches("input[type=checkbox]"))e.preventDefault()});   // state is handled on mousedown
  tbody.addEventListener("keydown",e=>{if(e.key===" "&&e.target.matches("input[type=checkbox]")){e.preventDefault();e.target.checked=!e.target.checked;e.target.closest("tr").classList.toggle("sel",e.target.checked);onChange()}});}
 /* ---------- navigation: tabs, address (deep links, back and forward), keyboard shortcuts */
-const TABS=["files","gen","run","explorer","results","beam","settings"];
+const TABS=["files","gen","run","explorer","results","beam","machines","settings"];
 let CUR=null,ROUTED="";
 const isTab=id=>CUR===id;
 function tabHash(id){const p=new URLSearchParams();if(id==="results")RS.pick.forEach(f=>p.append("f",f));if(id==="files"&&FM.file)p.set("p",FM.file);if(id==="beam"&&BP.scan){if(BP.folder)p.set("p",BP.folder);p.set("v",$("bpView").value);BP.sel.forEach(c=>p.append("c",c))}const q=p.toString();return "#"+id+(q?"?"+q:"")}
@@ -508,7 +561,7 @@ function syncHash(push){if(!CUR)return;const h=tabHash(CUR);if(location.hash===h
 function showTab(id,opt){opt=opt||{};if(!TABS.includes(id))id="files";const changed=CUR!==id;CUR=id;
  document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id===id));document.querySelectorAll("nav [role=tab]").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===id));store("tab",id);
  if(!opt.fromHash)syncHash(changed&&!opt.replace);
- if(id==="files"&&!opt.noload)fmLoad(FM.path);if(id==="run"){loadParams();renderQueue(true);showJob(true)}if(id==="results"){resLoad(RS.path);loadViews()}if(id==="explorer")exLoad(false);if(id==="gen")loadGens();if(id==="beam")bpLoad(false);if(id==="settings")loadSettings();
+ if(id==="files"&&!opt.noload)fmLoad(FM.path);if(id==="run"){loadParams();renderQueue(true);showJob(true)}if(id==="results"){resLoad(RS.path);loadViews()}if(id==="explorer")exLoad(false);if(id==="gen")loadGens();if(id==="beam")bpLoad(false);if(id==="machines"&&!MC.loaded)mcLoad(null);if(id==="settings")loadSettings();
  if(changed&&id==="run")poll();}
 /* #run, #results?f=a.csv&f=b.csv, #files?p=dir/case.txt */
 function routeFromHash(){const h=location.hash;if(!h||h===ROUTED)return !!h&&TABS.includes(h.slice(1).split("?")[0]);ROUTED=h;
@@ -1193,6 +1246,100 @@ $("bpNone").onclick=()=>{BP.sel.clear();bpCases();bpPicked()};
 for(const id of ["bpView","bpPos","bpKind","bpMode","bpAxis","bpQty","bpLog"])$(id).onchange=()=>{if(id==="bpView"){store("bp_view",$(id).value);syncHash(false)}bpControls();bpDraw()};
 $("bpK").oninput=()=>{bpDepthLabel();bpDrawSoon()};const bpDrawSoon=debounce(bpDraw,120);
 if(recall("bp_view"))$("bpView").value=recall("bp_view");
+
+/* ---------- matRad machines: A is the machine in view, B the one it is compared with; the server keeps the parsed files */
+const MC={dir:"",files:[],a:null,b:null,cache:new Map(),spec:null,seq:0,seq2:0,loaded:false};
+function mcGet(what,q){const u=`/api/machines/${what}?`+new URLSearchParams(q);if(!MC.cache.has(u))MC.cache.set(u,api(u,null,{timeout:180000}).catch(e=>{MC.cache.delete(u);throw e}));return MC.cache.get(u)}
+const mcPath=f=>MC.dir.replace(/\/+$/,"")+"/"+f;
+const mcRow=f=>MC.files.find(r=>r.file===f);
+/* matRad keeps ion energies per nucleon */
+const mcEU=f=>{const r=mcRow(f);return r&&r.radiation&&r.radiation!=="protons"?"MeV/u":"MeV"};
+const mcF=(v,n=2)=>v==null||!isFinite(v)?"–":(+v).toFixed(n);
+function mcUnit(k){return /^sigma|SisFWHM|sigma@iso/.test(k.split(".").pop())?"mm":/^LET/.test(k)?"keV/µm":/^alpha/.test(k)?"1/Gy":/^beta/.test(k)?"1/Gy²":/^(range|peakPos|offset)$/.test(k)?"mm":""}
+const mcLab=k=>{const u=mcUnit(k);return u?`${k} [${u}]`:k};
+async function mcLoad(dir){const seq=++MC.seq;$("mcBody").innerHTML=`<tr><td colspan="9" class="empty"><span class="spin"></span>${esc(t("loading"))}</td></tr>`;
+ let j;try{j=await api("/api/machines/list?"+new URLSearchParams(dir!=null?{dir}:{}),null,{timeout:300000})}catch(e){if(seq===MC.seq)$("mcBody").innerHTML=`<tr><td colspan="9" class="empty">${esc(t("error")+": "+e.message)}</td></tr>`;return}
+ if(seq!==MC.seq)return;MC.loaded=true;MC.dir=j.dir;MC.def=j.default;MC.files=j.files;$("mcDir").value=j.dir;MC.cache.clear();
+ const ok=j.files.filter(r=>!r.error).map(r=>r.file);if(!ok.includes(MC.a))MC.a=ok.includes(recall("mc_a"))?recall("mc_a"):ok[0]||null;if(!ok.includes(MC.b))MC.b=null;
+ mcList();mcPickA(MC.a,true)}
+function mcList(){const rs=MC.files;
+ $("mcBody").innerHTML=rs.length?rs.map(r=>r.error?`<tr><td></td><td></td><td>${esc(r.file)}</td><td colspan="6" class="mute">${esc(r.error)}</td></tr>`
+  :`<tr class="${r.file===MC.a?"sel":""}" data-f="${esc(r.file)}"><td><input type="radio" name="mcA" ${r.file===MC.a?"checked":""} aria-label="A"></td><td><input type="radio" name="mcB" data-b ${r.file===MC.b?"checked":""} aria-label="B"></td>
+   <td>${esc(r.file)}${r.name&&!r.file.includes(r.name)?` <span class="mute">${esc(r.name)}</span>`:""}</td><td>${esc(r.radiation||"")}</td><td>${esc(r.data_type||"")}</td><td>${r.n}</td>
+   <td>${mcF(r.e_min,1)}–${mcF(r.e_max,1)} ${mcEU(r.file)}</td><td>${r.depth_n_min===r.depth_n_max?r.depth_n_min:`${r.depth_n_min}–${r.depth_n_max}`} · ≤${mcF(r.depth_max,0)} mm</td><td>${esc(r.format)}</td></tr>`).join("")
+  :`<tr><td colspan="9" class="empty">${esc(t("mc_none"))}</td></tr>`}
+$("mcBody").addEventListener("click",e=>{const tr=e.target.closest("tr[data-f]");if(!tr)return;const f=tr.dataset.f;
+ if(e.target.matches("input[data-b]")){MC.b=MC.b===f?null:f;mcList();if(MC.b&&$("mcView").value!=="energy")$("mcView").value="cmp";mcControls().then(mcDraw);return}
+ mcPickA(f)});
+async function mcPickA(f,keepE){const prev=MC.a;MC.a=f;if(f)store("mc_a",f);mcList();$("mcTitle").textContent=f?`${t("tab_machines")}: ${f}`:t("tab_machines");
+ if(!f){await mcControls();mcDraw();return}
+ let v;try{v=await mcGet("view",{p:mcPath(f)})}catch(e){MC.spec={empty:t("error")+": "+e.message};mcPaint();return}
+ if(MC.a!==f)return;const s=$("mcE"),was=new Set([...s.selectedOptions].map(o=>+o.value));
+ s.innerHTML=v.energies.map((e,i)=>`<option value="${e}">${mcF(e,2)} ${mcEU(f)}</option>`).join("");
+ const keep=keepE||prev===f?[...s.options].filter(o=>was.has(+o.value)):[];if(keep.length)keep.forEach(o=>o.selected=true);else mcSpread();
+ await mcControls();mcDraw()}
+function mcSpread(){const o=[...$("mcE").options];o.forEach(x=>x.selected=false);if(!o.length)return;const n=Math.min(5,o.length);for(let k=0;k<n;k++)o[Math.round(k*(o.length-1)/Math.max(1,n-1))].selected=true}
+const mcSelE=()=>[...$("mcE").selectedOptions].map(o=>+o.value);
+async function mcControls(){const v=$("mcView").value,show=(id,on)=>{$(id).hidden=!on};
+ show("mcFieldL",v==="depth");show("mcQtyL",v==="energy");show("mcCmpL",v==="cmp");show("mcNormL",v==="idd"||v==="cmp"&&$("mcCmp").value!=="shift");
+ show("mcOffL",v!=="tree"&&v!=="energy");$("mcERow").hidden=v==="energy"||v==="cmp"&&$("mcCmp").value==="shift";$("mcE").multiple=v!=="tree";
+ $("mcWrap").hidden=v==="tree";$("mcExport").hidden=v==="tree";
+ if(!MC.a)return;let d;try{d=await mcGet("view",{p:mcPath(MC.a)})}catch(e){return}
+ const keepSel=(id,opts,pref)=>{const s=$(id),cur=s.value||recall(id);s.innerHTML=opts.map(([k,n])=>`<option value="${esc(k)}">${esc(n)}</option>`).join("");
+  if(opts.some(o=>o[0]===cur))s.value=cur;else{const p=pref.find(k=>opts.some(o=>o[0]===k));if(p)s.value=p}};
+ const fs=[...new Set(d.curves.flatMap(c=>Object.keys(c.fields)))];keepSel("mcField",fs.map(k=>[k,k]),["sigma","sigma1","LET"]);
+ const ms=[["m:r80",`${t("mc_r80")} (Z)`],["m:peak",`${t("mc_peak")} (Z)`],["m:bpw80",`${t("mc_bpw80")} (Z)`],["m:dfo",`${t("mc_dfo")} (Z)`],["m:pe",`${t("mc_pe")} (Z)`]];
+ keepSel("mcQty",Object.keys(d.scalars).map(k=>[k,k]).concat(ms),["range","peakPos"])}
+const mcXlab=()=>$("mcOff").checked?t("mc_wdepth"):t("mc_depth");
+function mcTable(head,rows){return rows.length?`<div style="overflow-x:auto;max-height:360px;overflow-y:auto"><table class="metrics" style="margin-top:8px"><thead><tr>${head.map(h=>`<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map(c=>`<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`:""}
+function mcTreeHtml(n,name,open){const kids=n.children||[];
+ const val=n.kind==="struct"?`<span class="mute">struct, ${kids.length}</span>`:n.kind==="cell"?`<span class="mute">cell ${(n.shape||[]).join("×")}</span>`:n.kind==="array"?`<span class="mute">${(n.shape||[]).join("×")}</span> ${n.min!=null?`${esc(mcF(n.min,4))} … ${esc(mcF(n.max,4))}`:""} <span class="mute">[${(n.preview||[]).map(x=>x==null?"NaN":+(+x).toPrecision(5)).join(", ")}${(n.shape||[]).reduce((a,b)=>a*b,1)>8?", …":""}]</span>`:esc(n.value==null?"":String(n.value));
+ return kids.length?`<details ${open?"open":""} style="margin-left:${open?0:14}px"><summary><b>${esc(name)}</b> ${val}</summary>${kids.map(k=>mcTreeHtml(k,k.name,false)).join("")}</details>`:`<div style="margin-left:28px"><b>${esc(name)}</b> ${val}</div>`}
+async function mcDraw(){const seq=++MC.seq2,v=$("mcView").value,es=mcSelE(),off=$("mcOff").checked,norm=$("mcNorm").value,col=i=>PAL[i%PAL.length];let spec=null,info="";
+ try{
+  if(!MC.a)spec={empty:t(MC.loaded&&!MC.files.length?"mc_none":"mc_pick")};
+  else{const d=await mcGet("view",{p:mcPath(MC.a)}),eu=mcEU(MC.a),ix=e=>d.energies.indexOf(e);
+   if(v==="idd"||v==="depth"){if(!es.length)spec={empty:t("mc_pick_e")};else{const fld=$("mcField").value,series=[],rows=[];
+    es.forEach((e,k)=>{const c=d.curves[ix(e)];if(!c)return;const y=v==="idd"?c.Z:c.fields[fld];if(!y)return;const mx=Math.max(...y.filter(x=>x!=null));
+     series.push({name:`${mcF(e,2)} ${eu}`,x:c.depths.map(z=>z+(off?c.offset:0)),y:v==="idd"&&norm==="max"&&mx>0?y.map(x=>x==null?null:x/mx):y,col:col(k)});
+     const m=d.metrics[ix(e)];if(v==="idd"&&m)rows.push([`<span style="color:${col(k)}">■</span> ${mcF(e,2)}`,mcF(c.offset),mcF(m.peak),mcF(m.r80),mcF(m.bpw80),mcF(m.dfo),mcF(m.pe),(+m.z0).toPrecision(4)])});
+    spec={type:"lines",series,xlab:mcXlab(),ylab:v==="idd"?(norm==="max"?"Z / max":"Z [MeV cm²/g]"):mcLab(fld),title:`${MC.a}  ·  ${v==="idd"?t("mc_v_idd"):fld}`};
+    if(rows.length)info=`<div class="mute">${esc(t("mc_metrics_note"))}</div>`+mcTable([`${t("mc_energy")} [${eu}]`,"offset [mm]",`${t("mc_peak")} [mm]`,`${t("mc_r80")} [mm]`,`${t("mc_bpw80")} [mm]`,`${t("mc_dfo")} [mm]`,t("mc_pe"),t("mc_entry")],rows)}}
+   else if(v==="energy"){const q=$("mcQty").value;store("mcQty",q);const val=(dd,i)=>q.startsWith("m:")?(dd.metrics[i]||{})[q.slice(2)]:(dd.scalars[q]||[])[i];
+    const series=[{name:MC.a,x:d.energies,y:d.energies.map((_,i)=>val(d,i)),col:col(0),pts:true}];
+    if(MC.b){const b=await mcGet("view",{p:mcPath(MC.b)});series.push({name:MC.b,x:b.energies,y:b.energies.map((_,i)=>val(b,i)),col:col(1),dash:[9,6],pts:true})}
+    const lab=q.startsWith("m:")?`${t("mc_"+q.slice(2))} [${q==="m:pe"?"–":"mm"}]`:mcLab(q);
+    spec={type:"lines",series,xlab:`${t("mc_energy")} [${eu}]`,ylab:lab,title:q.startsWith("m:")?t("mc_metrics_note"):""}}
+   else if(v==="tree"){const i=Math.max(0,ix(es[0]??d.energies[0]));const tr=await mcGet("tree",{p:mcPath(MC.a),i});
+    info=`<div style="font-size:13px;line-height:1.6">${mcTreeHtml(tr.meta,t("mc_meta"),true)}${mcTreeHtml(tr.data,t("mc_data").replace("{i}",tr.index+1).replace("{e}",`${mcF(tr.energy,2)} ${eu}`),true)}${tr.other?mcTreeHtml(tr.other,t("mc_other"),true):""}</div>`;spec={empty:" "}}
+   else{if(!MC.b)spec={empty:t("mc_pick_b")};else{const what=$("mcCmp").value,r=await mcGet("compare",{a:mcPath(MC.a),b:mcPath(MC.b),e:what==="shift"?"":es.join(","),norm,offset:off?1:0}),eb=mcEU(MC.b);
+    if(what==="shift")spec={type:"lines",series:[{name:t("mc_shift_r80"),x:r.rows.map(w=>w.energy_a),y:r.rows.map(w=>w.d_r80),col:col(0),pts:true},{name:t("mc_shift_peak"),x:r.rows.map(w=>w.energy_a),y:r.rows.map(w=>w.d_peak),col:col(1),dash:[9,6],pts:true}],
+     xlab:`${t("mc_energy")} A [${eu}]`,ylab:"Δ [mm]",title:`B ${MC.b}  −  A ${MC.a}`};
+    else if(!es.length)spec={empty:t("mc_pick_e")};
+    else{const series=[];r.curves.forEach((c,k)=>{if(what==="curves"){series.push({name:`A ${mcF(c.energy_a,2)}`,x:c.za,y:c.ya,col:col(k)});series.push({name:`B ${mcF(c.energy_b,2)}`,x:c.zb,y:c.yb,col:col(k),dash:[9,6]})}
+      else series.push({name:`${mcF(c.energy_a,2)} / ${mcF(c.energy_b,2)}`,x:c.za,y:c.diff,col:col(k)})});
+     spec={type:"lines",series,xlab:mcXlab(),ylab:what==="diff"?(norm==="max"?"(B − A) / max A [%]  ·  "+t("mc_n_max"):"(B − A) / max A [%]"):(norm==="max"?"Z / max":"Z [MeV cm²/g]"),title:`A ${MC.a}  ·  B ${MC.b}`}}
+    const sel=new Set(es);info=`<div class="mute">A ${esc(MC.a)}, B ${esc(MC.b)}: ${esc(t("mc_nearest"))}. ${esc(t("mc_metrics_note"))}</div>`+mcTable([`E A [${eu}]`,`E B [${eb}]`,`${t("mc_r80")} A`,`${t("mc_r80")} B`,`${t("mc_shift_r80")} [mm]`,`${t("mc_peak")} A`,`${t("mc_peak")} B`,`${t("mc_shift_peak")} [mm]`,`Δ${t("mc_bpw80")} [mm]`],
+     r.rows.map(w=>[`${sel.has(w.energy_a)?"▸ ":""}${mcF(w.energy_a,2)}`,mcF(w.energy_b,2),mcF(w.a&&w.a.r80),mcF(w.b&&w.b.r80),mcF(w.d_r80),mcF(w.a&&w.a.peak),mcF(w.b&&w.b.peak),mcF(w.d_peak),mcF(w.d_bpw80)]))}}}
+ }catch(e){spec={empty:t("error")+": "+e.message}}
+ if(seq!==MC.seq2)return;MC.spec=spec||{empty:t("bp_no_data")};mcPaint();$("mcInfo").innerHTML=info}
+function mcPaint(opt){opt=opt||{};const c=$("mcPlot"),g=opt.g||c.getContext("2d"),W=opt.W||c.width,H=opt.H||c.height,C=v=>opt.light?LIGHT[v]:css(v),s=MC.spec;
+ if(!opt.g)g.clearRect(0,0,W,H);$("mcEmpty").hidden=!(s&&s.empty);if(s&&s.empty)$("mcEmpty").textContent=s.empty;
+ if(!s||s.empty)return;g.fillStyle=C("--card");g.fillRect(0,0,W,H);bpLines(g,W,H,C,s)}
+function mcName(ext){const v=$("mcView").value,base=(MC.a||"machine").replace(/\.mat$/i,"");return `${base}_${v}${v==="cmp"&&MC.b?"_vs_"+MC.b.replace(/\.mat$/i,""):""}.${ext}`}
+$("mcPng").onclick=()=>{if(!MC.spec||MC.spec.empty)return;const sc=+$("mcScale").value,off=document.createElement("canvas");off.width=1200*sc;off.height=560*sc;const g=off.getContext("2d");g.scale(sc,sc);mcPaint({g,W:1200,H:560,light:$("mcLight").checked});off.toBlob(b=>download(b,mcName("png")),"image/png")};
+$("mcSvg").onclick=()=>{if(!MC.spec||MC.spec.empty)return;const g=new SvgCtx(1200,560);mcPaint({g,W:1200,H:560,light:$("mcLight").checked});download(new Blob([g.toString()],{type:"image/svg+xml"}),mcName("svg"))};
+/* one row per point, series in the first column: the same layout as the Beam profile export */
+$("mcCsv").onclick=()=>{const s=MC.spec;if(!s||s.empty)return;const dec=LANG==="de",f=v=>v!=null&&isFinite(v)?String(+(+v).toPrecision(7)).replace(".",dec?",":"."):"";
+ const lines=[`# ${s.title}; ${s.ylab}`,["series",s.xlab,"y"].join(";")];for(const r of s.series)r.x.forEach((x,i)=>lines.push([r.name,f(x),f(r.y[i])].join(";")));
+ download(new Blob(["﻿"+lines.join("\r\n")],{type:"text/csv"}),mcName("csv"))};
+$("mcLoad").onclick=async()=>{const d=$("mcDir").value.trim();try{await api("/api/config",{machines_dir:d});INFO_AT=0}catch(e){}mcLoad(d)};
+$("mcDir").onkeydown=e=>{if(e.key==="Enter")$("mcLoad").click()};
+$("mcDefault").onclick=async()=>{try{await api("/api/config",{machines_dir:""});INFO_AT=0}catch(e){}mcLoad(null)};
+$("mcESpread").onclick=()=>{mcSpread();mcDraw()};$("mcENone").onclick=()=>{[...$("mcE").options].forEach(o=>o.selected=false);mcDraw()};
+$("mcE").onchange=debounce(mcDraw,150);
+for(const id of ["mcView","mcField","mcQty","mcCmp","mcNorm","mcOff"])$(id).onchange=()=>{if(id!=="mcOff")store(id,$(id).value);mcControls().then(mcDraw)};
+for(const id of ["mcView","mcCmp","mcNorm"])if(recall(id)&&[...$(id).options].some(o=>o.value===recall(id)))$(id).value=recall(id);
 
 /* ---------- generators */
 let GENS=[];
