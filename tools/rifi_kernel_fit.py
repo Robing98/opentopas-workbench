@@ -118,6 +118,8 @@ def topas_info(path):
                 if typ == "TsRidgeFilter" and (comp, "XPoints") in P:
                     out["ridges"].append({"name": comp, "x": num(P[(comp, "XPoints")][1]), "z": num(P[(comp, "ZPoints")][1]),
                                           "width": num(P[(comp, "Width")][1]) if (comp, "Width") in P else None,
+                                          "pitch": pitch(P.get((comp, "Displacement"), ("", ""))[1]),
+                                          "x0": left_edge(P, comp),
                                           "rotz": num(P[(comp, "RotZ")][1]) if (comp, "RotZ") in P else 0.0, "material": mat})
                 elif typ == "TsCAD" and (comp, "InputFile") in P:
                     fn = P[(comp, "InputFile")][1].strip('"')
@@ -127,6 +129,21 @@ def topas_info(path):
                                         "units": num(P[(comp, "Units")][1]) if (comp, "Units") in P else 1.0})
             return out
     return {}
+
+
+def left_edge(P, comp):
+    """x (mm) where the first ridge starts: TOPAS centres a ridge of the given width on its displacement, plus TransX."""
+    disp = P.get((comp, "Displacement"), ("", ""))[1]
+    width = num(P[(comp, "Width")][1]) if (comp, "Width") in P else 0.0
+    tx = num(P[(comp, "TransX")][1]) if (comp, "TransX") in P else 0.0
+    return (float(np.min(np.atleast_1d(num(disp)))) if disp else 0.0) - width / 2 + tx
+
+
+def pitch(val):
+    """Spacing of the ridges from a Displacement vector, None for a single ridge or none given."""
+    d = np.diff(np.sort(np.atleast_1d(num(val)))) if val else []
+    d = [v for v in d if v > 1e-9]
+    return float(min(d)) if d else None
 
 
 def energy_from_name(path):
@@ -160,14 +177,20 @@ def convolve_kernels(a, b):
     return t, w, m, s
 
 
-def ridge_samples(x, z, width=None, n=200001):
-    """Thickness along one period of a TsRidgeFilter profile (TOPAS closes the profile at 0 on both ends)."""
+def ridge_samples(x, z, width=None, n=200001, pitch=None, offset=0.0):
+    """Thickness along one period of a TsRidgeFilter profile (TOPAS closes the profile at 0 on both ends).
+
+    With a ridge spacing (pitch) wider than the ridge, the gap between two ridges holds no material. offset (mm) is
+    where the ridge starts on the common grid, so plates of one period sampled with their own offsets add point by
+    point (a laminate, or plates slid against each other by a tilt)."""
     x = np.asarray(x, float); z = np.asarray(z, float)
     width = width or x[-1]
     if x[0] > 0: x = np.r_[0.0, x]; z = np.r_[0.0, z]
     if x[-1] < width: x = np.r_[x, width]; z = np.r_[z, 0.0]
-    xs = np.linspace(0, width, n + 1)[:-1] + width / (2 * n)
-    return np.interp(xs, x, z)
+    period = max(pitch or width, width)
+    if period > width * (1 + 1e-9): x = np.r_[x, np.nextafter(width, np.inf), period]; z = np.r_[z, 0.0, 0.0]
+    xs = np.linspace(0, period, n + 1)[:-1] + period / (2 * n)
+    return np.interp(np.mod(xs - offset, period), x, z)
 
 
 def read_stl(path):
@@ -268,13 +291,15 @@ def true_kernel(info, a):
         for r in info.get("ridges", []):                       # same orientation: aligned, profiles add; crossed: independent
             groups.setdefault(round(r["rotz"] % 180), []).append(r)
         for rot, rs in sorted(groups.items()):
-            w = rs[0]["width"] or rs[0]["x"][-1]
-            if all(abs((r["width"] or r["x"][-1]) - w) < 1e-9 for r in rs):
-                s = sum(ridge_samples(r["x"], r["z"], r["width"]) * material_spr(r["material"], a.spr) for r in rs)
+            per = lambda r: max(r.get("pitch") or 0, r["width"] or r["x"][-1])
+            if all(abs(per(r) - per(rs[0])) < 1e-9 for r in rs):     # one period: the plates' positions set the sum
+                x0 = rs[0].get("x0") or 0.0
+                s = sum(ridge_samples(r["x"], r["z"], r["width"], pitch=r.get("pitch"), offset=(r.get("x0") or 0.0) - x0)
+                        * material_spr(r["material"], a.spr) for r in rs)
                 parts.append(hist_kernel(s)); desc.append("+".join(r["name"] for r in rs) + f" (RotZ {rot}°)")
             else:
                 for r in rs:
-                    parts.append(hist_kernel(ridge_samples(r["x"], r["z"], r["width"]) * material_spr(r["material"], a.spr))); desc.append(r["name"])
+                    parts.append(hist_kernel(ridge_samples(r["x"], r["z"], r["width"], pitch=r.get("pitch")) * material_spr(r["material"], a.spr))); desc.append(r["name"])
         for c in info.get("cads", []):
             if c["format"] != "stl" or not os.path.exists(c["file"]): continue
             parts.append(hist_kernel(stl_thickness(read_stl(c["file"]) * c["units"]) * material_spr(c["material"], a.spr)))
@@ -454,7 +479,7 @@ def main():
             d0 = d0 + rng.normal(0, a.noise / 100, d0.size); d1 = d1 + rng.normal(0, a.noise / 100, d1.size)
         d0s = smooth(d0) if not a.coarse else d0                 # the curve that gets shifted: light smoothing against noise
         m0, m1 = metrics(z0, smooth(d0)), metrics(z1, smooth(d1))
-        geo = repr([(r["x"].tolist(), r["z"].tolist(), r["rotz"], r["width"], r["material"]) for r in i1.get("ridges", [])]) + \
+        geo = repr([(r["x"].tolist(), r["z"].tolist(), r["rotz"], r["width"], r.get("pitch"), r.get("x0"), r["material"]) for r in i1.get("ridges", [])]) + \
               repr([(c["file"], c["units"], c["material"]) for c in i1.get("cads", [])])
         key = (geo, a.pin, a.stl, a.ridge, a.heightmap)            # same geometry, same true kernel
         if key not in truth_cache: truth_cache[key] = true_kernel(i1, a)

@@ -8,6 +8,15 @@ Binary filters: plates with two thicknesses, half of each period thick ("bin"). 
 from plate to plate ("stk", 2 plates crossed = 4 equally frequent thicknesses, "x3" = 3 plates = 8) samples the same
 uniform kernel as a triangle in coarser steps. "pair" is two equal triangles of half the height crossed, "pair...v" two of
 the full height (Weber and Kraft's double filter, as rifi2).
+Staircases ("stp"): one piece with four equally wide steps of a quarter of the height each, the lowest step open (no
+base plate), as a laminate of three plates covering 75, 50 and 25 % of each period. Same 4-step kernel as "stk" without
+the second base plate. "stp...g" has a coarse period of 6 mm (a test plate cut by hand or a simple laser).
+Gap and tilt: "stp4s10" builds the staircase as the laminate itself, three separate 1 mm plates (75, 50, 25 % cover,
+aligned) with 10 mm of air between them; "xb4s10" is two crossed binary plates without base plate (2 and 1 mm), 10 mm
+apart. A suffix "n15" tilts the filter group by 15 mrad about the y axis (perpendicular to the stripes of the first
+plate), so a plate further downstream slides sideways by tilt x distance against the first one. The laminate's plates
+share their right edge: at +15 mrad the smaller plates slide back over the larger ones and the kernel stays the same,
+at -15 mrad ("n-15") they overhang the open quarter.
 Phantom surface at the isocentre, filters 80 cm upstream.
 """
 import importlib.util, math, os, re, struct
@@ -48,10 +57,23 @@ VARIANTS = {
     "stk4x3": {"en": "3 binary plates, steps 2 + 1 + 0.5 mm", "de": "3 Binärplatten, Stufen 2 + 1 + 0,5 mm"},
     "pair4": {"en": "2 triangles 2 mm crossed", "de": "2 Dreiecke 2 mm gekreuzt"},
     "pair4v": {"en": "2 triangles 4 mm crossed", "de": "2 Dreiecke 4 mm gekreuzt"},
+    "stp4": {"en": "staircase 4 steps of 1 mm, open lowest step", "de": "Treppe 4 Stufen je 1 mm, unterste offen"},
+    "stp3": {"en": "staircase 4 steps of 0.75 mm, open lowest step", "de": "Treppe 4 Stufen je 0,75 mm, unterste offen"},
+    "stp4g": {"en": "staircase 4 steps of 1 mm, coarse period 6 mm", "de": "Treppe 4 Stufen je 1 mm, grobe Periode 6 mm"},
+    "stp4n15": {"en": "staircase 4 steps of 1 mm, tilted 15 mrad", "de": "Treppe 4 Stufen je 1 mm, 15 mrad geneigt"},
+    "stp4s10": {"en": "staircase as 3 plates of 1 mm, 10 mm air between", "de": "Treppe aus 3 Platten je 1 mm, 10 mm Luft dazwischen"},
+    "stp4s10n15": {"en": "staircase as 3 plates, 10 mm air, tilted 15 mrad", "de": "Treppe aus 3 Platten, 10 mm Luft, 15 mrad geneigt"},
+    "stp4s10n-15": {"en": "staircase as 3 plates, 10 mm air, tilted -15 mrad (upper plates overhang)", "de": "Treppe aus 3 Platten, 10 mm Luft, -15 mrad geneigt (obere Platten stehen über)"},
+    "xb4s10": {"en": "2 binary plates crossed without base, 2 + 1 mm, 10 mm air", "de": "2 Binärplatten gekreuzt ohne Grundplatte, 2 + 1 mm, 10 mm Luft"},
+    "xb4s10n15": {"en": "2 binary plates crossed without base, 10 mm air, tilted 15 mrad", "de": "2 Binärplatten gekreuzt ohne Grundplatte, 10 mm Luft, 15 mrad geneigt"},
 }
 PIN_BASE, PIN_TOP_HALF, PIN_RINGS = 0.1, 0.04, 8     # mm, mm, segments of the pin flank
 PIN_RE = re.compile(r"^(pin|pyr)(\d+(?:\.\d+)?)(e?)$")
 SHAPE_RE = re.compile(r"^(bin|stk|pair)(\d+(?:\.\d+)?)(x3|v)?$")
+STAIR_RE = re.compile(r"^stp(\d+(?:\.\d+)?)(g?)(?:s(\d+(?:\.\d+)?))?(?:n(-?\d+(?:\.\d+)?))?$")
+XB_RE = re.compile(r"^xb(\d+(?:\.\d+)?)s(\d+(?:\.\d+)?)(?:n(-?\d+(?:\.\d+)?))?$")
+PIVOT = 80.0        # cm, the tilted filter group turns about the first plate
+COARSE = 6.0        # mm, period of the coarse staircase "stp...g"
 BASE = 0.3          # mm, base plate of the 1D triangles and binary plates
 EDGE = 0.001        # mm, flank of a binary step: TsRidgeFilter needs XPoints that rise strictly
 # Plates behind the first one: (TransZ cm, RotZ deg). The third plate turns by 45 deg, not 90: at 0 deg it would line
@@ -81,15 +103,26 @@ def range_mm(ion, e_u):
     return 0.022 * e_u ** 1.77 * a / z ** 2
 
 
-def ridge(name, xs, zs, width, n, tz, rotz=0):
-    disp = " ".join(f"{(i - n // 2) * width:.2f}" for i in range(n + 1))
+def ridge(name, xs, zs, width, n, tz, rotz=0, pitch=None, shift=0.0, tilt=0.0):
+    """A TsRidgeFilter of n + 1 ridges. With pitch > width the ridges stand apart and the gaps hold no material.
+
+    shift (mm) moves the plate in x; TOPAS centres a ridge of width w on its displacement, so plates of different
+    widths line up at their right edges with shift = (w_max - w) / 2. It goes into TransX, not into the displacements:
+    TOPAS sizes the envelope box symmetric about 0 from the displacements, so shifted ridges would stick out of it. tilt (mrad) turns the plate about y as part of a
+    group that pivots at PIVOT: the plate turns and slides sideways by its distance from the pivot times the tilt. The
+    slide is what matters; turning a 1 mm plate by 15 mrad changes its path length by 1e-4."""
+    pitch = pitch or width
+    disp = " ".join(f"{(i - n // 2) * pitch:.3f}" for i in range(n + 1))
+    tx = shift + (tz - PIVOT) * 10 * tilt / 1000
+    turn = (f"d:Ge/{name}/RotY     = {tilt:g} mrad\n" if tilt else "") + \
+           (f"d:Ge/{name}/TransX   = {tx:.4f} mm\n" if tilt or shift else "")
     return f'''
 s:Ge/{name}/Type     = "TsRidgeFilter"
 s:Ge/{name}/Parent   = "World"
 s:Ge/{name}/Material = "G4_PLEXIGLASS"
 d:Ge/{name}/TransZ   = {tz} cm
 d:Ge/{name}/RotZ     = {rotz} deg
-dv:Ge/{name}/XPoints = {len(xs)} {" ".join(f"{v:.3f}" for v in xs)} mm
+{turn}dv:Ge/{name}/XPoints = {len(xs)} {" ".join(f"{v:.3f}" for v in xs)} mm
 dv:Ge/{name}/ZPoints = {len(zs)} {" ".join(f"{v:.3f}" for v in zs)} mm
 d:Ge/{name}/Width    = {width} mm
 d:Ge/{name}/Length   = 12.0 cm
@@ -110,6 +143,30 @@ def binary(step, lam):
     return [0, half - EDGE, half, end - EDGE, end], [BASE, BASE, BASE + step, BASE + step, BASE]
 
 
+def staircase(height, lam):
+    """One ridge of a staircase with four equal steps, the lowest one open: (XPoints, ZPoints, ridge width).
+
+    The ridge covers the upper three steps (3/4 of the period); the open quarter is the gap to the next ridge, so
+    there is no base plate. TOPAS closes the profile at 0 on both ends, and both ends here are vertical."""
+    q, step = round(lam / 4, 3), height / 4
+    xs = [0, q - EDGE, q, 2 * q - EDGE, 2 * q, 3 * q]
+    zs = [step, step, 2 * step, 2 * step, 3 * step, 3 * step]
+    return xs, zs, round(3 * q, 3)
+
+
+def laminate(height, lam, gap):
+    """The staircase as three flat plates of height/4 each, covering 3, 2 and 1 quarters of a period, gap mm apart.
+
+    Plate k spans quarters k..2 of the period, so the stack reads 1, 2, 3 steps over quarters 0, 1, 2, as staircase().
+    Returns (XPoints, ZPoints, width, shift, TransZ cm) per plate, the first (widest) plate at 80 cm."""
+    q, step = round(lam / 4, 3), height / 4
+    plates = []
+    for k in range(3):
+        w = round((3 - k) * q, 3)
+        plates.append(([0, w], [step, step], w, round((3 * q - w) / 2, 4), round(PIVOT - k * (step + gap) / 10, 4)))
+    return plates
+
+
 def shape_plates(v, lam):
     """Profiles (XPoints, ZPoints) of the plates of a bin/stk/pair variant, first plate first."""
     m = SHAPE_RE.match(v)
@@ -128,6 +185,22 @@ def variant_block(v, lam):
     if v == "rifi2": return ridge("RiFi1", *grev, 1.0, 120, 80.0) + ridge("RiFi2", *grev, 1.0, 120, 78.3, 90)
     if v.startswith("t"):
         return ridge("RiFi1", *triangle(float(v[1:]), lam), lam, int(120 / lam), 80.0)
+    m = STAIR_RE.match(v)
+    if m:
+        p = COARSE if m.group(2) else lam
+        tilt = float(m.group(4) or 0)
+        if m.group(3) is not None:
+            return "".join(ridge(f"RiFi{i + 1}", xs, zs, w, int(120 / p), tz, pitch=4 * round(p / 4, 3), shift=sh, tilt=tilt)
+                           for i, (xs, zs, w, sh, tz) in enumerate(laminate(float(m.group(1)), p, float(m.group(3)))))
+        xs, zs, w = staircase(float(m.group(1)), p)
+        return ridge("RiFi1", xs, zs, w, int(120 / p), 80.0, pitch=4 * round(p / 4, 3), tilt=tilt)
+    m = XB_RE.match(v)
+    if m:
+        d, gap, tilt = float(m.group(1)), float(m.group(2)), float(m.group(3) or 0)
+        half, s1, s2 = round(lam / 2, 3), d / 2, d / 4    # half of each period carries the step, the other half is open
+        tz2 = round(PIVOT - (s1 / 2 + gap + s2 / 2) / 10, 4)
+        return (ridge("RiFi1", [0, half], [s1, s1], half, int(120 / lam), PIVOT, 0, pitch=lam, tilt=tilt)
+                + ridge("RiFi2", [0, half], [s2, s2], half, int(120 / lam), tz2, 90, pitch=lam, tilt=tilt))
     if SHAPE_RE.match(v):
         return "".join(ridge(f"RiFi{i + 1}", xs, zs, lam, int(120 / lam), tz, rot)
                        for i, ((xs, zs), (tz, rot)) in enumerate(zip(shape_plates(v, lam), STACK)))
@@ -159,7 +232,7 @@ def case(ion, e_u, v, hist, spread, lam, prefix):
     hlz = max(4.0, math.ceil((1.15 * range_mm(ion, e_u) + 15) / 10.0))
     name = f"{prefix}_{ion}{int(round(e_u)):03d}_{v}"
     s = f'''# {part} {e_u:g} MeV/u ({a * e_u:g} MeV total), {VARIANTS[v]["en"]}. Generated by OpenTOPAS Workbench (ripple_filter).
-# Phantom surface = isocentre (z = 0). Filter 80 cm upstream (second one 78.3 cm, crossed; third 76.6 cm, 45 deg).
+# Phantom surface = isocentre (z = 0). First filter plate 80 cm upstream, further plates as in the block at the end.
 i:Ts/NumberOfThreads            = 0
 i:Ts/ShowHistoryCountAtInterval = {max(1000, int(hist) // 50)}
 b:Ge/CheckForOverlaps           = "False"
