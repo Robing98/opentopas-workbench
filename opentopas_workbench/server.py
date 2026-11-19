@@ -8,14 +8,15 @@ Pure Python standard library. Runs on Linux, macOS and WSL.
     python3 -m opentopas_workbench [...]
 
 Security: listens on 127.0.0.1 only, checks the Host header and requires a per-session token for every API call,
-and only touches files inside the workspace.
+and only touches files inside the workspace. The one exception is the Machines view: it reads matRad machine files
+(.mat) that the page names, by default from the matRad folder in the user's home, and writes nothing there.
 """
 import argparse, base64, csv, fnmatch, io, zipfile, importlib.util, json, os, re, secrets, shutil, signal, socketserver, subprocess, sys, threading, time, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from . import __version__ as VERSION
-from . import beamprofile
+from . import beamprofile, machines
 TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
 TEXT_EXT = {".txt", ".py", ".sh", ".bat", ".json", ".csv", ".md", ".log", ".in", ".mac", ".xml", ".header", ".binheader", ".mcc", ".asc", ".dat", ".tsv"}
 TRASH = "_trash"
@@ -1005,6 +1006,37 @@ def beam_api(what, q):
     if what == "dose": return beamprofile.dose_depth(p, int(q.get("k", 0) or 0), mode)
     raise ValueError("unknown beam request")
 
+# ------------------------------------------------------------------ matRad machines view
+def machines_dir():
+    return STATE["cfg"].get("machines_dir") or machines.default_dir()
+
+
+def machine_file(s):
+    """A machine file the browser named: any .mat file, also outside the workspace (matRad keeps them in the user folder).
+    Read only; nothing of it is copied or logged."""
+    p = os.path.realpath(machines.local_path(s))
+    if not p.lower().endswith(".mat") or not os.path.isfile(p): raise ValueError("not a .mat file")
+    return p
+
+
+def machines_api(what, q):
+    """GET /api/machines/<what>: list (a folder), view, tree (meta and one data element), compare (two files)."""
+    if what == "list":
+        d = os.path.realpath(machines.local_path(q.get("dir") or machines_dir()))
+        return {"dir": d, "default": machines.default_dir(), "files": machines.list_dir(d)}
+    try:
+        if what == "view": return machines.view(machine_file(q.get("p", "")))
+        if what == "tree": return machines.tree(machine_file(q.get("p", "")), int(q.get("i", 0) or 0))
+        if what == "compare":
+            es = [float(x) for x in q.get("e", "").split(",") if x.strip()]
+            return machines.compare(machine_file(q.get("a", "")), machine_file(q.get("b", "")), es,
+                                    "abs" if q.get("norm") == "abs" else "max", q.get("offset", "1") != "0")
+    except (OSError, ValueError, RuntimeError):
+        raise
+    except Exception as e:  # scipy and h5py raise many kinds on a file that is not a machine; the view shows the message
+        raise ValueError(f"{type(e).__name__}: {e}")
+    raise ValueError("unknown machines request")
+
 # ------------------------------------------------------------------ generator plugins
 def load_generators():
     gens = {}
@@ -1499,6 +1531,7 @@ class H(BaseHTTPRequestHandler):
                 if not res.get("measured"): res["beam"] = producer_of(relp(resolve(q.get("p", ""))))
                 return self.send(200, res)
             if u.path.startswith("/api/beam/"): return self.send(200, beam_api(u.path[len("/api/beam/"):], q))
+            if u.path.startswith("/api/machines/"): return self.send(200, machines_api(u.path[len("/api/machines/"):], q))
             if u.path == "/api/generators": return self.send(200, gen_schema())
             if u.path == "/file":
                 p = resolve(q.get("p", ""))
@@ -1608,6 +1641,7 @@ class H(BaseHTTPRequestHandler):
                 if "keep_awake" in b: cfg["keep_awake"] = bool(b["keep_awake"])
                 if "keep_display" in b: cfg["keep_display"] = bool(b["keep_display"])
                 if "toast" in b: cfg["toast"] = bool(b["toast"])
+                if "machines_dir" in b: cfg["machines_dir"] = str(b["machines_dir"] or "").strip()
                 for k in ("exclude", "include"):
                     if k in b: cfg[k] = [str(x).strip() for x in b[k] if str(x).strip()][:200]; invalidate_cache()
                 if "binaries" in b:
