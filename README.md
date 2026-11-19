@@ -86,7 +86,7 @@ python3 -m pip install --user numpy scipy h5py
 4. Pick a second file as **B** to compare: the depth doses of the same or nearest energies on top of each other, the difference in percent, and the shift of R80 and of the peak. The numbers come from the same code as `tools/compare_idd_matrad.py`.
 5. Every plot exports as PNG or SVG, the plotted curves as CSV.
 
-The files are read where they lie. Nothing of them is copied into the workspace or written to a log.
+The files are read where they lie. Nothing of them is copied into the workspace or written to a log; only the folder path is kept, in `WORKSPACE/.workbench/config.json`.
 
 ## MCP server
 
@@ -157,7 +157,7 @@ Field types: `text`, `number`, `select`, `multi` (checkboxes, value is a list), 
 
 ## Security
 
-The server listens on `127.0.0.1` only, rejects requests with a foreign `Host` header, requires a per-session token for every API call, and only reads or writes inside the workspace. The one exception is the Machines tab: it reads `.mat` files in the folder you give it, also outside the workspace, and never writes there. It runs the TOPAS binaries you configure, so do not expose it to a network.
+The server listens on `127.0.0.1` only, rejects requests with a foreign `Host` header, requires a per-session token for every API call, and only reads or writes inside the workspace. The one exception is the Machines tab: it reads any `.mat` file the page names, also outside the workspace, and never writes there. It runs the TOPAS binaries you configure, so do not expose it to a network.
 
 ## Known limits
 

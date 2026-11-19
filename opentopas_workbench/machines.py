@@ -250,7 +250,8 @@ def summary(path):
     """One row of the folder list. The parsed machine is not kept for this: a folder may hold many large files."""
     np = need_numpy()
     k = _key(path)
-    if k in _SUMMARY: return _SUMMARY[k]
+    row = _SUMMARY.get(k)  # one lookup: another request may clear the dict between a test and a read
+    if row is not None: return row
     m = load_struct(path, "machine")
     meta = getattr(m, "meta", None)
     get = lambda name: _text(getattr(meta, name, None)) if meta is not None else None
@@ -343,7 +344,8 @@ def view(path):
     """Everything the Machines view draws: per-energy curves over depth and per-energy scalars."""
     np = need_numpy()
     ck = _key(path)
-    if ck in _VIEW: return _VIEW[ck]
+    out = _VIEW.get(ck)  # one lookup, as in summary()
+    if out is not None: return out
     m = machine(path)
     meta = getattr(m, "meta", None)
     sad = _scalar(getattr(meta, "SAD", None)) if meta is not None else None

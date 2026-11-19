@@ -9,7 +9,7 @@ Pure Python standard library. Runs on Linux, macOS and WSL.
 
 Security: listens on 127.0.0.1 only, checks the Host header and requires a per-session token for every API call,
 and only touches files inside the workspace. The one exception is the Machines view: it reads matRad machine files
-(.mat) from the folder the user picks, by default the matRad folder in the user's home, and writes nothing there.
+(.mat) that the page names, by default from the matRad folder in the user's home, and writes nothing there.
 """
 import argparse, base64, csv, fnmatch, io, zipfile, importlib.util, json, os, re, secrets, shutil, signal, socketserver, subprocess, sys, threading, time, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
