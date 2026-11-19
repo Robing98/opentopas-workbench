@@ -575,13 +575,13 @@ document.querySelectorAll("nav [role=tab]").forEach(b=>b.onclick=()=>showTab(b.d
 $("runBadge").onclick=()=>showTab("run");
 const FILTER_OF={files:"fmName",gen:"genSel",run:"rfFilter",explorer:"exQ",results:"resFilter",beam:"bpFilter",settings:"excBox"};
 function helpOpen(){const k=a=>a.map(x=>`<kbd>${esc(x)}</kbd>`).join(" "),de=LANG==="de";
- $("helpBody").innerHTML=[[k(["1"])+" … "+k(["7"])+" "+(de?"oder":"or")+" "+k(["Alt+1"])+" … "+k(["Alt+7"]),t("k_tabs")],[k(["/"]),t("k_filter")],[k([(de?"Strg":"Ctrl")+"+S"]),t("k_save")],
+ $("helpBody").innerHTML=[[k(["1"])+" … "+k(["8"])+" "+(de?"oder":"or")+" "+k(["Alt+1"])+" … "+k(["Alt+8"]),t("k_tabs")],[k(["/"]),t("k_filter")],[k([(de?"Strg":"Ctrl")+"+S"]),t("k_save")],
   [k([(de?"Umschalt+Klick":"Shift+click")]),t("k_range")],[k(["?"]),t("k_help")],[k(["Esc"]),t("k_esc")]].map(([a,b])=>`<tr><td>${a}</td><td>${esc(b)}</td></tr>`).join("")+
   `<tr><td colspan="2" class="mute">${esc(t("k_back"))}</td></tr>`;$("help").hidden=false;$("helpClose").focus()}
 function helpClose(){$("help").hidden=true}
 $("helpBtn").onclick=helpOpen;$("helpClose").onclick=helpClose;$("help").onclick=e=>{if(e.target.id==="help")helpClose()};
 document.addEventListener("keydown",e=>{const typing=e.target&&e.target.closest&&e.target.closest("input,textarea,select,[contenteditable]");
- const m=/^Digit([1-7])$/.exec(e.code||"");
+ const m=/^Digit([1-8])$/.exec(e.code||"");
  if(m&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey&&(e.altKey||!typing)&&$("lightbox").hidden&&$("help").hidden){e.preventDefault();showTab(TABS[+m[1]-1]);return}
  if(e.key==="Escape"&&!$("help").hidden){helpClose();return}
  if(typing||e.ctrlKey||e.metaKey||e.altKey)return;
