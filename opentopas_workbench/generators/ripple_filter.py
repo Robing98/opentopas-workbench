@@ -4,6 +4,10 @@ Example plugin for OpenTOPAS Workbench. Geometry follows Grevillot et al. (2D 2 
 2D pins: square pins on a 0.1 mm base plate, either shaped for a uniform thickness distribution ("pin", same modulation as a
 1D triangle) or straight pyramids ("pyr", thickness distribution falling linearly). Variants ending in "e" are 1D ridge filters
 with the same thickness distribution as the 2D pins, to check that only the distribution matters for the depth dose.
+Binary filters: plates with two thicknesses, half of each period thick ("bin"). A stack of binary plates whose steps halve
+from plate to plate ("stk", 2 plates crossed = 4 equally frequent thicknesses, "x3" = 3 plates = 8) samples the same
+uniform kernel as a triangle in coarser steps. "pair" is two equal triangles of half the height crossed, "pair...v" two of
+the full height (Weber and Kraft's double filter, as rifi2).
 Phantom surface at the isocentre, filters 80 cm upstream.
 """
 import importlib.util, math, os, re, struct
@@ -39,9 +43,21 @@ VARIANTS = {
     "pyr6": {"en": "2D pyramids 6 mm", "de": "2D-Pyramiden 6 mm"},
     "pin4e": {"en": "1D equivalent of 2D pins 4 mm", "de": "1D-Äquivalent der 2D-Pins 4 mm"},
     "pyr4e": {"en": "1D equivalent of 2D pyramids 4 mm", "de": "1D-Äquivalent der 2D-Pyramiden 4 mm"},
+    "bin4": {"en": "binary plate, step 2 mm", "de": "Binärplatte, Stufe 2 mm"},
+    "stk4": {"en": "2 binary plates crossed, steps 2 + 1 mm", "de": "2 Binärplatten gekreuzt, Stufen 2 + 1 mm"},
+    "stk4x3": {"en": "3 binary plates, steps 2 + 1 + 0.5 mm", "de": "3 Binärplatten, Stufen 2 + 1 + 0,5 mm"},
+    "pair4": {"en": "2 triangles 2 mm crossed", "de": "2 Dreiecke 2 mm gekreuzt"},
+    "pair4v": {"en": "2 triangles 4 mm crossed", "de": "2 Dreiecke 4 mm gekreuzt"},
 }
 PIN_BASE, PIN_TOP_HALF, PIN_RINGS = 0.1, 0.04, 8     # mm, mm, segments of the pin flank
 PIN_RE = re.compile(r"^(pin|pyr)(\d+(?:\.\d+)?)(e?)$")
+SHAPE_RE = re.compile(r"^(bin|stk|pair)(\d+(?:\.\d+)?)(x3|v)?$")
+BASE = 0.3          # mm, base plate of the 1D triangles and binary plates
+EDGE = 0.001        # mm, flank of a binary step: TsRidgeFilter needs XPoints that rise strictly
+# Plates behind the first one: (TransZ cm, RotZ deg). The third plate turns by 45 deg, not 90: at 0 deg it would line
+# up with the first (same period) and the two plates would add to 2 thicknesses instead of 4. The third plate lies
+# behind the 77.0 cm "after the filters" monitor plane.
+STACK = [(80.0, 0), (78.3, 90), (76.6, 45)]
 FIELDS = [
     {"key": "ions", "type": "multi", "label": {"en": "Ions", "de": "Ionen"}, "default": ["p"],
      "options": [["p", {"en": "Proton", "de": "Proton"}], ["a", "Helium-4"], ["c", {"en": "Carbon-12", "de": "Kohlenstoff-12"}]]},
@@ -81,14 +97,40 @@ dv:Ge/{name}/Displacement = {n + 1} {disp} mm
 '''
 
 
+def triangle(d, lam):
+    return [0, 0.01, lam / 2 - 0.04, lam / 2 + 0.04, lam - 0.01, lam], [BASE, BASE, d, d, BASE, BASE]
+
+
+def binary(step, lam):
+    """One period: thin (BASE) on the first half, BASE + step on the second, flanks EDGE wide.
+
+    The points sit on the 0.001 mm grid that ridge() writes, so an odd third decimal of the period cannot round two
+    of them onto the same value."""
+    half, end = round(lam / 2, 3), round(lam, 3)
+    return [0, half - EDGE, half, end - EDGE, end], [BASE, BASE, BASE + step, BASE + step, BASE]
+
+
+def shape_plates(v, lam):
+    """Profiles (XPoints, ZPoints) of the plates of a bin/stk/pair variant, first plate first."""
+    m = SHAPE_RE.match(v)
+    if not m or (m.group(3) == "x3" and m.group(1) != "stk") or (m.group(3) == "v" and m.group(1) != "pair"):
+        raise ValueError(v)
+    kind, d = m.group(1), float(m.group(2))
+    if kind == "bin": return [binary(d / 2, lam)]
+    if kind == "stk": return [binary(d / 2 ** (i + 1), lam) for i in range(3 if m.group(3) else 2)]
+    return [triangle(d if m.group(3) else d / 2, lam)] * 2
+
+
 def variant_block(v, lam):
     grev = ([0.0, 0.009, 0.46, 0.54, 0.991, 1.0], [0.4, 0.4, 2.0, 2.0, 0.4, 0.4])
     if v == "rifi0": return ""
     if v == "rifi1": return ridge("RiFi1", *grev, 1.0, 120, 80.0)
     if v == "rifi2": return ridge("RiFi1", *grev, 1.0, 120, 80.0) + ridge("RiFi2", *grev, 1.0, 120, 78.3, 90)
     if v.startswith("t"):
-        d = float(v[1:]); n = int(120 / lam)
-        return ridge("RiFi1", [0, 0.01, lam / 2 - 0.04, lam / 2 + 0.04, lam - 0.01, lam], [0.3, 0.3, d, d, 0.3, 0.3], lam, n, 80.0)
+        return ridge("RiFi1", *triangle(float(v[1:]), lam), lam, int(120 / lam), 80.0)
+    if SHAPE_RE.match(v):
+        return "".join(ridge(f"RiFi{i + 1}", xs, zs, lam, int(120 / lam), tz, rot)
+                       for i, ((xs, zs), (tz, rot)) in enumerate(zip(shape_plates(v, lam), STACK)))
     m = PIN_RE.match(v)
     if m:
         kind, d, equiv = m.group(1), float(m.group(2)), m.group(3)
@@ -117,7 +159,7 @@ def case(ion, e_u, v, hist, spread, lam, prefix):
     hlz = max(4.0, math.ceil((1.15 * range_mm(ion, e_u) + 15) / 10.0))
     name = f"{prefix}_{ion}{int(round(e_u)):03d}_{v}"
     s = f'''# {part} {e_u:g} MeV/u ({a * e_u:g} MeV total), {VARIANTS[v]["en"]}. Generated by OpenTOPAS Workbench (ripple_filter).
-# Phantom surface = isocentre (z = 0). Filter 80 cm upstream (second one 78.3 cm, crossed).
+# Phantom surface = isocentre (z = 0). Filter 80 cm upstream (second one 78.3 cm, crossed; third 76.6 cm, 45 deg).
 i:Ts/NumberOfThreads            = 0
 i:Ts/ShowHistoryCountAtInterval = {max(1000, int(hist) // 50)}
 b:Ge/CheckForOverlaps           = "False"
