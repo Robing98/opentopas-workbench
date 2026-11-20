@@ -28,9 +28,11 @@ def export(run, out, fractions=1, body=None):
     """Write the layers of a plan_mc run as NIfTI (total over `fractions`). Returns the summary dict."""
     ref_path = os.path.join(run, "rbe_dose_1_1.dcm")
     if not os.path.exists(ref_path): raise SystemExit(f"{ref_path} missing: run plan_mc rbe on this run first")
-    ref = geo.read_rtdose(ref_path)
-    letd = np.load(os.path.join(run, "letd.npy")).astype(np.float32)
-    eff11 = np.load(os.path.join(run, "rbe_dose_1_1.npy")).astype(np.float64)
+    ref, rev = geo.read_rtdose(ref_path, flipped=True)
+    # the npy arrays are in the RT Dose's frame order; reversed frames on the image need them reversed too
+    load = lambda name: (lambda a: a[::-1] if rev else a)(np.load(os.path.join(run, name)))
+    letd = load("letd.npy").astype(np.float32)
+    eff11 = load("rbe_dose_1_1.npy").astype(np.float64)
     if letd.shape != eff11.shape or letd.shape[::-1] != ref.GetSize():
         raise SystemExit(f"grids differ: letd {letd.shape}, rbe_dose_1_1 {eff11.shape}, RT Dose {ref.GetSize()[::-1]}")
     phys = eff11 / CONSTANT
@@ -41,7 +43,7 @@ def export(run, out, fractions=1, body=None):
     layers = {"letd": np.where(valid, letd, 0.0), "dose_phys": phys * fractions}
     for p in sorted(glob.glob(os.path.join(run, "rbe_dose_*.npy"))):
         tag = os.path.basename(p)[len("rbe_dose_"):-4]
-        layers[f"dose_rbe_{tag}"] = np.load(p).astype(np.float64) * fractions
+        layers[f"dose_rbe_{tag}"] = load(os.path.basename(p)).astype(np.float64) * fractions
     # the same rule as plan_mc: model RBE only where the LETd is trusted, 1.1 elsewhere
     layers["dose_rbe_bahn_linear"] = np.where(valid, bahn_linear(letd), CONSTANT) * phys * fractions
     for name, arr in layers.items():

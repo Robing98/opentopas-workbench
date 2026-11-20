@@ -47,6 +47,48 @@ def test_rtdose_roundtrip_keeps_geometry(tmp_path):
     assert np.allclose(sitk.GetArrayFromImage(img), d, atol=1e-6)
 
 
+def _set_offsets(path, offsets, ipp_z=None):
+    import pydicom
+    ds = pydicom.dcmread(path)
+    ds.GridFrameOffsetVector = [float(v) for v in offsets]
+    if ipp_z is not None: ds.ImagePositionPatient = [float(ds.ImagePositionPatient[0]), float(ds.ImagePositionPatient[1]), float(ipp_z)]
+    ds.save_as(path)
+
+
+def test_rtdose_absolute_offsets_start_at_image_position(tmp_path):
+    d = np.random.default_rng(2).random((4, 5, 6))
+    p = str(tmp_path / "d.dcm")
+    geo.write_rtdose(p, d, (-10.0, 20.0, 30.0), (2.0, 2.5, 3.0))
+    _set_offsets(p, [30, 33, 36, 39])          # absolute form: the first offset is the z of ImagePositionPatient
+    img = geo.read_rtdose(p)
+    assert np.allclose(img.GetOrigin(), (-10, 20, 30)) and np.allclose(img.GetSpacing(), (2, 2.5, 3))
+
+
+def test_export_keeps_npy_on_descending_frames(tmp_path):
+    import pydicom
+    run = str(tmp_path / "run")
+    ph.write_run(run)
+    raw = np.load(os.path.join(run, "letd.npy"))
+    # LETd rising along z, so that a head to feet mirror cannot pass
+    np.save(os.path.join(run, "letd.npy"), raw + np.arange(raw.shape[0])[:, None, None])
+    ex.export(run, str(tmp_path / "asc"))
+    ref = geo.read_rtdose(os.path.join(run, "rbe_dose_1_1.dcm"))
+    nz, dz = ref.GetSize()[2], ref.GetSpacing()[2]
+    top = ref.TransformIndexToPhysicalPoint((0, 0, nz - 1))[2]
+    # the same run stored head first: dcm pixel frames and every npy reversed, offsets descending
+    p = os.path.join(run, "rbe_dose_1_1.dcm"); ds = pydicom.dcmread(p)
+    ds.PixelData = np.ascontiguousarray(ds.pixel_array[::-1]).tobytes(); ds.save_as(p)
+    _set_offsets(p, [-k * dz for k in range(nz)], ipp_z=top)
+    for f in os.listdir(run):
+        if f.endswith(".npy"): np.save(os.path.join(run, f), np.load(os.path.join(run, f))[::-1])
+    ex.export(run, str(tmp_path / "desc"))
+    for name in ("letd", "dose_phys"):
+        i1 = sitk.ReadImage(str(tmp_path / "asc" / f"{name}.nii.gz"))
+        i2 = sitk.ReadImage(str(tmp_path / "desc" / f"{name}.nii.gz"))
+        assert np.allclose(i1.GetOrigin(), i2.GetOrigin()) and np.allclose(i1.GetDirection(), i2.GetDirection())
+        assert np.allclose(sitk.GetArrayFromImage(i1), sitk.GetArrayFromImage(i2), rtol=1e-5)
+
+
 def test_export_hides_low_dose_letd_and_applies_bahn_line(tmp_path):
     run, out = str(tmp_path / "run"), str(tmp_path / "frame")
     ph.write_run(run)

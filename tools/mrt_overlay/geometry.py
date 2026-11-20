@@ -21,8 +21,11 @@ def like(arr_zyx, ref):
     return img
 
 
-def read_rtdose(path):
-    """RT Dose as a float image in Gy, with its orientation (any IOP, ascending or descending frames)."""
+def read_rtdose(path, flipped=False):
+    """RT Dose as a float image in Gy, with its orientation (any IOP, ascending or descending frames).
+
+    Descending frames are reversed so the spacing stays positive; with `flipped` it returns (image, reversed), and
+    an array in the file's frame order needs [::-1] on axis 0 to lie on that image."""
     import pydicom
     ds = pydicom.dcmread(path)
     d = ds.pixel_array.astype(np.float64) * float(ds.DoseGridScaling)
@@ -32,12 +35,17 @@ def read_rtdose(path):
     iop = np.asarray(getattr(ds, "ImageOrientationPatient", [1, 0, 0, 0, 1, 0]), float)
     row, col = iop[:3], iop[3:]
     normal = np.cross(row, col)
-    dz = float(off[1] - off[0]) if len(off) > 1 else float(getattr(ds, "SliceThickness", 1) or 1)
-    origin = np.asarray(ds.ImagePositionPatient, float) + off[0] * normal
-    if dz < 0:   # frames run against the normal: flip them so the spacing stays positive
-        d, dz, origin = d[::-1], -dz, origin + off[-1] * normal - off[0] * normal
+    # ImagePositionPatient is frame 0 for relative offsets (first 0) and for absolute ones (first = its z), so
+    # only the offsets relative to the first frame move along the normal
+    off = off - off[0]
+    dz = float(off[1]) if len(off) > 1 else float(getattr(ds, "SliceThickness", 1) or 1)
+    origin = np.asarray(ds.ImagePositionPatient, float)
+    rev = dz < 0
+    if rev:   # frames run against the normal: flip them so the spacing stays positive
+        d, dz, origin = d[::-1], -dz, origin + off[-1] * normal
     spacing = (float(ds.PixelSpacing[1]), float(ds.PixelSpacing[0]), dz)
-    return from_array(d.astype(np.float32), origin, spacing, np.stack([row, col, normal], 1).ravel())
+    img = from_array(d.astype(np.float32), origin, spacing, np.stack([row, col, normal], 1).ravel())
+    return (img, rev) if flipped else img
 
 
 def write_rtdose(path, dose_zyx, origin, spacing):
