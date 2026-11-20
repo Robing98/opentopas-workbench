@@ -3,7 +3,11 @@
 #   run.sh RUN CT RTSTRUCT CACHEF VIEWERDATA PRESCRIPTION FRACTIONS OUT KENNZAHLEN
 # OUT receives the CT frame layers, the layers on the viewer grid and overlay.json; KENNZAHLEN numbers only.
 set -euo pipefail
-RUN=$1; CT=$2; RS=$3; CACHE=$4; VIEW=$5; RX=$6; FX=$7; OUT=$8; KZ=$9
+# Windows paths (C:\...) from the start file are turned into WSL paths here: wsl.exe drops the quotes of a
+# path with spaces when cmd converts it itself.
+win() { case "$1" in [A-Za-z]:\\*|[A-Za-z]:/*) wslpath -a "$1" ;; *) printf '%s\n' "$1" ;; esac; }
+RUN=$(win "$1"); CT=$(win "$2"); RS=$(win "$3"); CACHE=$(win "$4"); VIEW=$(win "$5"); RX=$6; FX=$7
+OUT=$(win "$8"); KZ=$(win "$9")
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PY="${MRT_PY:-}"
 if [ -z "$PY" ]; then
