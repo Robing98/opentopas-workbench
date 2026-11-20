@@ -3,16 +3,18 @@
 with a ripple filter folded into every depth dose and its extra spot size added in air.
 
 Layer grid: the template's energies are about 3 mm WET apart (protons_Generic), too coarse for a 2 mm grid. So the
-machine gets one energy per target peak position p_k = p_deep - k * spacing, made from the template entry with the
-nearest peak, its depth tables shifted by p_k - peakPos (at most half the template step; over 1.5 mm the Bragg peak
+machine gets one energy per target peak position p_k = anchor + k * spacing (anchor: a target's distal edge, default
+the template's deepest peak), made from the template entry with the nearest peak, its depth tables shifted by p_k - peakPos (at most half the template step; over 1.5 mm the Bragg peak
 width barely changes). The energy is interpolated over the peak position. With matRad's longitudinal spot spacing set
 below the grid (e.g. 0.5 mm), every energy of the machine stays available and the grid is exactly the one built here.
 
 Filter: Weber and Kraft 1999 as in rifi_kernel_fit.py and the convolution model of rifi_formvergleich:
     Z_with(z) = sum_i w_i * Z_without(z + t_i)
 with the kernel (t_i, w_i) of the filter in mm WET. Lateral tables and LET move with the mean thickness. The peak
-position and range are taken from the folded curve, so the grid of a filter machine is the same set of nominal
-energies with peaks pulled back by about the mean thickness.
+range (R80) is taken from the folded curve; the peak position written is p_k, made from the template curve whose own
+peak lies at p_k + mean thickness, so machines with and without a filter share one grid phase. Without that, a filter machine built from the same
+energies has its peaks about the mean thickness shallower, and a target edge can fall between two layers (2.4 mm short
+for stp4 at the cube of the plan comparison, which showed as 4.9 % ripple and a hot last layer).
 
 Extra spot size: the filter's angular spread adds sigma_x(E) in quadrature to the spot size in air at the isocentre,
 sigma_x(E) = a * (E / 100 MeV)^b, fitted to TOPAS values behind the nozzle model (rifi_position, rifi_treppe).
@@ -22,7 +24,7 @@ knows the spot size in air.
 Kernels: steps4:MEAN:SIGMA (four equal steps, stp4 and stp3), box:MEAN:SIGMA (t4), gauss:MEAN:SIGMA, none.
 Usage:
   python3 filter_machine.py --template protons_Generic.mat --name PV_stp4_464 --spacing 4.64 \
-      --kernel steps4:1.74:1.30 --extra-sigma 4.40:-1.07 --out protons_PV_stp4_464.mat
+      --kernel steps4:1.74:1.30 --extra-sigma 4.40:-1.07 --anchor 90 --out protons_PV_stp4_464.mat
 """
 import argparse, copy, datetime, os, sys
 import numpy as np
@@ -76,8 +78,25 @@ def dense(z, y, step=0.05):
 def col(x): return np.asarray(x, float).reshape(-1, 1)
 
 
-def build(template, spacing, kernel_spec="none", sigma_spec="none", depth_min=0.0, depth_max=None):
-    """New data array (1 x N record array like the template's) and a list of (energy, peak, range, sigma_air)."""
+def _fold(ent, P, E, p_src, t, w):
+    """Template curve shifted so that its unfolded peak sits at p_src, on a dense grid, and folded with the kernel."""
+    j = int(np.argmin(abs(P - p_src))); s = p_src - P[j]; e0 = ent[j]
+    z = e0["depths"].ravel().astype(float)
+    # shifted template curve: value at depth z is the template's at z - s (deeper peak for s > 0)
+    Z0 = np.interp(z - s, z, e0["Z"].ravel(), left=e0["Z"].ravel()[0], right=0.0)
+    # dense uniform grid so that folding and the peak search do not depend on the irregular template grid
+    zz = np.arange(0.0, z[-1] + s + 1e-9, 0.05)
+    Zd = np.interp(zz, z, Z0, left=Z0[0], right=0.0)
+    Zf = sum(wi * np.interp(zz + ti, zz, Zd, left=Zd[0], right=0.0) for ti, wi in zip(t, w))
+    return dict(e0=e0, z=z, s=s, zz=zz, Zf=Zf, energy=float(np.interp(p_src, P, E)))
+
+
+def build(template, spacing, kernel_spec="none", sigma_spec="none", depth_min=0.0, depth_max=None, anchor=None):
+    """New data array (1 x N record array like the template's) and a list of (energy, peak, range, sigma_air).
+
+    The peaks of the built machine, after folding, lie on anchor + k * spacing (default anchor: the template's deepest
+    peak). So machines with and without a filter share one grid phase, and a target edge at the anchor gets a layer.
+    """
     data = template["machine"]["data"][0, 0]
     ent = [data[0, j] for j in range(data.shape[1])]
     E = np.array([float(e["energy"].ravel()[0]) for e in ent])
@@ -85,22 +104,18 @@ def build(template, spacing, kernel_spec="none", sigma_spec="none", depth_min=0.
     P = np.array([fine_peak(*dense(e["depths"].ravel(), e["Z"].ravel())) for e in ent])
     t, w = filter_kernel(kernel_spec)
     tmean = float(np.sum(t * w))
+    a = P[-1] if anchor is None else float(anchor)
     hi = P[-1] if depth_max is None else min(depth_max, P[-1])
-    targets = np.arange(hi, max(P[0], depth_min) - 1e-9, -spacing)[::-1]
+    lo = max(P[0], depth_min)
+    targets = a + spacing * np.arange(np.floor((lo - a) / spacing) - 2, np.ceil((hi - a) / spacing) + 1)
     out, info = [], []
     for p in targets:
-        j = int(np.argmin(abs(P - p))); s = p - P[j]; e0 = ent[j]
-        z = e0["depths"].ravel().astype(float)
-        energy = float(np.interp(p, P, E))
-        # shifted template curve: value at depth z is the template's at z - s (deeper peak for s > 0)
-        Z0 = np.interp(z - s, z, e0["Z"].ravel(), left=e0["Z"].ravel()[0], right=0.0)
-        # dense uniform grid so that folding and the peak search do not depend on the irregular template grid
-        zz = np.arange(0.0, z[-1] + s + 1e-9, 0.05)
-        Zd = np.interp(zz, z, Z0, left=Z0[0], right=0.0)
-        Zf = sum(wi * np.interp(zz + ti, zz, Zd, left=Zd[0], right=0.0) for ti, wi in zip(t, w))
-        # the folded peak relative to the unfolded one: both are quantised alike by the linear template grid, so the
-        # difference is clean and an unfiltered machine keeps exactly the grid p_k
-        peak = p + fine_peak(zz, Zf) - fine_peak(zz, Zd)
+        # the filter pulls the peak back by about its mean thickness: start from the unfolded peak that lands on p
+        # the nominal peak of a filter layer is the unfolded one pulled back by the mean thickness, the centre of its
+        # sub-peaks; the maximum of a step-folded curve jumps between sub-peaks and would make the grid irregular
+        if not lo - 1e-9 <= p <= hi + 1e-9 or not P[0] - 1e-9 <= p + tmean <= P[-1] + 1e-9: continue
+        f = _fold(ent, P, E, p + tmean, t, w)
+        e0, z, s, zz, Zf, energy, peak = f["e0"], f["z"], f["s"], f["zz"], f["Zf"], f["energy"], float(p)
         r80 = r80_after_peak(zz, Zf)
         # output depth grid as in the template: coarse plateau, 0.1 mm around the peak, 0.5 mm in the tail
         last = zz[np.where(Zf > 1e-4 * Zf.max())[0][-1]]
@@ -142,10 +157,11 @@ def main():
     ap.add_argument("--extra-sigma", default="none", help="a:b for sigma_x = a * (E/100 MeV)^b [mm], added in quadrature")
     ap.add_argument("--depth-min", type=float, default=0.0, help="shallowest peak to keep [mm]")
     ap.add_argument("--depth-max", type=float, help="deepest peak, start of the grid [mm] (default: the template's)")
+    ap.add_argument("--anchor", type=float, help="depth [mm] that gets a peak, e.g. a target's distal edge (default: the template's deepest peak)")
     ap.add_argument("--out")
     a = ap.parse_args()
     tpl = sio.loadmat(a.template)
-    arr, info = build(tpl, a.spacing, a.kernel, a.extra_sigma, a.depth_min, a.depth_max)
+    arr, info = build(tpl, a.spacing, a.kernel, a.extra_sigma, a.depth_min, a.depth_max, a.anchor)
     mach = copy.deepcopy(tpl["machine"])
     mach["data"][0, 0] = arr
     meta = mach["meta"][0, 0]

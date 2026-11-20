@@ -63,17 +63,31 @@ def test_filter_pulls_peak_back_and_widens_it(tmp_path):
     tpl = template(tmp_path)
     a0, i0 = fm.build(tpl, 4.64)
     a1, i1 = fm.build(tpl, 4.64, "steps4:1.74:1.30")
-    assert len(i0) == len(i1)
-    shift = np.array([x[2] for x in i0]) - np.array([x[2] for x in i1])           # R80 moves by the mean thickness
-    assert np.allclose(shift, 1.74, atol=0.15)
-    j = a0.shape[1] // 2
+    # same grid phase: the filter machine's folded peaks sit on the unfiltered grid
+    common = np.intersect1d(np.round(peaks(a0), 2), np.round(peaks(a1), 2))
+    assert len(common) >= len(i1) - 1 and np.allclose(np.diff(peaks(a1)), 4.64, atol=0.05)
+    # for the same peak the filter needs more energy: the unfiltered energy of a peak 1.74 mm (mean thickness) deeper
+    E0 = np.array([x[0] for x in i0]); P0 = peaks(a0)
+    for x, p in zip(i1, peaks(a1)):
+        if P0[0] < p + 1.74 < P0[-1]: assert x[0] == pytest.approx(np.interp(p + 1.74, P0, E0), rel=0.01)
+    j1 = a1.shape[1] // 2; j0 = int(np.argmin(abs(P0 - peaks(a1)[j1])))
     def width(e):
         z = e["depths"].ravel(); Z = e["Z"].ravel(); zz = np.arange(0, z[-1], 0.01); y = np.interp(zz, z, Z)
         return np.ptp(zz[y >= 0.8 * y.max()])
-    assert width(a1[0, j]) > width(a0[0, j]) + 1.0
-    # LET and lateral tables move with the mean thickness
-    assert np.interp(10.0, a1[0, j]["depths"].ravel(), a1[0, j]["sigma"].ravel()) == pytest.approx(
-        np.interp(11.74, a0[0, j]["depths"].ravel(), a0[0, j]["sigma"].ravel()), rel=0.02)
+    assert width(a1[0, j1]) > width(a0[0, j0]) + 1.0
+    # LET and lateral tables move with the mean thickness: the filter machine at depth 10 sees the template at 11.74
+    j = a1.shape[1] // 2
+    e1 = a1[0, j]; src = fm.build(tpl, 4.64, anchor=peaks(a1)[j] + 1.74)[0]
+    k = int(np.argmin(abs(peaks(src) - (peaks(a1)[j] + 1.74))))
+    assert np.interp(10.0, e1["depths"].ravel(), e1["sigma"].ravel()) == pytest.approx(
+        np.interp(11.74, src[0, k]["depths"].ravel(), src[0, k]["sigma"].ravel()), rel=0.03)
+
+
+@pytest.mark.parametrize("kernel", ["none", "steps4:1.74:1.30", "box:2.58:1.32"])
+def test_anchor_gets_a_peak(tmp_path, kernel):
+    arr, _ = fm.build(template(tmp_path), 4.64, kernel, anchor=60.0)
+    assert np.min(abs(peaks(arr) - 60.0)) < 0.05
+    assert np.allclose(np.diff(peaks(arr)), 4.64, atol=0.05)
 
 
 def test_extra_sigma_in_quadrature(tmp_path):
