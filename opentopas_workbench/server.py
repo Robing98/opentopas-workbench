@@ -1025,6 +1025,44 @@ def gen_schema():
     return [{"id": k, "name": getattr(m, "NAME", {"en": k}), "description": getattr(m, "DESCRIPTION", {}),
              "fields": getattr(m, "FIELDS", [])} for k, m in load_generators().items()]
 
+# ------------------------------------------------------------------ RiFi designer
+RIFI_DELTAS = [round(2.0 + 0.25 * i, 2) for i in range(21)]      # mm water, layer spacings of the ripple curves
+
+
+def rifi_api(what, b):
+    """The RiFi designer: templates and library, live evaluation of a definition, saving, SVG masks.
+
+    The definitions, their kernel and the TOPAS block come from the ripple_filter generator and its _rifi.py, so the
+    designer shows exactly what a generated case will contain."""
+    rf = load_generators().get("ripple_filter")
+    if rf is None: raise ValueError("ripple_filter generator not found")
+    R = rf.R
+    if what == "list":
+        return {"templates": [rf.template(v, 1.5) for v in rf.TEMPLATES], "library": list(R.library(wb_dir()).values()),
+                "plates": list(R.PLATES), "schema": R.SCHEMA}
+    if what == "eval":
+        d = R.validate(b.get("def"))
+        k = R.kernel(d)
+        kt, kw = R.rebin(k["t"], k["w"], 0.05)                   # display bins, mm water
+        ref = R.reference()
+        rip = R.ripple_table(k["t"], k["w"], RIFI_DELTAS)
+        return {"def": d, "mean": round(k["mean"], 4), "sigma": round(k["sigma"], 4),
+                "design": round(R.design_spacing(k["t"], k["w"]), 3),
+                "kernel": [[round(t, 3), round(w, 6)] for t, w in zip(kt, kw)],
+                "deltas": RIFI_DELTAS, "ripple": rip, "lateral": R.lateral(k["mean"]), "lateral_spread": ref["lateral_spread"],
+                "hints": R.hints(d), "ridges": [{x: r[x] for x in ("name", "x", "z", "width", "pitch", "tz", "rotz", "shift", "n")} for r in R.ridges(d)],
+                "topas": rf.definition_block(d)}
+    if what == "save":
+        d = R.save(b.get("def"), wb_dir())
+        return {"ok": True, "name": d["name"], "variant": rf.LIB + d["name"]}
+    if what == "delete":
+        R.remove(str(b.get("name", "")), wb_dir()); return {"ok": True}
+    if what == "svg":
+        d = R.validate(b.get("def"))
+        return {"files": [{"name": f"{d['name']}_lage{i + 1}.svg", "svg": R.svg_mask(d, i)} for i in range(len(d["layers"]))]}
+    raise ValueError("unknown rifi request")
+
+
 # ------------------------------------------------------------------ file manager
 def fm_ls(rel):
     p = resolve(rel)
@@ -1523,7 +1561,8 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.guard(): return
         u = urlparse(self.path)
-        writes = u.path in ("/api/write", "/api/mkdir", "/api/newfile", "/api/move", "/api/copy", "/api/trash", "/api/generate", "/api/variants")
+        writes = u.path in ("/api/write", "/api/mkdir", "/api/newfile", "/api/move", "/api/copy", "/api/trash", "/api/generate", "/api/variants",
+                          "/api/rifi/save", "/api/rifi/delete")
         if writes: invalidate_cache()
         try:
             b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or 0) or b"{}")
@@ -1618,6 +1657,7 @@ class H(BaseHTTPRequestHandler):
                                          "subdir": str(x.get("subdir", ""))})
                     cfg["binaries"] = bins
                 save_cfg(); return self.send(200, {"ok": True, "cfg": cfg})
+            if u.path.startswith("/api/rifi/"): return self.send(200, rifi_api(u.path[len("/api/rifi/"):], b))
             if u.path == "/api/generate":
                 gens = load_generators()
                 mod = gens.get(b["id"])
@@ -1714,6 +1754,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
     STATE["root"] = os.path.realpath(a.workspace)
     if not os.path.isdir(STATE["root"]): sys.exit(f"workspace not found: {STATE['root']}")
+    os.environ["OPENTOPAS_WB_DIR"] = wb_dir()    # the ripple_filter generator reads its filter library from here
     load_cfg(); load_jobs(); save_cfg()
     threading.Thread(target=job_worker, daemon=True).start()
     threading.Thread(target=prewarm, daemon=True).start()

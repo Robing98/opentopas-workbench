@@ -35,6 +35,9 @@ main{padding:16px;max-width:1900px;margin:0 auto}
 .tab{display:none}.tab.on{display:grid;gap:16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
 h2{font-size:15px;margin:0 0 10px}
+.rdplot{margin:4px 0}.rdlayer{border:1px solid var(--line);border-radius:8px;padding:8px;margin-top:10px;background:var(--sunken)}
+.rdgrid{grid-template-columns:repeat(auto-fill,minmax(130px,1fr));margin:6px 0}.rdpts input{width:7em}.rdpts td,.rdpts th{padding:2px 4px}
+.rdhints{margin:0;padding-left:20px}.rdhints li.warn{color:var(--warn)}.rdhints li.ok{color:var(--ok)}.rdpre{max-height:260px;overflow:auto;font-size:12px;background:var(--sunken);padding:8px;border-radius:6px}
 .split{display:grid;grid-template-columns:minmax(340px,1fr) 1.4fr;gap:16px}
 @media (max-width:980px){.split{grid-template-columns:1fr}}
 button,select,input,textarea{font:inherit;color:var(--ink)}
@@ -153,6 +156,7 @@ kbd{font:12.5px ui-monospace,Consolas,monospace;padding:1px 6px;border:1px solid
     <button role="tab" data-tab="results"><span data-i18n="tab_results"></span></button>
     <button role="tab" data-tab="beam"><span data-i18n="tab_beam"></span></button>
     <span class="sep" aria-hidden="true"></span>
+    <button role="tab" data-tab="rifi"><span data-i18n="tab_rifi"></span></button>
     <button role="tab" data-tab="settings"><span data-i18n="tab_settings"></span></button>
   </nav>
   <span class="spacer"></span>
@@ -354,6 +358,38 @@ kbd{font:12.5px ui-monospace,Consolas,monospace;padding:1px 6px;border:1px solid
   </div>
 </section>
 
+<!-- RIFI DESIGNER -->
+<section id="rifi" class="tab">
+  <div class="split">
+    <div class="card">
+      <h2 data-i18n="rd_title"></h2>
+      <div class="row"><label><span data-i18n="rd_load"></span> <select id="rdLoad" style="max-width:320px"></select></label><button id="rdNewLayer" data-i18n="rd_add_layer"></button></div>
+      <div class="grid2" style="margin-top:8px">
+        <label><span data-i18n="rd_name"></span><input id="rdName" maxlength="40"></label>
+        <label><span data-i18n="rd_ftitle"></span><input id="rdTitle" maxlength="120"></label>
+        <label><span data-i18n="rd_material"></span><select id="rdMat"><option value="G4_PLEXIGLASS">PMMA (G4_PLEXIGLASS)</option><option value="G4_WATER">G4_WATER</option></select></label>
+        <label><span data-i18n="rd_spr"></span><input id="rdSpr" type="number" step="0.001" min="0.1" max="5"></label>
+      </div>
+      <div id="rdLayers"></div>
+      <div class="row" style="margin-top:10px"><button class="pri" id="rdSave" data-i18n="rd_save"></button><button id="rdDel" data-i18n="rd_delete"></button><button id="rdSvg" data-i18n="rd_svg"></button><span id="rdMsg" class="mute" role="status"></span></div>
+      <p class="mute" style="font-size:13px" data-i18n="rd_hint"></p>
+    </div>
+    <div class="card">
+      <h2 data-i18n="rd_section"></h2>
+      <div id="rdCross" class="rdplot"></div>
+      <h2 style="margin-top:12px" data-i18n="rd_kernel"></h2>
+      <div id="rdStats" class="mute"></div>
+      <div id="rdKern" class="rdplot"></div>
+      <h2 style="margin-top:12px" data-i18n="rd_ripple"></h2>
+      <div id="rdRip" class="rdplot"></div>
+      <div id="rdLat"></div>
+      <h2 style="margin-top:12px" data-i18n="rd_build"></h2>
+      <ul id="rdHints" class="rdhints"></ul>
+      <details><summary data-i18n="rd_topas"></summary><pre id="rdTopas" class="rdpre"></pre></details>
+    </div>
+  </div>
+</section>
+
 <!-- SETTINGS -->
 <section id="settings" class="tab">
   <div class="card">
@@ -433,6 +469,24 @@ const I18N={
   unsaved_q:"Unsaved changes. Click again to discard them, Ctrl+S saves.",
   error:"Error"}};
 /* Beam profile view */
+Object.assign(I18N.de,{tab_rifi:"RiFi-Designer",rd_title:"Ripple-Filter: Definition",rd_load:"Laden",rd_templates:"Vorlagen",rd_library:"Bibliothek",rd_add_layer:"Lage hinzufügen",
+ rd_name:"Name (Variante lib-Name)",rd_ftitle:"Titel",rd_material:"Material",rd_spr:"SPR (zu Wasser)",rd_save:"In Bibliothek speichern",rd_delete:"Aus Bibliothek löschen",rd_svg:"SVG-Masken",
+ rd_hint:"Gleich ausgerichtete Lagen addieren sich punktweise, gekreuzte Lagen sind unabhängig. Gespeicherte Filter stehen in den Generatoren Ripple-Filter-Studie und Nozzle als Variante lib-Name zur Wahl. Die SVG-Masken sind in Originalmaßen (1 Einheit = 1 mm), mit vier Passlöchern an derselben Stelle jeder Lage.",
+ rd_section:"Querschnitt",rd_kernel:"Kern (Dickenverteilung)",rd_ripple:"Welligkeit des SOBP gegen Schichtabstand",rd_build:"Fertigung",rd_topas:"TOPAS-Geometrie",
+ rd_layer:"Lage",rd_profile:"Profil",rd_steps:"Stufen",rd_del_layer:"Lage entfernen",rd_period:"Periode [mm]",rd_width:"Stegbreite [mm]",rd_width_ph:"= Ende des Profils",rd_base:"Grundplatte [mm]",
+ rd_rotz:"Drehung um z",rd_shift:"Versatz [mm]",rd_gap:"Luft zur vorigen Lage [mm]",rd_frac:"Flächenanteil",rd_h:"Höhe [mm]",rd_x:"x [mm]",rd_z:"z [mm]",rd_del_row:"Zeile entfernen",rd_add_row:"Zeile hinzufügen",
+ rd_three:"drei Perioden",rd_t_wet:"Dicke [mm Wasser]",rd_frac_area:"Flächenanteil",rd_mean:"Mittlere Dicke",rd_design:"Designabstand",rd_wet:"Wasser",rd_delta:"Schichtabstand Δ [mm Wasser]",rd_ripple_pct:"Welligkeit [%]",
+ rd_energy:"Energie",rd_lat:"Zusätzliche laterale Breite σ",rd_lat_note:"Schätzung: c(E) · √(mittlere Dicke), kalibriert an den TOPAS-Läufen der Tasks 3141 und 3176 (Filter 80 cm vor dem Isozentrum); ± die Streuung der Kalibrierläufe. Welligkeit: Faltungsmodell auf den rifi0-Kurven dieser Läufe, 6 Schichten.",
+ rd_one_layer:"Ein Filter braucht mindestens eine Lage.",rd_saved:"Gespeichert. In den Generatoren als Variante {v} wählbar.",rd_not_saved:"Dieser Name steht nicht in der Bibliothek.",rd_deleted:"Aus der Bibliothek gelöscht."});
+Object.assign(I18N.en,{tab_rifi:"RiFi designer",rd_title:"Ripple filter: definition",rd_load:"Load",rd_templates:"Templates",rd_library:"Library",rd_add_layer:"Add layer",
+ rd_name:"Name (variant lib-name)",rd_ftitle:"Title",rd_material:"Material",rd_spr:"SPR (to water)",rd_save:"Save to library",rd_delete:"Delete from library",rd_svg:"SVG masks",
+ rd_hint:"Layers with the same orientation add up point by point, crossed layers are independent. Saved filters can be chosen in the generators Ripple filter study and Nozzle as variant lib-name. The SVG masks are at original size (1 unit = 1 mm), with four registration holes at the same place on every layer.",
+ rd_section:"Cross-section",rd_kernel:"Kernel (thickness distribution)",rd_ripple:"SOBP ripple against layer spacing",rd_build:"Manufacturing",rd_topas:"TOPAS geometry",
+ rd_layer:"Layer",rd_profile:"Profile",rd_steps:"Steps",rd_del_layer:"Remove layer",rd_period:"Period [mm]",rd_width:"Ridge width [mm]",rd_width_ph:"= end of profile",rd_base:"Base plate [mm]",
+ rd_rotz:"Turn about z",rd_shift:"Offset [mm]",rd_gap:"Air to previous layer [mm]",rd_frac:"Area fraction",rd_h:"Height [mm]",rd_x:"x [mm]",rd_z:"z [mm]",rd_del_row:"Remove row",rd_add_row:"Add row",
+ rd_three:"three periods",rd_t_wet:"Thickness [mm water]",rd_frac_area:"Area fraction",rd_mean:"Mean thickness",rd_design:"Design spacing",rd_wet:"water",rd_delta:"Layer spacing Δ [mm water]",rd_ripple_pct:"Ripple [%]",
+ rd_energy:"Energy",rd_lat:"Extra lateral width σ",rd_lat_note:"Estimate: c(E) · √(mean thickness), calibrated on the TOPAS runs of tasks 3141 and 3176 (filter 80 cm before the isocentre); ± the spread of the calibration runs. Ripple: convolution model on the rifi0 curves of these runs, 6 layers.",
+ rd_one_layer:"A filter needs at least one layer.",rd_saved:"Saved. Selectable in the generators as variant {v}.",rd_not_saved:"This name is not in the library.",rd_deleted:"Deleted from the library."});
 Object.assign(I18N.de,{tab_beam:"Strahlprofil",bp_cases:"Fälle mit Monitoren",bp_case:"Fall",bp_planes:"Ebenen",bp_dose:"Dosis",
  bp_hint:"Fälle aus mon_<Position>_<Fall>_<p|e|o|all> in einem Ordner; Dosis aus 3D-Gittern mit dem Fallnamen. Mehrere Fälle ankreuzen, um sie zu überlagern.",
  bp_none:"Keine Monitor-Ausgaben in diesem Ordner. Monitore im Generator einschalten (Ripple-Filter, Pencil Beam) und die Fälle rechnen.",
@@ -499,8 +553,98 @@ function multiSelect(tbody,onChange){
  window.addEventListener("mouseup",()=>{if(!drag)return;drag=null;document.body.style.userSelect="";onChange()});
  tbody.addEventListener("click",e=>{if(e.target.matches("input[type=checkbox]"))e.preventDefault()});   // state is handled on mousedown
  tbody.addEventListener("keydown",e=>{if(e.key===" "&&e.target.matches("input[type=checkbox]")){e.preventDefault();e.target.checked=!e.target.checked;e.target.closest("tr").classList.toggle("sel",e.target.checked);onChange()}});}
+/* ---------- RiFi designer: periodic ripple filter definitions (rifi/v1), kernel and ripple live from /api/rifi/eval */
+const RD={list:null,def:null,res:null,seq:0};
+const rdNum=v=>{const x=parseFloat(String(v).replace(",","."));return isFinite(x)?x:0};
+const rdFmt=(x,n)=>(+x).toLocaleString(loc(),{maximumFractionDigits:n==null?3:n});
+async function rdLoad(){if(RD.list)return;RD.list=await api("/api/rifi/list",{});rdFillLoad();if(!RD.def){/* #rifi?n=NAME opens that template or library filter */const n=new URLSearchParams(location.hash.split("?")[1]||"").get("n")||"t4";
+ const all=RD.list.library.concat(RD.list.templates);rdSet(JSON.parse(JSON.stringify(all.find(d=>d.name===n)||RD.list.templates[0])))}}
+function rdFillLoad(){const s=$("rdLoad");const o=(d,g)=>`<option value="${g}:${esc(d.name)}">${esc(d.name)}${d.title?" · "+esc(d.title):""}</option>`;
+ s.innerHTML=`<option value="">…</option><optgroup label="${esc(t("rd_templates"))}">${RD.list.templates.map(d=>o(d,"t")).join("")}</optgroup>`+
+  (RD.list.library.length?`<optgroup label="${esc(t("rd_library"))}">${RD.list.library.map(d=>o(d,"l")).join("")}</optgroup>`:"")}
+function rdSet(d){RD.def=d;$("rdName").value=d.name;$("rdTitle").value=d.title||"";$("rdMat").value=d.material||"G4_PLEXIGLASS";$("rdSpr").value=d.spr;rdLayers();rdEval()}
+function rdLayerHtml(L,i){const steps=!!L.steps,rows=steps?L.steps:L.profile;
+ const cell=(k,j,c,v)=>`<td><input data-k="${k}" data-j="${j}" data-c="${c}" value="${v}" size="6" inputmode="decimal"></td>`;
+ const rot=[0,90,45].map(r=>`<option value="${r}"${+L.rotz===r?" selected":""}>${r}°</option>`).join("");
+ return `<div class="rdlayer" data-i="${i}"><div class="row"><b>${esc(t("rd_layer"))} ${i+1}</b>
+  <select data-f="kind"><option value="profile"${steps?"":" selected"}>${esc(t("rd_profile"))}</option><option value="steps"${steps?" selected":""}>${esc(t("rd_steps"))}</option></select>
+  <span class="spacer"></span>${i?`<button data-act="up">↑</button>`:""}<button data-act="del" aria-label="${esc(t("rd_del_layer"))}">✕</button></div>
+  <div class="grid2 rdgrid">
+   <label>${esc(t("rd_period"))}<input data-f="period" value="${L.period}" inputmode="decimal"></label>
+   ${steps?"":`<label>${esc(t("rd_width"))}<input data-f="width" value="${L.width!=null?L.width:""}" placeholder="${esc(t("rd_width_ph"))}" inputmode="decimal"></label>`}
+   <label>${esc(t("rd_base"))}<input data-f="base" value="${L.base||0}" inputmode="decimal"></label>
+   <label>${esc(t("rd_rotz"))}<select data-f="rotz">${rot}</select></label>
+   <label>${esc(t("rd_shift"))}<input data-f="shift" value="${L.shift||0}" inputmode="decimal"></label>
+   ${i?`<label>${esc(t("rd_gap"))}<input data-f="gap" value="${L.gap||0}" inputmode="decimal"></label>`:""}
+  </div>
+  <table class="rdpts"><thead><tr><th>${esc(t(steps?"rd_frac":"rd_x"))}</th><th>${esc(t(steps?"rd_h":"rd_z"))}</th><th></th></tr></thead><tbody>
+   ${rows.map((p,j)=>`<tr>${cell(steps?"steps":"profile",j,0,p[0])}${cell(steps?"steps":"profile",j,1,p[1])}<td><button data-act="rowdel" data-j="${j}" aria-label="${esc(t("rd_del_row"))}">−</button></td></tr>`).join("")}
+  </tbody></table><button data-act="rowadd">${esc(t("rd_add_row"))}</button></div>`}
+function rdLayers(){$("rdLayers").innerHTML=RD.def.layers.map(rdLayerHtml).join("")}
+function rdRead(){const d=RD.def;d.name=$("rdName").value.trim();d.title=$("rdTitle").value;d.material=$("rdMat").value;d.spr=rdNum($("rdSpr").value);d.schema="rifi/v1";
+ document.querySelectorAll("#rdLayers .rdlayer").forEach(el=>{const L=d.layers[+el.dataset.i];
+  el.querySelectorAll("[data-f]").forEach(f=>{const k=f.dataset.f;if(k==="kind")return;if(k==="width"){if(f.value.trim()==="")delete L.width;else L.width=rdNum(f.value);return}L[k]=rdNum(f.value)});
+  el.querySelectorAll("input[data-k]").forEach(f=>{L[f.dataset.k][+f.dataset.j][+f.dataset.c]=rdNum(f.value)});
+  if(L.profile&&L.width==null)delete L.width});return d}
+const rdEval=debounce(async()=>{const seq=++RD.seq;let r;try{r=await api("/api/rifi/eval",{def:rdRead()})}catch(e){if(seq===RD.seq){$("rdMsg").textContent=e.message;$("rdMsg").className="err"}return}
+ if(seq!==RD.seq)return;RD.res=r;$("rdMsg").textContent="";$("rdMsg").className="mute";rdDraw()},250);
+function rdConvert(L,kind){if(kind==="steps"&&L.profile){L.steps=[[0.5,0],[0.5,1]];delete L.profile;delete L.width}
+ else if(kind==="profile"&&L.steps){const p=L.period;L.profile=[[0,0],[p/2,1],[p,0]];delete L.steps}}
+function rdSvgWrap(w,h,body,label){return `<svg viewBox="0 0 ${w} ${h}" width="100%" role="img" aria-label="${esc(label)}" style="max-height:${h}px">${body}</svg>`}
+function rdAxes(w,h,m,x0,x1,y0,y1,xl,yl){const X=v=>m.l+(v-x0)/(x1-x0||1)*(w-m.l-m.r),Y=v=>h-m.b-(v-y0)/(y1-y0||1)*(h-m.t-m.b);
+ const tick=(a,b,n)=>{const s=Math.pow(10,Math.floor(Math.log10((b-a)/n||1)));const st=[1,2,5,10].map(k=>k*s).find(k=>(b-a)/k<=n)||s*10;const out=[];for(let v=Math.ceil(a/st)*st;v<=b+1e-9;v+=st)out.push(+v.toFixed(6));return out};
+ let g=`<g font-size="11" fill="var(--mute)" stroke="none">`;
+ tick(x0,x1,6).forEach(v=>g+=`<line x1="${X(v)}" x2="${X(v)}" y1="${m.t}" y2="${h-m.b}" stroke="var(--line)" stroke-width="0.5"/><text x="${X(v)}" y="${h-m.b+14}" text-anchor="middle">${rdFmt(v,2)}</text>`);
+ tick(y0,y1,4).forEach(v=>g+=`<line x1="${m.l}" x2="${w-m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)" stroke-width="0.5"/><text x="${m.l-5}" y="${Y(v)+4}" text-anchor="end">${rdFmt(v,2)}</text>`);
+ g+=`<text x="${(m.l+w-m.r)/2}" y="${h-4}" text-anchor="middle">${esc(xl)}</text><text x="12" y="${(m.t+h-m.b)/2}" text-anchor="middle" transform="rotate(-90 12 ${(m.t+h-m.b)/2})">${esc(yl)}</text></g>`;
+ return {X,Y,g}}
+function rdDraw(){const r=RD.res,rs=r.ridges;
+ /* cross-section: every layer over three periods along its own stripe axis, stacked in beam order */
+ const W=640,lh=62,H=rs.length*lh+28,per=Math.max(...rs.map(q=>q.pitch)),span=3*per;let b="";
+ rs.forEach((q,i)=>{const y0=14+i*lh+lh-14,hmax=Math.max(...rs.map(s=>Math.max(...s.z)))||1,sc=(lh-22)/hmax,X=x=>70+x/span*(W-80);let path="";
+  for(let k=0;k*q.pitch<span+q.pitch;k++){const off=k*q.pitch+(q.shift%q.pitch+q.pitch)%q.pitch-q.pitch;let pts=[[off,0]];q.x.forEach((x,j)=>pts.push([off+x,q.z[j]]));pts.push([off+q.width,0]);
+   path+=`<polygon points="${pts.map(p=>`${X(Math.max(0,Math.min(span,p[0]))).toFixed(1)},${(y0-p[1]*sc).toFixed(1)}`).join(" ")}" fill="${PAL[i%PAL.length]}" fill-opacity="0.55" stroke="${PAL[i%PAL.length]}" stroke-width="1"/>`}
+  b+=`<line x1="70" x2="${W-10}" y1="${y0}" y2="${y0}" stroke="var(--line)"/>${path}<text x="4" y="${y0-4}" font-size="11" fill="var(--ink)">${esc(t("rd_layer"))} ${i+1}</text><text x="4" y="${y0+9}" font-size="10" fill="var(--mute)">${q.rotz}° · ${rdFmt(Math.max(...q.z),2)} mm</text>`});
+ b+=`<text x="${W-10}" y="${H-4}" font-size="11" text-anchor="end" fill="var(--mute)">${esc(t("rd_three"))}: ${rdFmt(span,2)} mm</text>`;
+ $("rdCross").innerHTML=rdSvgWrap(W,H,b,t("rd_section"));
+ /* kernel histogram in mm water */
+ const kn=r.kernel,tmax=Math.max(...kn.map(k=>k[0]))+0.1,tmin=Math.min(0,...kn.map(k=>k[0])),wmax=Math.max(...kn.map(k=>k[1]));
+ let A=rdAxes(W,200,{l:52,r:10,t:8,b:30},tmin,tmax,0,wmax*1.1,t("rd_t_wet"),t("rd_frac_area"));let bars="";const bw=Math.max(1,A.X(0.05)-A.X(0)-0.5);
+ kn.forEach(k=>{if(k[1]>0)bars+=`<rect x="${(A.X(k[0]-0.025)).toFixed(1)}" y="${A.Y(k[1]).toFixed(1)}" width="${bw.toFixed(1)}" height="${(A.Y(0)-A.Y(k[1])).toFixed(1)}" fill="${PAL[0]}"><title>${rdFmt(k[0],2)} mm: ${rdFmt(100*k[1],2)} %</title></rect>`});
+ bars+=`<line x1="${A.X(r.mean)}" x2="${A.X(r.mean)}" y1="8" y2="170" stroke="var(--ink)" stroke-dasharray="4 3"/>`;
+ $("rdKern").innerHTML=rdSvgWrap(W,200,A.g+bars,t("rd_kernel"));
+ $("rdStats").innerHTML=`${esc(t("rd_mean"))} <b>${rdFmt(r.mean)}</b> mm · σ<sub>t</sub> <b>${rdFmt(r.sigma)}</b> mm · ${esc(t("rd_design"))} Δ <b>${rdFmt(r.design,2)}</b> mm (${esc(t("rd_wet"))})`;
+ /* ripple against layer spacing, one line per reference energy */
+ const es=Object.keys(r.ripple).sort((a,c)=>a-c),ys=[];es.forEach(e=>r.ripple[e].filter.forEach(v=>v!=null&&ys.push(v)));const ymax=Math.min(40,Math.max(5,...ys));
+ A=rdAxes(W,230,{l:52,r:90,t:8,b:30},r.deltas[0],r.deltas[r.deltas.length-1],0,ymax,t("rd_delta"),t("rd_ripple_pct"));let ln="";
+ es.forEach((e,i)=>{const pts=r.deltas.map((d,j)=>[d,r.ripple[e].filter[j]]).filter(p=>p[1]!=null);
+  ln+=`<polyline fill="none" stroke="${PAL[i]}" stroke-width="2" points="${pts.map(p=>`${A.X(p[0]).toFixed(1)},${A.Y(Math.min(ymax,p[1])).toFixed(1)}`).join(" ")}"/>`;
+  const last=pts[pts.length-1];if(last)ln+=`<text x="${A.X(last[0])+6}" y="${A.Y(Math.min(ymax,last[1]))+4}" font-size="11" fill="${PAL[i]}">${e} MeV</text>`});
+ if(r.design>=r.deltas[0]&&r.design<=r.deltas[r.deltas.length-1])ln+=`<line x1="${A.X(r.design)}" x2="${A.X(r.design)}" y1="8" y2="200" stroke="var(--ink)" stroke-dasharray="4 3"/><text x="${A.X(r.design)+4}" y="20" font-size="11" fill="var(--ink)">${esc(t("rd_design"))}</text>`;
+ $("rdRip").innerHTML=rdSvgWrap(W,230,A.g+ln,t("rd_ripple"));
+ $("rdLat").innerHTML=`<table><thead><tr><th>${esc(t("rd_energy"))}</th>${es.map(e=>`<th>${e} MeV</th>`).join("")}</tr></thead><tbody><tr><td>${esc(t("rd_lat"))}</td>${es.map(e=>`<td>${rdFmt(r.lateral[e],2)} mm ± ${rdFmt(100*r.lateral_spread[e],0)} %</td>`).join("")}</tr></tbody></table><p class="mute" style="font-size:13px">${esc(t("rd_lat_note"))}</p>`;
+ $("rdHints").innerHTML=r.hints.map(h=>`<li class="${h.level}">${esc(h[LANG]||h.en)}</li>`).join("");
+ $("rdTopas").textContent=r.topas}
+function rdInit(){
+ $("rdLoad").addEventListener("change",e=>{const v=e.target.value;if(!v)return;const [g,n]=[v[0],v.slice(2)];const src=g==="t"?RD.list.templates:RD.list.library;const d=src.find(x=>x.name===n);if(d)rdSet(JSON.parse(JSON.stringify(d)));e.target.value=""});
+ ["rdName","rdTitle","rdSpr"].forEach(id=>$(id).addEventListener("input",rdEval));$("rdMat").addEventListener("change",()=>{$("rdSpr").value=$("rdMat").value==="G4_WATER"?1:1.16;rdEval()});
+ $("rdLayers").addEventListener("input",e=>{if(e.target.matches("input"))rdEval()});
+ $("rdLayers").addEventListener("change",e=>{const el=e.target.closest(".rdlayer");if(!el)return;rdRead();const L=RD.def.layers[+el.dataset.i];
+  if(e.target.dataset.f==="kind"){rdConvert(L,e.target.value);rdLayers()}rdEval()});
+ $("rdLayers").addEventListener("click",e=>{const b=e.target.closest("button[data-act]");if(!b)return;rdRead();const el=b.closest(".rdlayer"),i=+el.dataset.i,L=RD.def.layers[i],rows=L.steps||L.profile,a=b.dataset.act;
+  if(a==="del"){if(RD.def.layers.length<2){toast(t("rd_one_layer"),"err");return}RD.def.layers.splice(i,1)}
+  if(a==="up"){const x=RD.def.layers.splice(i,1)[0];RD.def.layers.splice(i-1,0,x)}
+  if(a==="rowdel"&&rows.length>2)rows.splice(+b.dataset.j,1);
+  if(a==="rowadd"){const l=rows[rows.length-1];rows.push(L.steps?[0,l[1]]:[+(l[0]+0.1).toFixed(3),0])}
+  rdLayers();rdEval()});
+ $("rdNewLayer").addEventListener("click",()=>{rdRead();const p=RD.def.layers[0]?RD.def.layers[0].period:1.5;RD.def.layers.push({period:p,base:0,rotz:90,shift:0,gap:5,steps:[[0.5,0],[0.5,1]]});rdLayers();rdEval()});
+ $("rdSave").addEventListener("click",async()=>{const r=await api("/api/rifi/save",{def:rdRead()});RD.list=null;await rdLoad();toast(t("rd_saved").replace("{v}",r.variant))});
+ armed($("rdDel"),async()=>{const n=$("rdName").value.trim();if(!RD.list.library.some(d=>d.name===n)){toast(t("rd_not_saved"),"err");return}await api("/api/rifi/delete",{name:n});RD.list=null;await rdLoad();toast(t("rd_deleted"))});
+ $("rdSvg").addEventListener("click",async()=>{const r=await api("/api/rifi/svg",{def:rdRead()});
+  r.files.forEach(f=>{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([f.svg],{type:"image/svg+xml"}));a.download=f.name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1000)})})}
+rdInit();
 /* ---------- navigation: tabs, address (deep links, back and forward), keyboard shortcuts */
-const TABS=["files","gen","run","explorer","results","beam","settings"];
+const TABS=["files","gen","run","explorer","results","beam","rifi","settings"];
 let CUR=null,ROUTED="";
 const isTab=id=>CUR===id;
 function tabHash(id){const p=new URLSearchParams();if(id==="results")RS.pick.forEach(f=>p.append("f",f));if(id==="files"&&FM.file)p.set("p",FM.file);if(id==="beam"&&BP.scan){if(BP.folder)p.set("p",BP.folder);p.set("v",$("bpView").value);BP.sel.forEach(c=>p.append("c",c))}const q=p.toString();return "#"+id+(q?"?"+q:"")}
@@ -508,7 +652,7 @@ function syncHash(push){if(!CUR)return;const h=tabHash(CUR);if(location.hash===h
 function showTab(id,opt){opt=opt||{};if(!TABS.includes(id))id="files";const changed=CUR!==id;CUR=id;
  document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id===id));document.querySelectorAll("nav [role=tab]").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===id));store("tab",id);
  if(!opt.fromHash)syncHash(changed&&!opt.replace);
- if(id==="files"&&!opt.noload)fmLoad(FM.path);if(id==="run"){loadParams();renderQueue(true);showJob(true)}if(id==="results"){resLoad(RS.path);loadViews()}if(id==="explorer")exLoad(false);if(id==="gen")loadGens();if(id==="beam")bpLoad(false);if(id==="settings")loadSettings();
+ if(id==="files"&&!opt.noload)fmLoad(FM.path);if(id==="run"){loadParams();renderQueue(true);showJob(true)}if(id==="results"){resLoad(RS.path);loadViews()}if(id==="explorer")exLoad(false);if(id==="gen")loadGens();if(id==="beam")bpLoad(false);if(id==="rifi")rdLoad();if(id==="settings")loadSettings();
  if(changed&&id==="run")poll();}
 /* #run, #results?f=a.csv&f=b.csv, #files?p=dir/case.txt */
 function routeFromHash(){const h=location.hash;if(!h||h===ROUTED)return !!h&&TABS.includes(h.slice(1).split("?")[0]);ROUTED=h;
@@ -522,13 +666,13 @@ document.querySelectorAll("nav [role=tab]").forEach(b=>b.onclick=()=>showTab(b.d
 $("runBadge").onclick=()=>showTab("run");
 const FILTER_OF={files:"fmName",gen:"genSel",run:"rfFilter",explorer:"exQ",results:"resFilter",beam:"bpFilter",settings:"excBox"};
 function helpOpen(){const k=a=>a.map(x=>`<kbd>${esc(x)}</kbd>`).join(" "),de=LANG==="de";
- $("helpBody").innerHTML=[[k(["1"])+" … "+k(["7"])+" "+(de?"oder":"or")+" "+k(["Alt+1"])+" … "+k(["Alt+7"]),t("k_tabs")],[k(["/"]),t("k_filter")],[k([(de?"Strg":"Ctrl")+"+S"]),t("k_save")],
+ $("helpBody").innerHTML=[[k(["1"])+" … "+k(["8"])+" "+(de?"oder":"or")+" "+k(["Alt+1"])+" … "+k(["Alt+8"]),t("k_tabs")],[k(["/"]),t("k_filter")],[k([(de?"Strg":"Ctrl")+"+S"]),t("k_save")],
   [k([(de?"Umschalt+Klick":"Shift+click")]),t("k_range")],[k(["?"]),t("k_help")],[k(["Esc"]),t("k_esc")]].map(([a,b])=>`<tr><td>${a}</td><td>${esc(b)}</td></tr>`).join("")+
   `<tr><td colspan="2" class="mute">${esc(t("k_back"))}</td></tr>`;$("help").hidden=false;$("helpClose").focus()}
 function helpClose(){$("help").hidden=true}
 $("helpBtn").onclick=helpOpen;$("helpClose").onclick=helpClose;$("help").onclick=e=>{if(e.target.id==="help")helpClose()};
 document.addEventListener("keydown",e=>{const typing=e.target&&e.target.closest&&e.target.closest("input,textarea,select,[contenteditable]");
- const m=/^Digit([1-7])$/.exec(e.code||"");
+ const m=/^Digit([1-8])$/.exec(e.code||"");
  if(m&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey&&(e.altKey||!typing)&&$("lightbox").hidden&&$("help").hidden){e.preventDefault();showTab(TABS[+m[1]-1]);return}
  if(e.key==="Escape"&&!$("help").hidden){helpClose();return}
  if(typing||e.ctrlKey||e.metaKey||e.altKey)return;
