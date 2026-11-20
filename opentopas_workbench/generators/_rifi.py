@@ -197,7 +197,7 @@ def moments(t, w):
     m = sum(a * b for a, b in zip(t, w)); return m, math.sqrt(max(sum(b * (a - m) ** 2 for a, b in zip(t, w)), 0.0))
 
 
-def kernel(d, step=0.02, n=6000):
+def kernel(d, step=0.01, n=6000):
     """Thickness kernel of a definition in mm water: grid, weights (sum 1), mean, sigma, raw samples per part."""
     spr = lambda mat: 1.0 if mat.upper() in ("G4_WATER", "WATER") else d["spr"]
     k, parts = None, []
@@ -206,8 +206,18 @@ def kernel(d, step=0.02, n=6000):
         h = histogram(s, step)
         k = h if k is None else convolve(k, h, step)
     t, w = k
-    m, sg = moments(t, w)
-    return {"t": t, "w": w, "mean": m, "sigma": sg, "parts": parts}
+    # moments from the samples, not the bins: independent parts add their means and their variances
+    ms = [sum(p) / len(p) for p in parts]
+    var = sum(sum((x - m) ** 2 for x in p) / len(p) for p, m in zip(parts, ms))
+    return {"t": t, "w": w, "mean": sum(ms), "sigma": math.sqrt(var), "parts": parts}
+
+
+def rebin(t, w, step):
+    """The kernel on coarser bins of width step (a whole multiple of its own), centres at (k + 0.5) step."""
+    out = {}
+    for a, b in zip(t, w):
+        if b > 0: k = math.floor(a / step); out[k] = out.get(k, 0.0) + b
+    return [(k + 0.5) * step for k in sorted(out)], [out[k] for k in sorted(out)]
 
 
 def design_spacing(t, w, tol=1e-3):
@@ -302,26 +312,36 @@ def hints(d):
     for i, (L, r) in enumerate(zip(d["layers"], rs)):
         tag = f"Layer {i + 1}", f"Lage {i + 1}"
         xs, zs = r["x"], r["z"]
-        flats = [b[0] - a[0] for a, b in zip(list(zip(xs, zs)), list(zip(xs[1:], zs[1:]))) if abs(b[1] - a[1]) < 1e-9 and b[0] - a[0] > 1.5 * EDGE]
+        seg = [(b0 - a0, za) for a0, b0, za, zb in zip(xs, xs[1:], zs, zs[1:]) if abs(zb - za) < 1e-9 and b0 - a0 > 1.5 * EDGE]
         gapw = L["period"] - r["width"]
+        if gapw <= 1e-6 and len(seg) > 1 and abs(zs[0] - zs[-1]) < 1e-9 and seg[0][1] == zs[0] and seg[-1][1] == zs[-1] \
+                and xs[1] - xs[0] > 1.5 * EDGE and xs[-1] - xs[-2] > 1.5 * EDGE:
+            seg = [(seg[0][0] + seg[-1][0], zs[0])] + seg[1:-1]        # the flat at the end runs on into the next ridge
+        flats = [w for w, _ in seg]
         feat = min(flats + ([gapw] if gapw > 1e-6 else [])) if flats or gapw > 1e-6 else None
         if feat is not None:
             lvl = "warn" if feat < 0.2 else "info"
-            out.append((lvl, f"{tag[0]}: smallest feature {feat:.3f} mm", f"{tag[1]}: kleinste Strukturbreite {feat:.3f} mm".replace(".", ",")))
+            out.append((lvl, f"{tag[0]}: smallest feature {feat + EDGE:.2f} mm", f"{tag[1]}: kleinste Strukturbreite {feat + EDGE:.2f} mm".replace(".", ",")))
+        std = lambda x: any(abs(x - q) < 1e-6 for q in PLATES)
+        plates = ", ".join(f"{q:g}" for q in PLATES)
         if "steps" in L:
             hs = sorted({h for _, h in L["steps"]})
-            rises = [round(b - a, 4) for a, b in zip(hs, hs[1:])]
-            odd = sorted({x for x in rises + ([L["base"]] if L["base"] else []) if not any(abs(x - p) < 1e-6 for p in PLATES)})
+            odd = sorted({round(b - a, 4) for a, b in zip(hs, hs[1:]) if not std(round(b - a, 4))})
             if odd:
                 v = ", ".join(f"{x:g}" for x in odd)
-                out.append(("warn", f"{tag[0]}: steps of {v} mm match no standard plate ({', '.join(f'{p:g}' for p in PLATES)} mm)",
-                            f"{tag[1]}: Stufen von {v} mm passen zu keiner Standardplatte ({', '.join(f'{p:g}' for p in PLATES)} mm)".replace(".", ",")))
+                out.append(("warn", f"{tag[0]}: steps of {v} mm match no standard plate ({plates} mm)",
+                            f"{tag[1]}: Stufen von {v} mm passen zu keiner Standardplatte ({plates} mm)".replace(".", ",")))
             else:
                 out.append(("ok", f"{tag[0]}: all steps match standard plates", f"{tag[1]}: alle Stufen passen zu Standardplatten"))
         else:
             out.append(("info", f"{tag[0]}: continuous profile, milled or printed", f"{tag[1]}: stetiges Profil, gefräst oder gedruckt"))
-        out.append(("info", f"{tag[0]}: base plate {L['base']:g} mm" if L["base"] else f"{tag[0]}: no base plate",
-                    (f"{tag[1]}: Grundplatte {L['base']:g} mm" if L["base"] else f"{tag[1]}: keine Grundplatte").replace(".", ",")))
+        if not L["base"]:
+            out.append(("info", f"{tag[0]}: no base plate", f"{tag[1]}: keine Grundplatte"))
+        elif std(L["base"]):
+            out.append(("ok", f"{tag[0]}: base plate {L['base']:g} mm", f"{tag[1]}: Grundplatte {L['base']:g} mm".replace(".", ",")))
+        else:
+            out.append(("warn", f"{tag[0]}: base plate {L['base']:g} mm matches no standard plate",
+                        f"{tag[1]}: Grundplatte {L['base']:g} mm passt zu keiner Standardplatte".replace(".", ",")))
     for _, g, aligned in group_ridges(rs):
         if not aligned or len(g) < 2: continue
         idx = sorted(rs.index(r) for r in g)

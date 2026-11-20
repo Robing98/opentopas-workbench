@@ -1043,14 +1043,12 @@ def rifi_api(what, b):
     if what == "eval":
         d = R.validate(b.get("def"))
         k = R.kernel(d)
-        step = 0.05                                               # display bins, mm water
-        hist = {}
-        for t, w in zip(k["t"], k["w"]): i = round(t / step); hist[i] = hist.get(i, 0.0) + w
+        kt, kw = R.rebin(k["t"], k["w"], 0.05)                   # display bins, mm water
         ref = R.reference()
         rip = R.ripple_table(k["t"], k["w"], RIFI_DELTAS)
         return {"def": d, "mean": round(k["mean"], 4), "sigma": round(k["sigma"], 4),
                 "design": round(R.design_spacing(k["t"], k["w"]), 3),
-                "kernel": [[round(i * step, 3), round(w, 6)] for i, w in sorted(hist.items())],
+                "kernel": [[round(t, 3), round(w, 6)] for t, w in zip(kt, kw)],
                 "deltas": RIFI_DELTAS, "ripple": rip, "lateral": R.lateral(k["mean"]), "lateral_spread": ref["lateral_spread"],
                 "hints": R.hints(d), "ridges": [{x: r[x] for x in ("name", "x", "z", "width", "pitch", "tz", "rotz", "shift", "n")} for r in R.ridges(d)],
                 "topas": rf.definition_block(d)}
