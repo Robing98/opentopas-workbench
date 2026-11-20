@@ -26,7 +26,13 @@ EXTENT = 120.0        # mm, filter size: number of ridges and length of the stri
 FIRST_CM = 80.0       # cm, TransZ of the first layer (ripple_filter.py places its filters there)
 SPR_PMMA = 1.16       # PMMA to water, as in the shape comparison (task 3176)
 PLATES = (0.5, 0.75, 1.0, 1.5, 2.0, 3.0)   # mm, standard PMMA plate thicknesses
-NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$")
+NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,39}")   # used with fullmatch: $ would let a trailing newline in
+RESERVED = {"CON", "PRN", "AUX", "NUL"} | {f"{d}{k}" for d in ("COM", "LPT") for k in range(1, 10)}   # Windows device names
+ROTATIONS = (0.0, 45.0, 90.0)   # the turns of the stack (ripple_filter.STACK); 180 would mirror an aligned profile
+
+
+def name_ok(name):
+    return bool(NAME_RE.fullmatch(name)) and name.split(".")[0].upper() not in RESERVED
 
 
 # ------------------------------------------------------------------ definition and validation
@@ -43,7 +49,7 @@ def validate(d):
     if not isinstance(d, dict): raise ValueError("definition must be an object")
     if d.get("schema", SCHEMA) != SCHEMA: raise ValueError(f"schema must be {SCHEMA}")
     name = str(d.get("name", ""))
-    if not NAME_RE.match(name): raise ValueError("name: letters, digits, _ . - only, at most 40 characters")
+    if not name_ok(name): raise ValueError("name: letters, digits, _ . - only, at most 40 characters, no device name")
     layers = d.get("layers")
     if not isinstance(layers, list) or not 1 <= len(layers) <= 6: raise ValueError("layers: 1 to 6 layers")
     out = {"schema": SCHEMA, "name": name, "title": " ".join(str(d.get("title", "")).split())[:120],
@@ -56,6 +62,9 @@ def validate(d):
         c = {"period": _num(L.get("period"), f"{w} period", 0.05, 100.0), "base": _num(L.get("base", 0), f"{w} base", 0, 50),
              "rotz": _num(L.get("rotz", 0), f"{w} rotz", -360, 360), "shift": _num(L.get("shift", 0), f"{w} shift", -100, 100),
              "gap": _num(L.get("gap", 0), f"{w} gap", 0, 1000)}
+        if c["rotz"] not in ROTATIONS: raise ValueError(f"{w} rotz: 0, 45 or 90 degrees")
+        # shift goes into TransX, which runs along the stripes of a turned plate: only an unturned plate can be offset
+        if c["rotz"] and c["shift"]: raise ValueError(f"{w}: an offset needs rotz 0")
         if L.get("count") is not None: c["count"] = int(_num(L["count"], f"{w} count", 1, 10000))
         if L.get("steps") is not None:
             st = [[_num(f, f"{w} step fraction", 0, 1), _num(h, f"{w} step height", 0, 50)] for f, h in L["steps"]]
@@ -63,18 +72,30 @@ def validate(d):
             if abs(sum(f for f, _ in st) - 1) > 1e-6: raise ValueError(f"{w}: step fractions must add up to 1")
             if any(f <= 0 for f, _ in st): raise ValueError(f"{w}: every step needs a fraction above 0")
             c["steps"] = st
+            b = [0.0] + _bounds(st, c["period"])
+            if any(y - x < 2 * EDGE for x, y in zip(b, b[1:])):   # flanks of EDGE need room, or XPoints stop rising
+                raise ValueError(f"{w}: every step must be at least {2 * EDGE:g} mm wide")
         else:
             pr = L.get("profile")
             if not isinstance(pr, list) or len(pr) < 2: raise ValueError(f"{w}: profile needs at least two points")
             pts = [[_num(x, f"{w} profile x", 0, 100), _num(z, f"{w} profile z", 0, 50)] for x, z in pr]
             if pts[0][0] != 0: raise ValueError(f"{w}: profile must start at x = 0")
-            if any(b[0] <= a[0] for a, b in zip(pts, pts[1:])): raise ValueError(f"{w}: profile x must rise strictly")
+            # the geometry prints x with 3 decimals, so points closer than that would collapse there
+            if any(round(b[0], 3) <= round(a[0], 3) for a, b in zip(pts, pts[1:])):
+                raise ValueError(f"{w}: profile x must rise strictly, by at least 0.001 mm")
             width = _num(L.get("width", pts[-1][0]), f"{w} width", 0.01, 100)
             if abs(width - pts[-1][0]) > 1e-9: raise ValueError(f"{w}: profile must end at the ridge width")
             if width > c["period"] + 1e-9: raise ValueError(f"{w}: ridge width above the period")
             c["profile"] = pts
             if L.get("width") is not None: c["width"] = width
         out["layers"].append(c)
+    return out
+
+
+def _bounds(st, p):
+    """Right edges (mm) of the steps st over the period p, as the geometry prints them."""
+    out, acc = [], 0.0
+    for f, _ in st: acc += f; out.append(round(acc * p, 3))
     return out
 
 
@@ -88,8 +109,7 @@ def layer_points(L):
     open_end = 0
     while b == 0 and st and st[-1][1] == 0: open_end += st.pop()[0]
     if not st: raise ValueError("a layer of steps needs material")
-    bounds, acc = [], 0.0
-    for f, _ in st: acc += f; bounds.append(round(acc * p, 3))
+    bounds = _bounds(st, p)
     xs, zs = [0], [b + st[0][1]]
     for k in range(1, len(st)):
         c = bounds[k - 1]; xs += [c - EDGE, c]; zs += [b + st[k - 1][1], b + st[k][1]]
@@ -220,22 +240,26 @@ def rebin(t, w, step):
     return [(k + 0.5) * step for k in sorted(out)], [out[k] for k in sorted(out)]
 
 
-def design_spacing(t, w, tol=1e-3):
+def design_spacing(t, w, tol=1e-3, discrete=0.98):
     """Layer spacing (mm water) the kernel is made for: its full width, plus one level spacing for discrete levels.
 
     N equally spaced levels s apart fill a gap of N s (a 4-step staircase of 1 mm: 4 mm PMMA); a continuous kernel
-    fills its own width."""
-    step = t[1] - t[0] if len(t) > 1 else 1.0
+    fills its own width. The kernel counts as discrete when its levels (bins above tol) hold nearly all the weight;
+    the flanks of steps hold the rest. A continuous slope may also fall below tol per bin once it is tall."""
+    if len(t) < 2: return 0.0                           # one level: nothing to fill
+    step = t[1] - t[0]
     runs = []                                           # runs of occupied bins = discrete levels
     for x, y in zip(t, w):
         if y <= tol: continue
         if runs and x - runs[-1][-1][0] < 1.5 * step: runs[-1].append((x, y))
         else: runs.append([(x, y)])
     if not runs: return 0.0
-    if 2 <= len(runs) <= 16 and all(len(r) <= 3 for r in runs):
+    held = sum(y for r in runs for _, y in r) / (sum(w) or 1.0)
+    if 2 <= len(runs) <= 16 and all(len(r) <= 3 for r in runs) and held >= discrete:
         c = [sum(x * y for x, y in r) / sum(y for _, y in r) for r in runs]
         return (c[-1] - c[0]) * len(c) / (len(c) - 1)
-    return runs[-1][-1][0] - runs[0][0][0] + step
+    occ = [x for x, y in zip(t, w) if y > 0]
+    return occ[-1] - occ[0] + step
 
 
 # ------------------------------------------------------------------ ripple and lateral width from reference curves
@@ -357,7 +381,10 @@ def svg_mask(d, i, margin=10.0, hole=3.0):
     """Top view of layer i in millimetres (1 user unit = 1 mm): stripes shaded by height, cut lines at every step,
     and four registration holes at the same place on every layer, so pins through them line the layers up."""
     L = d["layers"][i]; r = ridges(d)[i]
-    size = EXTENT + 2 * margin
+    # a turned plate needs room for its corners; every layer gets the size of the widest, so the holes coincide
+    turn = lambda r: abs(math.cos(math.radians(r))) + abs(math.sin(math.radians(r)))
+    size = round(EXTENT * max(turn(M["rotz"]) for M in d["layers"]) + 2 * margin, 3)
+    off = (size - EXTENT) / 2
     xs, zs = r["x"], r["z"]
     hmax = max(zs) or 1.0
     # flat runs of the profile, as (start, end, height) within one ridge
@@ -372,7 +399,7 @@ def svg_mask(d, i, margin=10.0, hole=3.0):
             x1, x2 = max(left + a, -EXTENT / 2), min(left + b, EXTENT / 2)
             if x2 <= x1: continue
             g = int(235 - 175 * h / hmax)
-            rects.append(f'<rect x="{x1 + EXTENT / 2 + margin:.3f}" y="{margin:.3f}" width="{x2 - x1:.3f}" height="{EXTENT:.3f}" '
+            rects.append(f'<rect x="{x1 + EXTENT / 2 + off:.3f}" y="{off:.3f}" width="{x2 - x1:.3f}" height="{EXTENT:.3f}" '
                          f'fill="rgb({g},{g},{g})" stroke="#000" stroke-width="0.05"/>')
     c = size / 2
     rot = f' transform="rotate({-L["rotz"]:g} {c:.3f} {c:.3f})"' if L["rotz"] else ""
@@ -399,7 +426,7 @@ def library(wb=None):
         if not f.endswith(".json"): continue
         try:
             with open(os.path.join(p, f), encoding="utf-8") as fh: d = validate(json.load(fh))
-            out[d["name"]] = d
+            if d["name"] == f[:-5]: out[d["name"]] = d   # keyed as remove() finds it
         except (OSError, ValueError, TypeError, KeyError): continue
     return out
 
@@ -414,6 +441,6 @@ def save(d, wb=None):
 
 def remove(name, wb=None):
     p = library_dir(wb)
-    if not p or not NAME_RE.match(name): raise ValueError("bad name")
+    if not p or not name_ok(name): raise ValueError("bad name")
     f = os.path.join(p, name + ".json")
     if os.path.exists(f): os.remove(f)

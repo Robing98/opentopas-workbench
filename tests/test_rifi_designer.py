@@ -64,6 +64,13 @@ def defn(*layers, name="x"):
     ({"name": "a", "layers": [dict(period=1.5, profile=[[0, 0], [2, 1]])]}, "above the period"),
     ({"name": "a", "layers": [dict(period=-1, profile=[[0, 0], [1, 1]])]}, "period"),
     ({"name": "a", "schema": "rifi/v9", "layers": [plate(1)]}, "schema"),
+    ({"name": "abc\n", "layers": [plate(1)]}, "name"),
+    ({"name": "NUL", "layers": [plate(1)]}, "device"),
+    ({"name": "a", "layers": [plate(1, rotz=180)]}, "rotz"),
+    ({"name": "a", "layers": [plate(1, rotz=90, shift=0.75)]}, "offset"),
+    ({"name": "a", "layers": [dict(period=1, steps=[[0.5, 0], [0.0004, 1], [0.4996, 2]])]}, "wide"),
+    ({"name": "a", "layers": [dict(period=0.05, steps=[[0.5, 0], [0.01, 1], [0.49, 2]])]}, "wide"),
+    ({"name": "a", "layers": [dict(period=1.5, profile=[[0, 0], [0.5, 1], [0.5004, 0.5], [1, 0]])]}, "rise strictly"),
 ])
 def test_validate_refuses(bad, msg):
     with pytest.raises(ValueError, match=msg):
@@ -154,6 +161,36 @@ def test_svg_mask():
     assert "rotate(-90" in g.get("transform")
     xs = sorted(float(r.get("x")) for r in g.findall(f"{ns}rect"))
     assert len(xs) >= 2 * 80 and 10.0 <= xs[0] and xs[-1] <= 130.0
+
+
+def test_svg_mask_turned_keeps_corners_and_holes():
+    import xml.etree.ElementTree as ET
+    d = defn(plate(2.0), plate(1.0, rotz=45, gap=15))
+    a, b = (ET.fromstring(R.svg_mask(d, i)) for i in (0, 1))
+    assert a.get("viewBox") == b.get("viewBox")                # holes of both layers at the same place
+    side = float(b.get("viewBox").split()[2])
+    assert side >= 120 * math.sqrt(2)                           # the corners of the turned square stay inside
+    ns = "{http://www.w3.org/2000/svg}"
+    holes = lambda r: [(c.get("cx"), c.get("cy")) for c in r.findall(f"{ns}circle")]
+    assert holes(a) == holes(b)
+
+
+@pytest.mark.parametrize("d", [4, 6, 12, 20])
+def test_design_spacing_of_tall_triangles(d):
+    """A continuous kernel fills its own width (the ridge above its 0.3 mm base, in water), also when its slope falls
+    below the level threshold per bin: t12 once came out at twice its width."""
+    c = R.kernel(R.validate(load("ripple_filter").template(f"t{d}", 1.5)))
+    assert R.design_spacing(c["t"], c["w"]) == pytest.approx((d - 0.3) * 1.16, rel=0.02)
+
+
+def test_design_spacing_of_one_level():
+    assert R.design_spacing([1.0], [1.0]) == 0.0
+
+
+def test_library_skips_a_renamed_file(tmp_path):
+    R.save({"schema": "rifi/v1", "name": "mine", "layers": [plate(1.0)]}, wb=str(tmp_path))
+    os.rename(tmp_path / "rifi" / "mine.json", tmp_path / "rifi" / "other.json")
+    assert R.library(str(tmp_path)) == {}
 
 
 def test_library_variant_in_both_generators(tmp_path, monkeypatch):
