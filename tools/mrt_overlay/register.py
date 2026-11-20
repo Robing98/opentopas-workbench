@@ -1,7 +1,10 @@
 """Rigid CT to MRI registration with Mattes mutual information, and its quality measures.
 
-The transform maps points of the fixed image (the MRI) to the moving image (the CT), so
-sitk.Resample(ct_layer, mri, transform) puts a CT frame layer onto the MRI grid.
+The returned transform maps points of the MRI to the CT, so sitk.Resample(ct_layer, mri, transform) puts a CT
+frame layer onto the MRI grid. Internally the CT is the fixed image and the result is inverted: on RIRE patient 001
+the MI optimum with the CT fixed lay 1.3 mm from the marker gold standard, with the MRI fixed 2.8 mm (started at
+the gold standard; from the usual starts 1.5 against 3.1 mm RMS). Probable reason: the CT's finer in-plane grid
+samples the joint histogram more densely and with less interpolation of the CT.
 """
 import numpy as np
 import SimpleITK as sitk
@@ -77,13 +80,15 @@ def rigid(mri, ct, initial=None, perturb=PERTURB, mask_points=None, levels=None)
     Quality: the metric of the best start, and the spread: the largest RMS distance over `mask_points` (brain
     points of the MRI; the whole image when None) between the best result and every other start that reached the
     same optimum. A spread near zero shows a reproducible optimum, not that the optimum is right."""
-    f = sitk.Cast(mri, sitk.sitkFloat32)
-    m = _prep_ct(ct)
+    f = _prep_ct(ct)
+    m = sitk.Cast(mri, sitk.sitkFloat32)
     kw = {"levels": levels} if levels else {}
+    init = _inverse(initial) if initial is not None else None
     results = []
-    for i, s in enumerate(starts(f, m, initial, perturb)):
-        try: results.append(_one(f, m, s, seed=i + 1, **kw))
+    for i, s in enumerate(starts(f, m, init, perturb)):
+        try: t, v = _one(f, m, s, seed=i + 1, **kw)
         except RuntimeError: continue
+        results.append((_inverse(t), v))
     if not results: raise SystemExit("registration failed from every start")
     results.sort(key=lambda r: r[1])
     best_t, best_v = results[0]
@@ -99,13 +104,24 @@ def rigid(mri, ct, initial=None, perturb=PERTURB, mask_points=None, levels=None)
                     "starts_elsewhere": lost, "spread_rms_mm": spread}
 
 
+def _inverse(t):
+    return _euler(_euler(t).GetInverse())
+
+
 def metric(mri, ct, transform):
-    """Mattes MI of CT on MRI at `transform`, on all voxels (lower is better)."""
+    """Mattes MI at `transform` (MRI to CT) in the orientation rigid() optimises, on all voxels (lower is better)."""
     e = sitk.ImageRegistrationMethod()
     e.SetMetricAsMattesMutualInformation(50)
     e.SetInterpolator(sitk.sitkLinear)
-    e.SetInitialTransform(transform)
-    return float(e.MetricEvaluate(sitk.Cast(mri, sitk.sitkFloat32), _prep_ct(ct)))
+    e.SetInitialTransform(_inverse(transform))
+    return float(e.MetricEvaluate(_prep_ct(ct), sitk.Cast(mri, sitk.sitkFloat32)))
+
+
+def from_start(mri, ct, transform):
+    """One search started at `transform` (MRI to CT): returns (transform MRI to CT, metric), where the metric's own
+    optimum lies near that start."""
+    t, v = _one(_prep_ct(ct), sitk.Cast(mri, sitk.sitkFloat32), _inverse(transform))
+    return _inverse(t), v
 
 
 def gold_from_points(src, dst):

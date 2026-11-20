@@ -61,7 +61,7 @@ def rire(folder):
     off = np.linalg.norm(blob_position(mr, ct, t, c_ct) - centre)
     off_gold = np.linalg.norm(blob_position(mr, ct, gold, c_ct) - centre)
     # started at the gold standard: where the metric's own optimum lies, apart from the search
-    tg, vg = rg._one(sitk.Cast(mr, sitk.sitkFloat32), rg._prep_ct(ct), rg._euler(gold))
+    tg, vg = rg.from_start(mr, ct, gold)
     drift = geo.displacement_mm(tg, gold, pts)[0]
     return {"ct_size": list(ct.GetSize()), "ct_spacing_mm": [round(v, 3) for v in ct.GetSpacing()],
             "mr_size": list(mr.GetSize()), "mr_spacing_mm": [round(v, 3) for v in mr.GetSpacing()],
@@ -129,7 +129,10 @@ def report(res):
               "Starr (Euler 3D), Mattes Mutual Information mit 50 Bins, 10 % Zufallsstichprobe, drei Auflösungsstufen "
               "(4, 2, 1 mit Glättung 2, 1, 0 mm), Gradientenabstieg mit festen Schrittregeln. Sechs Starts: geometrische "
               "Mitte und Schwerpunkt, je ungestört und um ±3 bis 4 Grad und ±5 bis 6 mm verschoben. Das beste Ergebnis "
-              "nach dem Metrikwert auf allen Voxeln gewinnt. CT auf -1000 bis 2000 HU begrenzt.", ""]
+              "nach dem Metrikwert auf allen Voxeln gewinnt. CT auf -1000 bis 2000 HU begrenzt. Das CT ist das feste Bild, das "
+              "Ergebnis wird umgekehrt: mit dem MRT als festem Bild lag der Fehler an RIRE bei 3,29 mm RMS (Optimum der "
+              "Metrik 2,8 mm neben dem Goldstandard), mit dem CT als festem Bild bei 1,1 bis 1,6 mm über 12 Läufe aus "
+              "allen Starts mit zwei Stichproben.", ""]
     if r:
         q = r["registration"]
         lines += [f"RIRE: {q['starts']} Starts, {q['starts_same_optimum']} am selben Optimum, Streuung {f(q['spread_rms_mm'])} mm, "
