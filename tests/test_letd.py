@@ -18,6 +18,14 @@ import pytest
 
 from opentopas_workbench import letd, server as wb
 
+REPO_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "mrt_overlay", "run.sh")
+
+
+@pytest.fixture(autouse=True)
+def script_of_the_checkout(monkeypatch):
+    # CI installs the package into site-packages, where tools/ does not come along; the tab runs from a checkout
+    monkeypatch.setattr(letd, "SCRIPT", REPO_SCRIPT)
+
 
 @pytest.fixture
 def ws(tmp_path):
