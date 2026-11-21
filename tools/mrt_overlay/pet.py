@@ -27,7 +27,7 @@ MIRROR_MARGIN = 0.01                   # unflipped MI must be at least 1 % bette
                                        # (phantom with a one-sided cavity: 3.7 % in either direction)
 RATIO_MAX = 4.0                        # viewer byte = ratio x 255 / 4: steps of 0.016 up to 4
 STRIATUM = (11, 12, 50, 51)            # SynthSeg: caudate and putamen, left and right
-HINWEIS = ("Nur Anzeige, keine Befundung. Kein SUV: die Werte sind ein Verhältnis zur Referenzregion. "
+HINWEIS = ("Nur Anzeige, keine Befundung. Die Werte sind ein Verhältnis zur Referenzregion. "
            "Deutung bei Nuklearmedizin und Neuroradiologie.")
 
 
