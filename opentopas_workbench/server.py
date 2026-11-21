@@ -11,12 +11,12 @@ Security: listens on 127.0.0.1 only, checks the Host header and requires a per-s
 and only touches files inside the workspace. The one exception is the Machines view: it reads matRad machine files
 (.mat) that the page names, by default from the matRad folder in the user's home, and writes nothing there.
 """
-import argparse, base64, csv, fnmatch, io, zipfile, importlib.util, json, os, re, secrets, shutil, signal, socketserver, subprocess, sys, threading, time, webbrowser
+import argparse, base64, csv, fnmatch, io, zipfile, importlib.util, json, os, re, secrets, shlex, shutil, signal, socketserver, subprocess, sys, threading, time, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from . import __version__ as VERSION
-from . import beamprofile, machines
+from . import beamprofile, letd, machines
 TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
 TEXT_EXT = {".txt", ".py", ".sh", ".bat", ".json", ".csv", ".md", ".log", ".in", ".mac", ".xml", ".header", ".binheader", ".mcc", ".asc", ".dat", ".tsv"}
 TRASH = "_trash"
@@ -69,9 +69,18 @@ def load_cfg():
     STATE["cfg"] = cfg
 
 
+CFG_LOCK = threading.Lock()
+
+
 def save_cfg():
+    """Atomic and one at a time: the LETd run saves its record from its own thread while requests save too, and a
+    half-written config.json would load as {} and lose every setting."""
     os.makedirs(wb_dir(), exist_ok=True)
-    with open(os.path.join(wb_dir(), "config.json"), "w") as fh: json.dump(STATE["cfg"], fh, indent=1)
+    path = os.path.join(wb_dir(), "config.json")
+    with CFG_LOCK:
+        tmp = path + ".tmp"
+        with open(tmp, "w") as fh: json.dump(STATE["cfg"], fh, indent=1)
+        os.replace(tmp, path)
 
 
 def load_jobs():
@@ -87,7 +96,9 @@ def load_jobs():
         if j.get("restarts", 0) >= 1:
             j["status"] = "aborted"; j["note"] = NOTE_ABORTED
         else:
-            j["status"] = "queued"; j["restarts"] = j.get("restarts", 0) + 1; j["note"] = NOTE_REQUEUED
+            # a FLUKA run goes back on hold: only its user starts FLUKA, also after a restart
+            j["status"] = "held" if j.get("binary") == "FLUKA" else "queued"
+            j["restarts"] = j.get("restarts", 0) + 1; j["note"] = NOTE_REQUEUED
             for k in ("start", "t0"): j.pop(k, None)
     STATE["next_id"] = max([j["id"] for j in STATE["jobs"]] + [0]) + 1
     if changed: save_jobs()   # the count must be on disk before the job starts again
@@ -514,16 +525,84 @@ def job_worker():
         worker_step()
 
 
+# ------------------------------------------------------------------ FLUKA jobs
+# FLUKA is licensed to its user personally: the workbench never starts it on its own. A FLUKA input enters the queue
+# held, and only the Start button of the queue (/api/release) lets it run.
+FLUKA_BINARY = "FLUKA"
+FLUKA_DIR_DEFAULT = "/home/robin/fluka/fluka4-5.2/bin"
+FLUKA_CYCLES = 5    # rfluka -M, the CYCLES of generators/_fluka.py: START there is the count of one cycle
+FLUKA_UNIT = 21     # the USRBIN unit of generators/_fluka.py: rfluka names the cycle files NAME001_fort.21 and so on
+
+
+def fluka_dir(): return os.path.expanduser(STATE["cfg"].get("fluka_dir") or FLUKA_DIR_DEFAULT)
+
+
+def fluka_module():
+    spec = importlib.util.spec_from_file_location("wb_fluka", os.path.join(TOOL_DIR, "generators", "_fluka.py"))
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    return mod
+
+
+def fluka_script(name):
+    """The shell steps of one FLUKA job in its output folder: the cycles, then usbsuw merges the binary USRBIN files of
+    all cycles (file names one a line, a blank line, the output name) and usbrea prints the merged file as text (input
+    name, output name). Both read their answers from stdin, as the manual's description of the programs gives them.
+
+    Every program is called by its path in the fluka_dir setting, never through PATH: a wrong setting must fail the
+    job, not start another FLUKA found on PATH."""
+    q, d = shlex.quote, fluka_dir()
+    merged, text = f"{name}_{FLUKA_UNIT}.bnn", f"{name}_{FLUKA_UNIT}.txt"
+    return "\n".join([
+        "set -e",
+        f"for p in rfluka usbsuw usbrea; do [ -x {q(d)}/$p ] || {{ echo \"FLUKA program $p not found in {d} (Settings: FLUKA)\"; exit 127; }}; done",
+        f"{q(d + '/rfluka')} -N0 -M{FLUKA_CYCLES} {q(name)}",
+        f"ls {q(name)}[0-9][0-9][0-9]_fort.{FLUKA_UNIT} > {q(name)}.usbsuw.in",
+        f"printf '\\n%s\\n' {q(merged)} >> {q(name)}.usbsuw.in",
+        f"{q(d + '/usbsuw')} < {q(name)}.usbsuw.in",
+        f"printf '%s\\n%s\\n' {q(merged)} {q(text)} | {q(d + '/usbrea')}",
+        ""])
+
+
+def fluka_convert(param, out):
+    """usbrea's text output to the workbench CSV, named like the TOPAS scorer file of the same case plus _fluka, so
+    both results of a case can sit in one folder (IDD_NAME.csv and IDD_NAME_fluka.csv)."""
+    fk = fluka_module()
+    with open(param) as fh: m = fk.read_case(fh.read())
+    name = os.path.splitext(os.path.basename(param))[0]
+    with open(os.path.join(out, f"{name}_{FLUKA_UNIT}.txt")) as fh:
+        vals, errs = fk.read_usbrea(fh.read(), m["phantom"]["zbins"])
+    path = os.path.join(out, m["score"]["name"] + "_fluka.csv")
+    with open(path, "w") as fh: fh.write(fk.to_csv(vals, errs, m))
+    return path
+
+
+def release_jobs(ids=None):
+    """Held FLUKA jobs to queued: the start by the user's hand. None releases every held job."""
+    n = 0
+    with STATE["lock"]:
+        for j in STATE["jobs"]:
+            if j["status"] == "held" and (ids is None or j["id"] in ids): j["status"] = "queued"; n += 1
+        save_jobs()
+    return n
+
+
 def run_job(job):
-    binary = next((b for b in STATE["cfg"]["binaries"] if b["name"] == job["binary"]), None)
+    fluka = job["binary"] == FLUKA_BINARY and job["file"].lower().endswith(".inp")
+    binary = None if fluka else next((b for b in STATE["cfg"]["binaries"] if b["name"] == job["binary"]), None)
     logdir = os.path.join(wb_dir(), "logs"); os.makedirs(logdir, exist_ok=True)
     job["log"] = relp(os.path.join(logdir, f"job{job['id']:05d}.log"))
     try:
         param = resolve(job["file"])
         out = resolve(os.path.join(os.path.dirname(job["file"]), job.get("subdir") or ""))
         os.makedirs(out, exist_ok=True)
-        if binary is None: raise RuntimeError(f"binary '{job['binary']}' not configured")
-        env = dict(os.environ, **{k: os.path.expanduser(v) for k, v in binary.get("env", {}).items()})
+        if binary is None and not fluka: raise RuntimeError(f"binary '{job['binary']}' not configured")
+        env = dict(os.environ, **{k: os.path.expanduser(v) for k, v in (binary or {}).get("env", {}).items()})
+        if fluka:   # rfluka runs in its output folder and takes the input's name without .inp
+            name = os.path.splitext(os.path.basename(param))[0]
+            if out != os.path.dirname(param): shutil.copy2(param, os.path.join(out, name + ".inp"))
+            cmd = ["bash", "-c", fluka_script(name)]
+        else:
+            cmd = [os.path.expanduser(binary["cmd"]), param]
         # copy companion geometry files (STL/PLY) so relative InputFile paths work in a subfolder
         if out != os.path.dirname(param):
             for f in os.listdir(os.path.dirname(param)):
@@ -535,14 +614,19 @@ def run_job(job):
         job["total"], job["energy"] = job_size(param, max_age=0)   # the file may have been edited right before the start
         t0 = time.time(); job["t0"] = t0
         with open(resolve(job["log"]), "w") as log:
-            log.write(f"# {job['start']}  {binary['cmd']} {param}\n# cwd: {out}\n"); log.flush()
-            proc = subprocess.Popen([os.path.expanduser(binary["cmd"]), param], cwd=out, stdout=log, stderr=subprocess.STDOUT,
+            log.write(f"# {job['start']}  {' '.join(cmd) if fluka else binary['cmd'] + ' ' + param}\n# cwd: {out}\n"); log.flush()
+            proc = subprocess.Popen(cmd, cwd=out, stdout=log, stderr=subprocess.STDOUT,
                                     env=env, start_new_session=True)
             with STATE["lock"]: STATE["proc"] = proc
             while True:   # this thread is the only one that feeds the keep-awake heartbeat, so it must not block for the whole run
                 try: rc = proc.wait(timeout=AWAKE_EVERY); break
                 except subprocess.TimeoutExpired: tend_awake()
         if STATE.get("closing"): return   # the server is ending: the record stays "running", so the next start runs the job again
+        if fluka and rc == 0 and not STATE["stop"]:
+            try: fluka_convert(param, out)
+            except (OSError, ValueError, KeyError) as e:
+                rc = 1
+                with open(resolve(job["log"]), "a") as log: log.write(f"\nFLUKA result not converted: {e}\n")
         job["seconds"] = round(time.time() - t0)
         job["outputs"] = sorted(relp(os.path.join(out, f)) for f, mt in snapshot().items()
                                 if before.get(f) != mt and not f.lower().endswith((".stl", ".ply")))
@@ -567,6 +651,7 @@ def enqueue(files, binary, subdir, skip_existing):
     for f in files:
         p = resolve(f)
         if not os.path.isfile(p): raise ValueError(f"not a file: {f}")
+        if binary == FLUKA_BINARY and not f.lower().endswith(".inp"): raise ValueError(f"FLUKA takes .inp inputs only: {f}")
         if skip_existing:
             info = file_info(p)
             outs = info["outs"] if info else []
@@ -574,7 +659,9 @@ def enqueue(files, binary, subdir, skip_existing):
             if outs and os.path.isdir(od) and all(has_output(dir_names(od), o) for o in outs):
                 skipped.append(f); continue
         with STATE["lock"]:
-            STATE["jobs"].append({"id": STATE["next_id"], "file": f, "binary": binary, "subdir": subdir, "status": "queued",
+            fluka = f.lower().endswith(".inp")
+            STATE["jobs"].append({"id": STATE["next_id"], "file": f, "binary": FLUKA_BINARY if fluka else binary, "subdir": subdir,
+                                  "status": "held" if fluka else "queued",
                                   "queued": time.strftime("%Y-%m-%d %H:%M:%S")})
             STATE["next_id"] += 1
         added.append(f)
@@ -1055,7 +1142,45 @@ def load_generators():
 
 def gen_schema():
     return [{"id": k, "name": getattr(m, "NAME", {"en": k}), "description": getattr(m, "DESCRIPTION", {}),
-             "fields": getattr(m, "FIELDS", [])} for k, m in load_generators().items()]
+             "fields": getattr(m, "FIELDS", []), "fluka": hasattr(m, "generate_fluka")} for k, m in load_generators().items()]
+
+# ------------------------------------------------------------------ RiFi designer
+RIFI_DELTAS = [round(2.0 + 0.25 * i, 2) for i in range(21)]      # mm water, layer spacings of the ripple curves
+
+
+def rifi_api(what, b):
+    """The RiFi designer: templates and library, live evaluation of a definition, saving, SVG masks.
+
+    The definitions, their kernel and the TOPAS block come from the ripple_filter generator and its _rifi.py, so the
+    designer shows exactly what a generated case will contain."""
+    rf = load_generators().get("ripple_filter")
+    if rf is None: raise ValueError("ripple_filter generator not found")
+    R = rf.R
+    if what == "list":
+        return {"templates": [rf.template(v, 1.5) for v in rf.TEMPLATES], "library": list(R.library(wb_dir()).values()),
+                "plates": list(R.PLATES), "schema": R.SCHEMA}
+    if what == "eval":
+        d = R.validate(b.get("def"))
+        k = R.kernel(d)
+        kt, kw = R.rebin(k["t"], k["w"], 0.05)                   # display bins, mm water
+        ref = R.reference()
+        rip = R.ripple_table(k["t"], k["w"], RIFI_DELTAS)
+        return {"def": d, "mean": round(k["mean"], 4), "sigma": round(k["sigma"], 4),
+                "design": round(R.design_spacing(k["t"], k["w"]), 3),
+                "kernel": [[round(t, 3), round(w, 6)] for t, w in zip(kt, kw)],
+                "deltas": RIFI_DELTAS, "ripple": rip, "lateral": R.lateral(k["mean"]), "lateral_spread": ref["lateral_spread"],
+                "hints": R.hints(d), "ridges": [{x: r[x] for x in ("name", "x", "z", "width", "pitch", "tz", "rotz", "shift", "n")} for r in R.ridges(d)],
+                "topas": rf.definition_block(d)}
+    if what == "save":
+        d = R.save(b.get("def"), wb_dir())
+        return {"ok": True, "name": d["name"], "variant": rf.LIB + d["name"]}
+    if what == "delete":
+        R.remove(str(b.get("name", "")), wb_dir()); return {"ok": True}
+    if what == "svg":
+        d = R.validate(b.get("def"))
+        return {"files": [{"name": f"{d['name']}_lage{i + 1}.svg", "svg": R.svg_mask(d, i)} for i in range(len(d["layers"]))]}
+    raise ValueError("unknown rifi request")
+
 
 # ------------------------------------------------------------------ file manager
 def fm_ls(rel):
@@ -1430,6 +1555,47 @@ def prewarm():
         print(f"prewarm failed: {e}", file=sys.stderr)
 
 
+# ------------------------------------------------------------------ LETd on MRI (letd.py)
+LETD_KEEP = ("status", "start", "end", "seconds", "rc", "error", "out", "out_local", "build", "synthseg", "page_local", "html", "t0")
+
+
+def letd_save(form=None, last=None):
+    """The form and the record of the last run in config.json, so the next visit starts from them (also in another
+    browser). Only the paths the user typed and the run's state, nothing read from the data."""
+    c = STATE["cfg"].setdefault("letd", {})
+    if form is not None: c["form"] = {k: str(form.get(k, "") or "")[:1000] for k in letd.FIELDS}
+    if last is not None: c["last"] = {k: last[k] for k in LETD_KEEP if k in last}
+    save_cfg()
+
+
+def letd_info():
+    c = STATE["cfg"].get("letd", {})
+    letd.restore(c.get("last"))
+    form = dict(c.get("form") or {"rx": "", "fx": "30", "build": "1", "synthseg": "1"})
+    for k, v in letd.default_out(STATE["root"]).items():
+        if not form.get(k): form[k] = v
+    return {"form": form, "job": letd.status(), "script": os.path.isfile(letd.SCRIPT)}
+
+
+def letd_post(what, b):
+    form = b.get("form") or {}
+    if what == "derive": return 200, letd.derive(b.get("mrt", ""))
+    if what == "check":
+        bad, notes = letd.check(form, STATE["root"])
+        return 200, {"problems": bad, "notes": notes}
+    if what == "start":
+        bad, notes = letd.check(form, STATE["root"])
+        letd_save(form=form)
+        if bad: return 200, {"problems": bad, "notes": notes}
+        try: job = letd.start(form, on_end=lambda st: letd_save(last=st))
+        except RuntimeError: return 409, {"error": "running"}
+        letd_save(last=letd.JOB["state"])
+        return 200, {"job": job, "notes": notes}
+    if what == "stop": return 200, {"stopped": letd.stop()}
+    if what == "open": return 200, {"ok": letd.open_html()}
+    return 404, {"error": "not found"}
+
+
 # ------------------------------------------------------------------ HTTP
 class Server(ThreadingHTTPServer):
     def server_bind(self):
@@ -1471,6 +1637,7 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/info":
                 return self.send(200, {"root": STATE["root"], "cfg": STATE["cfg"], "version": VERSION, "detected": detected_binaries(),
                                        "default_exclude": DEFAULT_EXCLUDE,
+                                       "fluka_dir_default": FLUKA_DIR_DEFAULT,
                                        "folders": list_folders()})
             if u.path == "/api/ls": return self.send(200, fm_ls(q.get("p", "")))
             if u.path == "/api/read":
@@ -1498,8 +1665,8 @@ class H(BaseHTTPRequestHandler):
                 with STATE["lock"]:
                     alljobs = list(STATE["jobs"]); running = STATE["proc"] is not None; rev = STATE["rev"]
                 # every waiting job is sent (a long queue must stay complete for "remove waiting"), history only up to hist
-                active = [j for j in alljobs if j["status"] in ("queued", "running")]
-                finished = [j for j in alljobs if j["status"] not in ("queued", "running")]
+                active = [j for j in alljobs if j["status"] in ("queued", "running", "held")]
+                finished = [j for j in alljobs if j["status"] not in ("queued", "running", "held")]
                 keep = {id(j) for j in active} | {id(j) for j in finished[max(0, len(finished) - hist):]}
                 jobs = [dict(j) for j in alljobs if id(j) in keep]
                 counts = {}
@@ -1533,6 +1700,7 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/beam/"): return self.send(200, beam_api(u.path[len("/api/beam/"):], q))
             if u.path.startswith("/api/machines/"): return self.send(200, machines_api(u.path[len("/api/machines/"):], q))
             if u.path == "/api/generators": return self.send(200, gen_schema())
+            if u.path == "/api/letd": return self.send(200, letd_info())
             if u.path == "/file":
                 p = resolve(q.get("p", ""))
                 ext = os.path.splitext(p)[1].lower()
@@ -1556,7 +1724,8 @@ class H(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self.guard(): return
         u = urlparse(self.path)
-        writes = u.path in ("/api/write", "/api/mkdir", "/api/newfile", "/api/move", "/api/copy", "/api/trash", "/api/generate", "/api/variants")
+        writes = u.path in ("/api/write", "/api/mkdir", "/api/newfile", "/api/move", "/api/copy", "/api/trash", "/api/generate", "/api/variants",
+                          "/api/rifi/save", "/api/rifi/delete")
         if writes: invalidate_cache()
         try:
             b = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or 0) or b"{}")
@@ -1594,6 +1763,8 @@ class H(BaseHTTPRequestHandler):
                 a, s = enqueue(b["files"], b["binary"], b.get("subdir", ""), b.get("skip", False))
                 return self.send(200, {"added": a, "skipped": s})
             if u.path == "/api/stop": stop_current(); return self.send(200, {"ok": True})
+            if u.path == "/api/release":
+                return self.send(200, {"ok": True, "released": release_jobs(None if b.get("all") else set(b.get("ids", [])))})
             if u.path == "/api/views":
                 os.makedirs(wb_dir(), exist_ok=True)
                 with open(os.path.join(wb_dir(), "views.json"), "w") as fh: json.dump(b.get("views", [])[:200], fh, indent=1)
@@ -1622,7 +1793,7 @@ class H(BaseHTTPRequestHandler):
                 ids, n = set(b.get("ids", [])), 0
                 with STATE["lock"]:
                     for j in STATE["jobs"]:
-                        if j["status"] == "queued" and (b.get("all") or j["id"] in ids): j["status"] = "removed"; n += 1
+                        if j["status"] in ("queued", "held") and (b.get("all") or j["id"] in ids): j["status"] = "removed"; n += 1
                     save_jobs()
                 return self.send(200, {"ok": True, "removed": n})
             if u.path == "/api/outputs":
@@ -1633,7 +1804,7 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, {"outputs": out})
             if u.path == "/api/clearhistory":
                 with STATE["lock"]:
-                    STATE["jobs"] = [j for j in STATE["jobs"] if j["status"] in ("queued", "running")]; save_jobs()
+                    STATE["jobs"] = [j for j in STATE["jobs"] if j["status"] in ("queued", "running", "held")]; save_jobs()
                 return self.send(200, {"ok": True})
             if u.path == "/api/config":
                 cfg = STATE["cfg"]
@@ -1642,6 +1813,7 @@ class H(BaseHTTPRequestHandler):
                 if "keep_display" in b: cfg["keep_display"] = bool(b["keep_display"])
                 if "toast" in b: cfg["toast"] = bool(b["toast"])
                 if "machines_dir" in b: cfg["machines_dir"] = str(b["machines_dir"] or "").strip()
+                if "fluka_dir" in b: cfg["fluka_dir"] = str(b["fluka_dir"] or "").strip()
                 for k in ("exclude", "include"):
                     if k in b: cfg[k] = [str(x).strip() for x in b[k] if str(x).strip()][:200]; invalidate_cache()
                 if "binaries" in b:
@@ -1652,11 +1824,17 @@ class H(BaseHTTPRequestHandler):
                                          "subdir": str(x.get("subdir", ""))})
                     cfg["binaries"] = bins
                 save_cfg(); return self.send(200, {"ok": True, "cfg": cfg})
+            if u.path.startswith("/api/letd/"): return self.send(*letd_post(u.path[len("/api/letd/"):], b))
+            if u.path.startswith("/api/rifi/"): return self.send(200, rifi_api(u.path[len("/api/rifi/"):], b))
             if u.path == "/api/generate":
                 gens = load_generators()
                 mod = gens.get(b["id"])
                 if mod is None: raise ValueError("unknown generator")
-                files = mod.generate(b.get("values", {}))
+                if b.get("backend", "topas") == "fluka":
+                    if not hasattr(mod, "generate_fluka"): raise ValueError("this generator writes no FLUKA input yet")
+                    files = mod.generate_fluka(b.get("values", {}))
+                else:
+                    files = mod.generate(b.get("values", {}))
                 folder = b.get("folder", "")
                 if b.get("preview"):
                     first = next((t for _, t in files if isinstance(t, str)), "")
@@ -1748,6 +1926,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
     STATE["root"] = os.path.realpath(a.workspace)
     if not os.path.isdir(STATE["root"]): sys.exit(f"workspace not found: {STATE['root']}")
+    os.environ["OPENTOPAS_WB_DIR"] = wb_dir()    # the ripple_filter generator reads its filter library from here
     load_cfg(); load_jobs(); save_cfg()
     threading.Thread(target=job_worker, daemon=True).start()
     threading.Thread(target=prewarm, daemon=True).start()

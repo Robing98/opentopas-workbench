@@ -35,6 +35,9 @@ main{padding:16px;max-width:1900px;margin:0 auto}
 .tab{display:none}.tab.on{display:grid;gap:16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
 h2{font-size:15px;margin:0 0 10px}
+.rdplot{margin:4px 0}.rdlayer{border:1px solid var(--line);border-radius:8px;padding:8px;margin-top:10px;background:var(--sunken)}
+.rdgrid{grid-template-columns:repeat(auto-fill,minmax(130px,1fr));margin:6px 0}.rdpts input{width:7em}.rdpts td,.rdpts th{padding:2px 4px}
+.rdhints{margin:0;padding-left:20px}.rdhints li.warn{color:var(--warn)}.rdhints li.ok{color:var(--ok)}.rdpre{max-height:260px;overflow:auto;font-size:12px;background:var(--sunken);padding:8px;border-radius:6px}
 .split{display:grid;grid-template-columns:minmax(340px,1fr) 1.4fr;gap:16px}
 @media (max-width:980px){.split{grid-template-columns:1fr}}
 button,select,input,textarea{font:inherit;color:var(--ink)}
@@ -72,6 +75,11 @@ canvas{cursor:crosshair;width:100%;height:440px;border:1px solid var(--line);bor
 .live .big{height:10px;border-radius:5px;background:var(--line);overflow:hidden}.live .big>i{display:block;height:100%;background:var(--acc);transition:width .9s linear}
 .live .kv{display:flex;gap:18px;flex-wrap:wrap;font-size:14px;font-variant-numeric:tabular-nums}.live .kv b{font-weight:600}
 .live .last{font:12.5px ui-monospace,Consolas,monospace;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lf{display:grid;grid-template-columns:minmax(150px,240px) minmax(0,1fr);gap:6px 12px;align-items:start;margin-bottom:12px}
+.lf>label{padding-top:6px;font-size:14px}.lf .in{display:flex;flex-direction:column;gap:2px;min-width:0}.lf .in>div{display:flex;gap:6px}.lf input[type=text]{flex:1;min-width:0}
+.lf .msg{font-size:13px;color:var(--mute)}.lf .msg.bad{color:var(--err);font-weight:600}.lf .msg.note{color:var(--warn)}
+.lf .opt{font-size:12px;color:var(--mute);font-weight:400}
+@media (max-width:640px){.lf{grid-template-columns:1fr}.lf>label{padding-top:0}}
 .res{color:var(--ok);font-weight:600}.log-err{color:var(--err);font-weight:600}.log-wrn{color:var(--warn)}.hints{color:var(--err);font-size:13px;margin-top:6px;white-space:pre-wrap;font-family:ui-monospace,Consolas,monospace}
 .thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}.thumbs figure{margin:0;cursor:zoom-in;border:1px solid var(--line);border-radius:7px;overflow:hidden;background:var(--sunken)}
 .thumbs img{width:100%;height:150px;object-fit:contain;background:#fff;display:block}.thumbs figcaption{font-size:12.5px;padding:4px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -153,7 +161,9 @@ kbd{font:12.5px ui-monospace,Consolas,monospace;padding:1px 6px;border:1px solid
     <button role="tab" data-tab="results"><span data-i18n="tab_results"></span></button>
     <button role="tab" data-tab="beam"><span data-i18n="tab_beam"></span></button>
     <button role="tab" data-tab="machines"><span data-i18n="tab_machines"></span></button>
+    <button role="tab" data-tab="letd"><span data-i18n="tab_letd"></span><span id="letdCnt" class="cnt" hidden></span></button>
     <span class="sep" aria-hidden="true"></span>
+    <button role="tab" data-tab="rifi"><span data-i18n="tab_rifi"></span></button>
     <button role="tab" data-tab="settings"><span data-i18n="tab_settings"></span></button>
   </nav>
   <span class="spacer"></span>
@@ -216,7 +226,7 @@ kbd{font:12.5px ui-monospace,Consolas,monospace;padding:1px 6px;border:1px solid
     </div>
     <div class="card">
       <div class="row" style="margin-bottom:6px"><h2 style="margin:0" data-i18n="queue"></h2><span id="qEta" class="mute"></span></div>
-      <div class="row"><button id="qStop" data-i18n="stop_current"></button><button id="qRemove" data-i18n="remove_queued"></button><button id="qClear" data-i18n="clear_history"></button>
+      <div class="row"><button id="qStop" data-i18n="stop_current"></button><button class="pri" id="qRelease" hidden></button><button id="qRemove" data-i18n="remove_queued"></button><button id="qClear" data-i18n="clear_history"></button>
         <span class="spacer"></span><label><span data-i18n="q_show"></span> <select id="qShow"><option value="all" data-i18n="q_show_all"></option><option value="active" data-i18n="q_show_active"></option><option value="failed" data-i18n="q_show_failed"></option></select></label></div>
       <div class="scroll" style="max-height:min(420px,40vh)"><table id="qTable"><thead><tr><th>#</th><th data-i18n="col_file"></th><th data-i18n="binary"></th><th data-i18n="col_status"></th><th data-i18n="col_time"></th><th></th></tr></thead><tbody id="qRun"></tbody><tbody id="qWait"></tbody><tbody id="qBody"></tbody></table></div>
       <div id="liveBox" class="live" hidden></div>
@@ -376,14 +386,73 @@ kbd{font:12.5px ui-monospace,Consolas,monospace;padding:1px 6px;border:1px solid
 <section id="gen" class="tab">
   <div class="card">
     <h2 data-i18n="gen_title"></h2>
-    <div class="row"><label><span data-i18n="generator"></span> <select id="genSel"></select></label><span id="genDesc" class="mute"></span></div>
+    <div class="row"><label><span data-i18n="generator"></span> <select id="genSel"></select></label><span id="genDesc" class="mute"></span><label id="genBackendL" hidden><span data-i18n="gen_backend"></span> <select id="genBackend"><option value="topas">TOPAS</option><option value="fluka">FLUKA</option></select></label></div>
     <div class="grid2" id="genForm"></div>
     <div class="row" style="margin-top:12px">
       <label><span data-i18n="target_folder"></span> <input id="genFolder" size="24"></label>
       <label><input type="checkbox" id="genOver"> <span data-i18n="overwrite"></span></label>
-      <button id="genPrev" data-i18n="preview"></button><button class="pri" id="genMake" data-i18n="create"></button><span id="genMsg" class="mute" role="status"></span><button id="genToRuns" hidden></button>
+      <button id="genPrev" data-i18n="preview"></button><button class="pri" id="genMake" data-i18n="create"></button><span id="genMsg" class="mute" role="status"></span><button id="genToRuns" hidden></button><button id="genToQueue" hidden></button>
     </div>
     <pre id="genOut"></pre>
+  </div>
+</section>
+
+<!-- LETD ON MRI: tools/mrt_overlay/run.sh from one form (letd.py) -->
+<section id="letd" class="tab">
+  <div class="card">
+    <h2 data-i18n="lt_title"></h2>
+    <p class="mute" style="font-size:13px;margin-top:0" data-i18n="lt_intro"></p>
+    <div class="lf" id="ltForm"></div>
+    <div class="row">
+      <button id="ltCheck" data-i18n="lt_check"></button><button class="pri" id="ltStart" data-i18n="lt_start"></button>
+      <button id="ltStop" data-i18n="lt_stop" hidden></button><span id="ltMsg" class="mute" role="status"></span>
+    </div>
+    <div id="ltLive" class="live" hidden>
+      <div class="ph" id="ltSteps"></div>
+      <div class="big" id="ltBar" hidden><i></i></div>
+      <div class="kv" id="ltKv"></div>
+      <details><summary data-i18n="lt_log"></summary><pre id="ltLog"></pre></details>
+    </div>
+  </div>
+  <div class="card" id="ltRes" hidden>
+    <h2 data-i18n="lt_result"></h2>
+    <div class="row" id="ltResHead"></div>
+    <div class="scroll" style="max-height:360px"><table><thead><tr><th data-i18n="lt_exam"></th><th data-i18n="lt_native"></th><th data-i18n="lt_suitable"></th><th data-i18n="lt_check_rms"></th><th data-i18n="lt_check_ok"></th></tr></thead><tbody id="ltExams"></tbody></table></div>
+    <h2 style="margin-top:14px" data-i18n="lt_look"></h2>
+    <div id="ltLook"></div>
+    <p class="mute" style="font-size:13px" id="ltHint"></p>
+  </div>
+</section>
+
+<!-- RIFI DESIGNER -->
+<section id="rifi" class="tab">
+  <div class="split">
+    <div class="card">
+      <h2 data-i18n="rd_title"></h2>
+      <div class="row"><label><span data-i18n="rd_load"></span> <select id="rdLoad" style="max-width:320px"></select></label><button id="rdNewLayer" data-i18n="rd_add_layer"></button></div>
+      <div class="grid2" style="margin-top:8px">
+        <label><span data-i18n="rd_name"></span><input id="rdName" maxlength="40"></label>
+        <label><span data-i18n="rd_ftitle"></span><input id="rdTitle" maxlength="120"></label>
+        <label><span data-i18n="rd_material"></span><select id="rdMat"><option value="G4_PLEXIGLASS">PMMA (G4_PLEXIGLASS)</option><option value="G4_WATER">G4_WATER</option></select></label>
+        <label><span data-i18n="rd_spr"></span><input id="rdSpr" type="number" step="0.001" min="0.1" max="5"></label>
+      </div>
+      <div id="rdLayers"></div>
+      <div class="row" style="margin-top:10px"><button class="pri" id="rdSave" data-i18n="rd_save"></button><button id="rdDel" data-i18n="rd_delete"></button><button id="rdSvg" data-i18n="rd_svg"></button><span id="rdMsg" class="mute" role="status"></span></div>
+      <p class="mute" style="font-size:13px" data-i18n="rd_hint"></p>
+    </div>
+    <div class="card">
+      <h2 data-i18n="rd_section"></h2>
+      <div id="rdCross" class="rdplot"></div>
+      <h2 style="margin-top:12px" data-i18n="rd_kernel"></h2>
+      <div id="rdStats" class="mute"></div>
+      <div id="rdKern" class="rdplot"></div>
+      <h2 style="margin-top:12px" data-i18n="rd_ripple"></h2>
+      <div id="rdRip" class="rdplot"></div>
+      <div id="rdLat"></div>
+      <h2 style="margin-top:12px" data-i18n="rd_build"></h2>
+      <ul id="rdHints" class="rdhints"></ul>
+      <details><summary data-i18n="rd_topas"></summary><pre id="rdTopas" class="rdpre"></pre></details>
+    </div>
   </div>
 </section>
 
@@ -407,6 +476,9 @@ kbd{font:12.5px ui-monospace,Consolas,monospace;padding:1px 6px;border:1px solid
     <h2 data-i18n="notes"></h2>
     <p class="row"><label><input type="checkbox" id="set_notify"> <span data-i18n="note_browser"></span></label><label><input type="checkbox" id="set_sound"> <span data-i18n="note_sound"></span></label><label><input type="checkbox" id="set_note_each"> <span data-i18n="note_each"></span></label><button id="noteTest" data-i18n="note_testbtn"></button><span id="noteMsg" class="mute"></span></p>
     <p><label><input type="checkbox" id="setToast"> <span data-i18n="note_toast"></span></label></p>
+    <h2>FLUKA</h2>
+    <p class="mute" style="font-size:13px" data-i18n="fluka_hint"></p>
+    <div class="row"><label><span data-i18n="fluka_dir"></span> <input id="setFluka" size="40"></label><button class="pri" id="flukaSave" data-i18n="save"></button><span id="flukaMsg" class="mute" role="status"></span></div>
     <h2 data-i18n="binaries"></h2>
     <p class="mute" data-i18n="bin_hint"></p>
     <div id="binList"></div>
@@ -429,7 +501,7 @@ const I18N={
   run_files:"Parameterdateien",filter_ph:"Filter",only_not_done:"nur ohne Ergebnisse",col_results:"Ergebnisse",here:"hier",eta:"noch",histories_done:"Historien",log_hints:"Auffällige Zeilen im Log:",binary:"Programm",subdir:"Ausgabe-Unterordner",subdir_ph:"leer = gleicher Ordner",skip_existing:"vorhandene Ergebnisse überspringen",
   select_all:"alle",select_none:"keine",enqueue:"In Warteschlange",queue:"Warteschlange",stop_current:"Aktuellen Lauf stoppen",remove_queued:"Wartende entfernen",clear_history:"Verlauf leeren",log:"Log",
   added:"hinzugefügt",skipped:"übersprungen",nothing_selected:"Nichts ausgewählt.",no_binary:"Kein Programm eingerichtet, siehe Einstellungen.",outputs:"Ausgaben",
-  note_requeued:"nach Neustart des Servers neu eingereiht",note_aborted:"abgebrochen: der Server endete zweimal während dieses Laufs",st_queued:"wartet",st_running:"läuft",st_done:"fertig",st_failed:"Fehler",st_stopped:"gestoppt",st_aborted:"abgebrochen",st_removed:"entfernt",st_external:"extern",ext_title:"außerhalb der Warteschlange gestartet (Terminal, Skript, Agent); hier nur angezeigt",running_badge:"läuft",
+  note_requeued:"nach Neustart des Servers neu eingereiht",note_aborted:"abgebrochen: der Server endete zweimal während dieses Laufs",st_queued:"wartet",st_running:"läuft",st_done:"fertig",st_failed:"Fehler",st_stopped:"gestoppt",st_aborted:"abgebrochen",st_removed:"entfernt",st_held:"hält an",release_job:"Starten",q_release_all:"{n} FLUKA-Läufe starten",gen_backend:"Backend",gen_to_queue:"{n} FLUKA-Inputs in die Warteschlange (angehalten)",gen_queued_held:"{n} angehalten eingereiht: in Läufe mit Starten freigeben",fluka_dir:"Ordner der FLUKA-Programme",fluka_hint:"Der Ordner mit rfluka, usbsuw und usbrea. FLUKA-Läufe warten in der Warteschlange, bis du sie dort startest.",st_external:"extern",ext_title:"außerhalb der Warteschlange gestartet (Terminal, Skript, Agent); hier nur angezeigt",running_badge:"läuft",
   res_files:"Scorer-Ausgaben und Messdaten",res_hint:"Zeile anklicken wählt aus, Umschalt+Klick wählt einen Bereich, Ziehen über mehrere Zeilen wählt alle davon. Dateien anhaken, um Kurven zu überlagern, auch aus verschiedenen Ordnern. Messdaten: PTW .mcc, IBA .asc oder Spalten (x in mm, Wert). 2D/3D-Daten erscheinen als Karte.",view:"Darstellung",mode_curves:"Kurven",mode_diff:"Differenz zur Referenz",mode_ratio:"Verhältnis zur Referenz",reference:"Referenz",zoom_peak:"Peak-Zoom",zoom_reset:"Zoom zurücksetzen",clear_sel:"Auswahl leeren",selected:"ausgewählt",plot_hint:"Bereich mit der Maus aufziehen zum Zoomen, Doppelklick setzt zurück.",peak_entr:"Peak/Eingang",xaxis:"Tiefenachse",loading:"lädt …",live_elapsed:"läuft seit",live_rate:"Rate",live_cores:"Kerne",ph_init:"Initialisierung (Geometrie, Physiktabellen)",ph_run:"Simulation",ph_output:"Ausgabe schreiben",q_rest:"Rest",q_finish:"fertig ca.",q_unknown:"ohne Schätzung",q_eta_wait:"Restzeit erscheint, sobald ein Lauf fertig ist",total:"gesamt",no_r80:"Ohne R80 (kein Bragg-Peak im Phantom), bei relativer Tiefe nicht dargestellt",x_abs:"absolut",x_shift:"Tiefe − R80",x_rel:"Tiefe / R80",tail:"Schwanz",tail_tip:"Dosis hinter dem distalen Abfall (bei R80 + max(10 mm, 4 × (D80–D20))) relativ zum Maximum: Fragmentierungsschwanz",relw_tip:"Breite relativ zur Reichweite: vergleichbar zwischen Ionen bei unterschiedlicher Reichweite",bpw_filter:"BPW80 Filter",dr80_tip:"R80 minus R80 der Referenz",quad_tip:"√(BPW80² − BPW80²Referenz): Beitrag des Filters zur Peakbreite, wenn die Referenz die Kurve ohne Filter ist",plot:"Plot",statistic:"Statistik",normalize:"Normierung",
   norm_none:"keine",norm_max:"auf Maximum",norm_first:"auf Eingang",norm_sum:"auf Fläche",normalized:"normiert",log_y:"log. y-Achse",bragg:"Bragg-Kennzahlen",collapse:"Summieren über",save_png:"Als PNG speichern",images:"Bilder im Ordner",
   peak:"Peak",gen_title:"Parameterdateien erzeugen",generator:"Generator",target_folder:"Zielordner",overwrite:"vorhandene überschreiben",create:"Anlegen",created:"angelegt",
@@ -452,7 +524,7 @@ const I18N={
   run_files:"Parameter files",filter_ph:"Filter",only_not_done:"only without results",col_results:"Results",here:"here",eta:"left",histories_done:"histories",log_hints:"Suspicious log lines:",binary:"Program",subdir:"Output subfolder",subdir_ph:"empty = same folder",skip_existing:"skip existing results",
   select_all:"all",select_none:"none",enqueue:"Add to queue",queue:"Queue",stop_current:"Stop current run",remove_queued:"Remove waiting",clear_history:"Clear history",log:"Log",
   added:"added",skipped:"skipped",nothing_selected:"Nothing selected.",no_binary:"No program configured, see Settings.",outputs:"Outputs",
-  note_requeued:"re-queued after server restart",note_aborted:"aborted: the server ended twice during this run",st_queued:"waiting",st_running:"running",st_done:"done",st_failed:"failed",st_stopped:"stopped",st_aborted:"aborted",st_removed:"removed",st_external:"external",ext_title:"started outside the queue (terminal, script, agent); shown here only",running_badge:"running",
+  note_requeued:"re-queued after server restart",note_aborted:"aborted: the server ended twice during this run",st_queued:"waiting",st_running:"running",st_done:"done",st_failed:"failed",st_stopped:"stopped",st_aborted:"aborted",st_removed:"removed",st_held:"on hold",release_job:"Start",q_release_all:"Start {n} FLUKA runs",gen_backend:"Backend",gen_to_queue:"Queue {n} FLUKA inputs (on hold)",gen_queued_held:"{n} queued on hold: start them in Runs",fluka_dir:"Folder of the FLUKA programs",fluka_hint:"The folder with rfluka, usbsuw and usbrea. FLUKA runs wait in the queue until you start them there.",st_external:"external",ext_title:"started outside the queue (terminal, script, agent); shown here only",running_badge:"running",
   res_files:"Scorer output and measurements",res_hint:"Click a row to select it, shift+click selects a range, drag across rows to select them all. Tick files to overlay curves, also across folders. Measurements: PTW .mcc, IBA .asc, or columns (x in mm, value). 2D/3D data show as a map.",view:"View",mode_curves:"Curves",mode_diff:"Difference to reference",mode_ratio:"Ratio to reference",reference:"Reference",zoom_peak:"Zoom to peak",zoom_reset:"Reset zoom",clear_sel:"Clear selection",selected:"selected",plot_hint:"Drag across the plot to zoom, double-click to reset.",peak_entr:"Peak/entrance",xaxis:"Depth axis",loading:"loading …",live_elapsed:"running for",live_rate:"Rate",live_cores:"cores",ph_init:"Initialization (geometry, physics tables)",ph_run:"Simulation",ph_output:"Writing output",q_rest:"Remaining",q_finish:"done at",q_unknown:"without estimate",q_eta_wait:"remaining time appears once a run has finished",total:"total",no_r80:"No R80 (no Bragg peak in the phantom), not shown with relative depth",x_abs:"absolute",x_shift:"depth − R80",x_rel:"depth / R80",tail:"Tail",tail_tip:"Dose beyond the distal fall-off (at R80 + max(10 mm, 4 × (D80–D20))) relative to the maximum: fragmentation tail",relw_tip:"Width relative to the range: comparable between ions with different ranges",bpw_filter:"BPW80 filter",dr80_tip:"R80 minus R80 of the reference",quad_tip:"√(BPW80² − BPW80²reference): filter contribution to the peak width when the reference is the curve without filter",plot:"Plot",statistic:"Statistic",normalize:"Normalize",
   norm_none:"none",norm_max:"to maximum",norm_first:"to entrance",norm_sum:"to area",normalized:"normalized",log_y:"log y axis",bragg:"Bragg metrics",collapse:"Sum over",save_png:"Save as PNG",images:"Images in folder",
   peak:"Peak",gen_title:"Generate parameter files",generator:"Generator",target_folder:"Target folder",overwrite:"overwrite existing",create:"Create",created:"created",
@@ -466,6 +538,24 @@ const I18N={
   unsaved_q:"Unsaved changes. Click again to discard them, Ctrl+S saves.",
   error:"Error"}};
 /* Beam profile view */
+Object.assign(I18N.de,{tab_rifi:"RiFi-Designer",rd_title:"Ripple-Filter: Definition",rd_load:"Laden",rd_templates:"Vorlagen",rd_library:"Bibliothek",rd_add_layer:"Lage hinzufügen",
+ rd_name:"Name (Variante lib-Name)",rd_ftitle:"Titel",rd_material:"Material",rd_spr:"SPR (zu Wasser)",rd_save:"In Bibliothek speichern",rd_delete:"Aus Bibliothek löschen",rd_svg:"SVG-Masken",
+ rd_hint:"Gleich ausgerichtete Lagen addieren sich punktweise, gekreuzte Lagen sind unabhängig. Gespeicherte Filter stehen in den Generatoren Ripple-Filter-Studie und Nozzle als Variante lib-Name zur Wahl. Die SVG-Masken sind in Originalmaßen (1 Einheit = 1 mm), mit vier Passlöchern an derselben Stelle jeder Lage.",
+ rd_section:"Querschnitt",rd_kernel:"Kern (Dickenverteilung)",rd_ripple:"Welligkeit des SOBP gegen Schichtabstand",rd_build:"Fertigung",rd_topas:"TOPAS-Geometrie",
+ rd_layer:"Lage",rd_profile:"Profil",rd_steps:"Stufen",rd_del_layer:"Lage entfernen",rd_period:"Periode [mm]",rd_width:"Stegbreite [mm]",rd_width_ph:"= Ende des Profils",rd_base:"Grundplatte [mm]",
+ rd_rotz:"Drehung um z",rd_shift:"Versatz [mm]",rd_gap:"Luft zur vorigen Lage [mm]",rd_frac:"Flächenanteil",rd_h:"Höhe [mm]",rd_x:"x [mm]",rd_z:"z [mm]",rd_del_row:"Zeile entfernen",rd_add_row:"Zeile hinzufügen",
+ rd_three:"drei Perioden",rd_t_wet:"Dicke [mm Wasser]",rd_frac_area:"Flächenanteil",rd_mean:"Mittlere Dicke",rd_design:"Designabstand",rd_wet:"Wasser",rd_delta:"Schichtabstand Δ [mm Wasser]",rd_ripple_pct:"Welligkeit [%]",
+ rd_energy:"Energie",rd_lat:"Zusätzliche laterale Breite σ",rd_lat_note:"Schätzung: c(E) · √(mittlere Dicke), kalibriert an den TOPAS-Läufen der Tasks 3141 und 3176 (Filter 80 cm vor dem Isozentrum); ± die Streuung der Kalibrierläufe. Welligkeit: Faltungsmodell auf den rifi0-Kurven dieser Läufe, 6 Schichten.",
+ rd_one_layer:"Ein Filter braucht mindestens eine Lage.",rd_saved:"Gespeichert. In den Generatoren als Variante {v} wählbar.",rd_not_saved:"Dieser Name steht nicht in der Bibliothek.",rd_deleted:"Aus der Bibliothek gelöscht."});
+Object.assign(I18N.en,{tab_rifi:"RiFi designer",rd_title:"Ripple filter: definition",rd_load:"Load",rd_templates:"Templates",rd_library:"Library",rd_add_layer:"Add layer",
+ rd_name:"Name (variant lib-name)",rd_ftitle:"Title",rd_material:"Material",rd_spr:"SPR (to water)",rd_save:"Save to library",rd_delete:"Delete from library",rd_svg:"SVG masks",
+ rd_hint:"Layers with the same orientation add up point by point, crossed layers are independent. Saved filters can be chosen in the generators Ripple filter study and Nozzle as variant lib-name. The SVG masks are at original size (1 unit = 1 mm), with four registration holes at the same place on every layer.",
+ rd_section:"Cross-section",rd_kernel:"Kernel (thickness distribution)",rd_ripple:"SOBP ripple against layer spacing",rd_build:"Manufacturing",rd_topas:"TOPAS geometry",
+ rd_layer:"Layer",rd_profile:"Profile",rd_steps:"Steps",rd_del_layer:"Remove layer",rd_period:"Period [mm]",rd_width:"Ridge width [mm]",rd_width_ph:"= end of profile",rd_base:"Base plate [mm]",
+ rd_rotz:"Turn about z",rd_shift:"Offset [mm]",rd_gap:"Air to previous layer [mm]",rd_frac:"Area fraction",rd_h:"Height [mm]",rd_x:"x [mm]",rd_z:"z [mm]",rd_del_row:"Remove row",rd_add_row:"Add row",
+ rd_three:"three periods",rd_t_wet:"Thickness [mm water]",rd_frac_area:"Area fraction",rd_mean:"Mean thickness",rd_design:"Design spacing",rd_wet:"water",rd_delta:"Layer spacing Δ [mm water]",rd_ripple_pct:"Ripple [%]",
+ rd_energy:"Energy",rd_lat:"Extra lateral width σ",rd_lat_note:"Estimate: c(E) · √(mean thickness), calibrated on the TOPAS runs of tasks 3141 and 3176 (filter 80 cm before the isocentre); ± the spread of the calibration runs. Ripple: convolution model on the rifi0 curves of these runs, 6 layers.",
+ rd_one_layer:"A filter needs at least one layer.",rd_saved:"Saved. Selectable in the generators as variant {v}.",rd_not_saved:"This name is not in the library.",rd_deleted:"Deleted from the library."});
 Object.assign(I18N.de,{tab_beam:"Strahlprofil",bp_cases:"Fälle mit Monitoren",bp_case:"Fall",bp_planes:"Ebenen",bp_dose:"Dosis",
  bp_hint:"Fälle aus mon_<Position>_<Fall>_<p|e|o|all> in einem Ordner; Dosis aus 3D-Gittern mit dem Fallnamen. Mehrere Fälle ankreuzen, um sie zu überlagern.",
  bp_none:"Keine Monitor-Ausgaben in diesem Ordner. Monitore im Generator einschalten (Ripple-Filter, Pencil Beam) und die Fälle rechnen.",
@@ -552,8 +642,98 @@ function multiSelect(tbody,onChange){
  window.addEventListener("mouseup",()=>{if(!drag)return;drag=null;document.body.style.userSelect="";onChange()});
  tbody.addEventListener("click",e=>{if(e.target.matches("input[type=checkbox]"))e.preventDefault()});   // state is handled on mousedown
  tbody.addEventListener("keydown",e=>{if(e.key===" "&&e.target.matches("input[type=checkbox]")){e.preventDefault();e.target.checked=!e.target.checked;e.target.closest("tr").classList.toggle("sel",e.target.checked);onChange()}});}
+/* ---------- RiFi designer: periodic ripple filter definitions (rifi/v1), kernel and ripple live from /api/rifi/eval */
+const RD={list:null,def:null,res:null,seq:0};
+const rdNum=v=>{const x=parseFloat(String(v).replace(",","."));return isFinite(x)?x:0};
+const rdFmt=(x,n)=>(+x).toLocaleString(loc(),{maximumFractionDigits:n==null?3:n});
+async function rdLoad(){if(RD.list)return;RD.list=await api("/api/rifi/list",{});rdFillLoad();if(!RD.def){/* #rifi?n=NAME opens that template or library filter */const n=new URLSearchParams(location.hash.split("?")[1]||"").get("n")||"t4";
+ const all=RD.list.library.concat(RD.list.templates);rdSet(JSON.parse(JSON.stringify(all.find(d=>d.name===n)||RD.list.templates[0])))}}
+function rdFillLoad(){const s=$("rdLoad");const o=(d,g)=>`<option value="${g}:${esc(d.name)}">${esc(d.name)}${d.title?" · "+esc(d.title):""}</option>`;
+ s.innerHTML=`<option value="">…</option><optgroup label="${esc(t("rd_templates"))}">${RD.list.templates.map(d=>o(d,"t")).join("")}</optgroup>`+
+  (RD.list.library.length?`<optgroup label="${esc(t("rd_library"))}">${RD.list.library.map(d=>o(d,"l")).join("")}</optgroup>`:"")}
+function rdSet(d){RD.def=d;$("rdName").value=d.name;$("rdTitle").value=d.title||"";$("rdMat").value=d.material||"G4_PLEXIGLASS";$("rdSpr").value=d.spr;rdLayers();rdEval()}
+function rdLayerHtml(L,i){const steps=!!L.steps,rows=steps?L.steps:L.profile;
+ const cell=(k,j,c,v)=>`<td><input data-k="${k}" data-j="${j}" data-c="${c}" value="${v}" size="6" inputmode="decimal"></td>`;
+ const rot=[0,90,45].map(r=>`<option value="${r}"${+L.rotz===r?" selected":""}>${r}°</option>`).join("");
+ return `<div class="rdlayer" data-i="${i}"><div class="row"><b>${esc(t("rd_layer"))} ${i+1}</b>
+  <select data-f="kind"><option value="profile"${steps?"":" selected"}>${esc(t("rd_profile"))}</option><option value="steps"${steps?" selected":""}>${esc(t("rd_steps"))}</option></select>
+  <span class="spacer"></span>${i?`<button data-act="up">↑</button>`:""}<button data-act="del" aria-label="${esc(t("rd_del_layer"))}">✕</button></div>
+  <div class="grid2 rdgrid">
+   <label>${esc(t("rd_period"))}<input data-f="period" value="${L.period}" inputmode="decimal"></label>
+   ${steps?"":`<label>${esc(t("rd_width"))}<input data-f="width" value="${L.width!=null?L.width:""}" placeholder="${esc(t("rd_width_ph"))}" inputmode="decimal"></label>`}
+   <label>${esc(t("rd_base"))}<input data-f="base" value="${L.base||0}" inputmode="decimal"></label>
+   <label>${esc(t("rd_rotz"))}<select data-f="rotz">${rot}</select></label>
+   <label>${esc(t("rd_shift"))}<input data-f="shift" value="${L.shift||0}" inputmode="decimal"></label>
+   ${i?`<label>${esc(t("rd_gap"))}<input data-f="gap" value="${L.gap||0}" inputmode="decimal"></label>`:""}
+  </div>
+  <table class="rdpts"><thead><tr><th>${esc(t(steps?"rd_frac":"rd_x"))}</th><th>${esc(t(steps?"rd_h":"rd_z"))}</th><th></th></tr></thead><tbody>
+   ${rows.map((p,j)=>`<tr>${cell(steps?"steps":"profile",j,0,p[0])}${cell(steps?"steps":"profile",j,1,p[1])}<td><button data-act="rowdel" data-j="${j}" aria-label="${esc(t("rd_del_row"))}">−</button></td></tr>`).join("")}
+  </tbody></table><button data-act="rowadd">${esc(t("rd_add_row"))}</button></div>`}
+function rdLayers(){$("rdLayers").innerHTML=RD.def.layers.map(rdLayerHtml).join("")}
+function rdRead(){const d=RD.def;d.name=$("rdName").value.trim();d.title=$("rdTitle").value;d.material=$("rdMat").value;d.spr=rdNum($("rdSpr").value);d.schema="rifi/v1";
+ document.querySelectorAll("#rdLayers .rdlayer").forEach(el=>{const L=d.layers[+el.dataset.i];
+  el.querySelectorAll("[data-f]").forEach(f=>{const k=f.dataset.f;if(k==="kind")return;if(k==="width"){if(f.value.trim()==="")delete L.width;else L.width=rdNum(f.value);return}L[k]=rdNum(f.value)});
+  el.querySelectorAll("input[data-k]").forEach(f=>{L[f.dataset.k][+f.dataset.j][+f.dataset.c]=rdNum(f.value)});
+  if(L.profile&&L.width==null)delete L.width});return d}
+const rdEval=debounce(async()=>{const seq=++RD.seq;let r;try{r=await api("/api/rifi/eval",{def:rdRead()})}catch(e){if(seq===RD.seq){$("rdMsg").textContent=e.message;$("rdMsg").className="err"}return}
+ if(seq!==RD.seq)return;RD.res=r;$("rdMsg").textContent="";$("rdMsg").className="mute";rdDraw()},250);
+function rdConvert(L,kind){if(kind==="steps"&&L.profile){L.steps=[[0.5,0],[0.5,1]];delete L.profile;delete L.width}
+ else if(kind==="profile"&&L.steps){const p=L.period;L.profile=[[0,0],[p/2,1],[p,0]];delete L.steps}}
+function rdSvgWrap(w,h,body,label){return `<svg viewBox="0 0 ${w} ${h}" width="100%" role="img" aria-label="${esc(label)}" style="max-height:${h}px">${body}</svg>`}
+function rdAxes(w,h,m,x0,x1,y0,y1,xl,yl){const X=v=>m.l+(v-x0)/(x1-x0||1)*(w-m.l-m.r),Y=v=>h-m.b-(v-y0)/(y1-y0||1)*(h-m.t-m.b);
+ const tick=(a,b,n)=>{const s=Math.pow(10,Math.floor(Math.log10((b-a)/n||1)));const st=[1,2,5,10].map(k=>k*s).find(k=>(b-a)/k<=n)||s*10;const out=[];for(let v=Math.ceil(a/st)*st;v<=b+1e-9;v+=st)out.push(+v.toFixed(6));return out};
+ let g=`<g font-size="11" fill="var(--mute)" stroke="none">`;
+ tick(x0,x1,6).forEach(v=>g+=`<line x1="${X(v)}" x2="${X(v)}" y1="${m.t}" y2="${h-m.b}" stroke="var(--line)" stroke-width="0.5"/><text x="${X(v)}" y="${h-m.b+14}" text-anchor="middle">${rdFmt(v,2)}</text>`);
+ tick(y0,y1,4).forEach(v=>g+=`<line x1="${m.l}" x2="${w-m.r}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)" stroke-width="0.5"/><text x="${m.l-5}" y="${Y(v)+4}" text-anchor="end">${rdFmt(v,2)}</text>`);
+ g+=`<text x="${(m.l+w-m.r)/2}" y="${h-4}" text-anchor="middle">${esc(xl)}</text><text x="12" y="${(m.t+h-m.b)/2}" text-anchor="middle" transform="rotate(-90 12 ${(m.t+h-m.b)/2})">${esc(yl)}</text></g>`;
+ return {X,Y,g}}
+function rdDraw(){const r=RD.res,rs=r.ridges;
+ /* cross-section: every layer over three periods along its own stripe axis, stacked in beam order */
+ const W=640,lh=62,H=rs.length*lh+28,per=Math.max(...rs.map(q=>q.pitch)),span=3*per;let b="";
+ rs.forEach((q,i)=>{const y0=14+i*lh+lh-14,hmax=Math.max(...rs.map(s=>Math.max(...s.z)))||1,sc=(lh-22)/hmax,X=x=>70+x/span*(W-80);let path="";
+  for(let k=0;k*q.pitch<span+q.pitch;k++){const off=k*q.pitch+(q.shift%q.pitch+q.pitch)%q.pitch-q.pitch;let pts=[[off,0]];q.x.forEach((x,j)=>pts.push([off+x,q.z[j]]));pts.push([off+q.width,0]);
+   path+=`<polygon points="${pts.map(p=>`${X(Math.max(0,Math.min(span,p[0]))).toFixed(1)},${(y0-p[1]*sc).toFixed(1)}`).join(" ")}" fill="${PAL[i%PAL.length]}" fill-opacity="0.55" stroke="${PAL[i%PAL.length]}" stroke-width="1"/>`}
+  b+=`<line x1="70" x2="${W-10}" y1="${y0}" y2="${y0}" stroke="var(--line)"/>${path}<text x="4" y="${y0-4}" font-size="11" fill="var(--ink)">${esc(t("rd_layer"))} ${i+1}</text><text x="4" y="${y0+9}" font-size="10" fill="var(--mute)">${q.rotz}° · ${rdFmt(Math.max(...q.z),2)} mm</text>`});
+ b+=`<text x="${W-10}" y="${H-4}" font-size="11" text-anchor="end" fill="var(--mute)">${esc(t("rd_three"))}: ${rdFmt(span,2)} mm</text>`;
+ $("rdCross").innerHTML=rdSvgWrap(W,H,b,t("rd_section"));
+ /* kernel histogram in mm water */
+ const kn=r.kernel,tmax=Math.max(...kn.map(k=>k[0]))+0.1,tmin=Math.min(0,...kn.map(k=>k[0])),wmax=Math.max(...kn.map(k=>k[1]));
+ let A=rdAxes(W,200,{l:52,r:10,t:8,b:30},tmin,tmax,0,wmax*1.1,t("rd_t_wet"),t("rd_frac_area"));let bars="";const bw=Math.max(1,A.X(0.05)-A.X(0)-0.5);
+ kn.forEach(k=>{if(k[1]>0)bars+=`<rect x="${(A.X(k[0]-0.025)).toFixed(1)}" y="${A.Y(k[1]).toFixed(1)}" width="${bw.toFixed(1)}" height="${(A.Y(0)-A.Y(k[1])).toFixed(1)}" fill="${PAL[0]}"><title>${rdFmt(k[0],2)} mm: ${rdFmt(100*k[1],2)} %</title></rect>`});
+ bars+=`<line x1="${A.X(r.mean)}" x2="${A.X(r.mean)}" y1="8" y2="170" stroke="var(--ink)" stroke-dasharray="4 3"/>`;
+ $("rdKern").innerHTML=rdSvgWrap(W,200,A.g+bars,t("rd_kernel"));
+ $("rdStats").innerHTML=`${esc(t("rd_mean"))} <b>${rdFmt(r.mean)}</b> mm · σ<sub>t</sub> <b>${rdFmt(r.sigma)}</b> mm · ${esc(t("rd_design"))} Δ <b>${rdFmt(r.design,2)}</b> mm (${esc(t("rd_wet"))})`;
+ /* ripple against layer spacing, one line per reference energy */
+ const es=Object.keys(r.ripple).sort((a,c)=>a-c),ys=[];es.forEach(e=>r.ripple[e].filter.forEach(v=>v!=null&&ys.push(v)));const ymax=Math.min(40,Math.max(5,...ys));
+ A=rdAxes(W,230,{l:52,r:90,t:8,b:30},r.deltas[0],r.deltas[r.deltas.length-1],0,ymax,t("rd_delta"),t("rd_ripple_pct"));let ln="";
+ es.forEach((e,i)=>{const pts=r.deltas.map((d,j)=>[d,r.ripple[e].filter[j]]).filter(p=>p[1]!=null);
+  ln+=`<polyline fill="none" stroke="${PAL[i]}" stroke-width="2" points="${pts.map(p=>`${A.X(p[0]).toFixed(1)},${A.Y(Math.min(ymax,p[1])).toFixed(1)}`).join(" ")}"/>`;
+  const last=pts[pts.length-1];if(last)ln+=`<text x="${A.X(last[0])+6}" y="${A.Y(Math.min(ymax,last[1]))+4}" font-size="11" fill="${PAL[i]}">${e} MeV</text>`});
+ if(r.design>=r.deltas[0]&&r.design<=r.deltas[r.deltas.length-1])ln+=`<line x1="${A.X(r.design)}" x2="${A.X(r.design)}" y1="8" y2="200" stroke="var(--ink)" stroke-dasharray="4 3"/><text x="${A.X(r.design)+4}" y="20" font-size="11" fill="var(--ink)">${esc(t("rd_design"))}</text>`;
+ $("rdRip").innerHTML=rdSvgWrap(W,230,A.g+ln,t("rd_ripple"));
+ $("rdLat").innerHTML=`<table><thead><tr><th>${esc(t("rd_energy"))}</th>${es.map(e=>`<th>${e} MeV</th>`).join("")}</tr></thead><tbody><tr><td>${esc(t("rd_lat"))}</td>${es.map(e=>`<td>${rdFmt(r.lateral[e],2)} mm ± ${rdFmt(100*r.lateral_spread[e],0)} %</td>`).join("")}</tr></tbody></table><p class="mute" style="font-size:13px">${esc(t("rd_lat_note"))}</p>`;
+ $("rdHints").innerHTML=r.hints.map(h=>`<li class="${h.level}">${esc(h[LANG]||h.en)}</li>`).join("");
+ $("rdTopas").textContent=r.topas}
+function rdInit(){
+ $("rdLoad").addEventListener("change",e=>{const v=e.target.value;if(!v)return;const [g,n]=[v[0],v.slice(2)];const src=g==="t"?RD.list.templates:RD.list.library;const d=src.find(x=>x.name===n);if(d)rdSet(JSON.parse(JSON.stringify(d)));e.target.value=""});
+ ["rdName","rdTitle","rdSpr"].forEach(id=>$(id).addEventListener("input",rdEval));$("rdMat").addEventListener("change",()=>{$("rdSpr").value=$("rdMat").value==="G4_WATER"?1:1.16;rdEval()});
+ $("rdLayers").addEventListener("input",e=>{if(e.target.matches("input"))rdEval()});
+ $("rdLayers").addEventListener("change",e=>{const el=e.target.closest(".rdlayer");if(!el)return;rdRead();const L=RD.def.layers[+el.dataset.i];
+  if(e.target.dataset.f==="kind"){rdConvert(L,e.target.value);rdLayers()}rdEval()});
+ $("rdLayers").addEventListener("click",e=>{const b=e.target.closest("button[data-act]");if(!b)return;rdRead();const el=b.closest(".rdlayer"),i=+el.dataset.i,L=RD.def.layers[i],rows=L.steps||L.profile,a=b.dataset.act;
+  if(a==="del"){if(RD.def.layers.length<2){toast(t("rd_one_layer"),"err");return}RD.def.layers.splice(i,1)}
+  if(a==="up"){const x=RD.def.layers.splice(i,1)[0];RD.def.layers.splice(i-1,0,x)}
+  if(a==="rowdel"&&rows.length>2)rows.splice(+b.dataset.j,1);
+  if(a==="rowadd"){const l=rows[rows.length-1];rows.push(L.steps?[0,l[1]]:[+(l[0]+0.1).toFixed(3),0])}
+  rdLayers();rdEval()});
+ $("rdNewLayer").addEventListener("click",()=>{rdRead();const p=RD.def.layers[0]?RD.def.layers[0].period:1.5;RD.def.layers.push({period:p,base:0,rotz:90,shift:0,gap:5,steps:[[0.5,0],[0.5,1]]});rdLayers();rdEval()});
+ $("rdSave").addEventListener("click",async()=>{const r=await api("/api/rifi/save",{def:rdRead()});RD.list=null;await rdLoad();toast(t("rd_saved").replace("{v}",r.variant))});
+ armed($("rdDel"),async()=>{const n=$("rdName").value.trim();if(!RD.list.library.some(d=>d.name===n)){toast(t("rd_not_saved"),"err");return}await api("/api/rifi/delete",{name:n});RD.list=null;await rdLoad();toast(t("rd_deleted"))});
+ $("rdSvg").addEventListener("click",async()=>{const r=await api("/api/rifi/svg",{def:rdRead()});
+  r.files.forEach(f=>{const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([f.svg],{type:"image/svg+xml"}));a.download=f.name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1000)})})}
+rdInit();
 /* ---------- navigation: tabs, address (deep links, back and forward), keyboard shortcuts */
-const TABS=["files","gen","run","explorer","results","beam","machines","settings"];
+const TABS=["files","gen","run","explorer","results","beam","machines","letd","rifi","settings"];
 let CUR=null,ROUTED="";
 const isTab=id=>CUR===id;
 function tabHash(id){const p=new URLSearchParams();if(id==="results")RS.pick.forEach(f=>p.append("f",f));if(id==="files"&&FM.file)p.set("p",FM.file);if(id==="beam"&&BP.scan){if(BP.folder)p.set("p",BP.folder);p.set("v",$("bpView").value);BP.sel.forEach(c=>p.append("c",c))}const q=p.toString();return "#"+id+(q?"?"+q:"")}
@@ -561,7 +741,7 @@ function syncHash(push){if(!CUR)return;const h=tabHash(CUR);if(location.hash===h
 function showTab(id,opt){opt=opt||{};if(!TABS.includes(id))id="files";const changed=CUR!==id;CUR=id;
  document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id===id));document.querySelectorAll("nav [role=tab]").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===id));store("tab",id);
  if(!opt.fromHash)syncHash(changed&&!opt.replace);
- if(id==="files"&&!opt.noload)fmLoad(FM.path);if(id==="run"){loadParams();renderQueue(true);showJob(true)}if(id==="results"){resLoad(RS.path);loadViews()}if(id==="explorer")exLoad(false);if(id==="gen")loadGens();if(id==="beam")bpLoad(false);if(id==="machines"&&!MC.loaded)mcLoad(null);if(id==="settings")loadSettings();
+ if(id==="files"&&!opt.noload)fmLoad(FM.path);if(id==="run"){loadParams();renderQueue(true);showJob(true)}if(id==="results"){resLoad(RS.path);loadViews()}if(id==="explorer")exLoad(false);if(id==="gen")loadGens();if(id==="beam")bpLoad(false);if(id==="machines"&&!MC.loaded)mcLoad(null);if(id==="settings")loadSettings();if(id==="letd")ltLoad();if(id==="rifi")rdLoad();
  if(changed&&id==="run")poll();}
 /* #run, #results?f=a.csv&f=b.csv, #files?p=dir/case.txt */
 function routeFromHash(){const h=location.hash;if(!h||h===ROUTED)return !!h&&TABS.includes(h.slice(1).split("?")[0]);ROUTED=h;
@@ -575,14 +755,14 @@ document.querySelectorAll("nav [role=tab]").forEach(b=>b.onclick=()=>showTab(b.d
 $("runBadge").onclick=()=>showTab("run");
 const FILTER_OF={files:"fmName",gen:"genSel",run:"rfFilter",explorer:"exQ",results:"resFilter",beam:"bpFilter",settings:"excBox"};
 function helpOpen(){const k=a=>a.map(x=>`<kbd>${esc(x)}</kbd>`).join(" "),de=LANG==="de";
- $("helpBody").innerHTML=[[k(["1"])+" … "+k(["8"])+" "+(de?"oder":"or")+" "+k(["Alt+1"])+" … "+k(["Alt+8"]),t("k_tabs")],[k(["/"]),t("k_filter")],[k([(de?"Strg":"Ctrl")+"+S"]),t("k_save")],
+ $("helpBody").innerHTML=[[k(["1"])+" … "+k(["9"])+", "+k(["0"])+" "+(de?"oder":"or")+" "+k(["Alt+1"])+" … "+k(["Alt+0"]),t("k_tabs")],[k(["/"]),t("k_filter")],[k([(de?"Strg":"Ctrl")+"+S"]),t("k_save")],
   [k([(de?"Umschalt+Klick":"Shift+click")]),t("k_range")],[k(["?"]),t("k_help")],[k(["Esc"]),t("k_esc")]].map(([a,b])=>`<tr><td>${a}</td><td>${esc(b)}</td></tr>`).join("")+
   `<tr><td colspan="2" class="mute">${esc(t("k_back"))}</td></tr>`;$("help").hidden=false;$("helpClose").focus()}
 function helpClose(){$("help").hidden=true}
 $("helpBtn").onclick=helpOpen;$("helpClose").onclick=helpClose;$("help").onclick=e=>{if(e.target.id==="help")helpClose()};
 document.addEventListener("keydown",e=>{const typing=e.target&&e.target.closest&&e.target.closest("input,textarea,select,[contenteditable]");
- const m=/^Digit([1-8])$/.exec(e.code||"");
- if(m&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey&&(e.altKey||!typing)&&$("lightbox").hidden&&$("help").hidden){e.preventDefault();showTab(TABS[+m[1]-1]);return}
+ const m=/^Digit([0-9])$/.exec(e.code||"");
+ if(m&&!e.ctrlKey&&!e.metaKey&&!e.shiftKey&&(e.altKey||!typing)&&$("lightbox").hidden&&$("help").hidden){e.preventDefault();showTab(TABS[(+m[1]+9)%10]);return}
  if(e.key==="Escape"&&!$("help").hidden){helpClose();return}
  if(typing||e.ctrlKey||e.metaKey||e.altKey)return;
  if(e.key==="?"){e.preventDefault();$("help").hidden?helpOpen():helpClose();return}
@@ -745,12 +925,13 @@ async function refreshJobs(){const hist=Q.show==="failed"?5000:Q.more+5;const j=
  const aw=j.awake||{};$("awakeBadge").hidden=!aw.active;$("awakeBadge").textContent="☕ "+t("awake_badge");$("awakeBadge").title=aw.method||"";
  $("awakeMsg").textContent=aw.active?`${t("awake_on")} (${aw.method})`:aw.error?`${t("error")}: ${aw.error}`:"";
  const run=j.jobs.find(x=>x.status==="running"),wait=j.jobs.filter(x=>x.status==="queued").length;
+ const held=j.jobs.filter(x=>x.status==="held").length;$("qRelease").hidden=!held;$("qRelease").textContent=t("q_release_all").replace("{n}",held);
  const qe=j.queue_eta;const etaTxt=qe&&(run||wait)?`${t("q_rest")} ≈ ${fmtDur(qe.seconds)}, ${t("q_finish")} ${qe.finish}${qe.unknown?` (${qe.unknown} ${t("q_unknown")})`:""}`:(run||wait)?t("q_eta_wait"):"";
  $("qEta").textContent=etaTxt?"· "+etaTxt:"";
  $("runBadge").hidden=!run&&!wait;$("runBadge").textContent=(run?`▶ ${run.file.split("/").pop()}${run.progress!=null?" "+Math.round(run.progress*100)+" %":""}`:`${t("st_queued")}: ${wait}`)+(qe&&(run||wait)?` · ${t("q_finish")} ${qe.finish}`:"");
  $("runBadge").title=(run?`${t("running_badge")}: ${run.file} (+${wait})\n`:"")+etaTxt;
  const n=(run?1:0)+wait+(j.external||[]).length;$("runCnt").hidden=!n;$("runCnt").textContent=n;
- const fin=j.finished!=null?j.finished:j.jobs.filter(x=>x.status!=="queued"&&x.status!=="running").length;
+ const fin=j.finished!=null?j.finished:j.jobs.filter(x=>x.status!=="queued"&&x.status!=="running"&&x.status!=="held").length;
  if(Q.fin!=null&&fin!==Q.fin){RS.gen++;EX.dirty=true;if(isTab("run")&&RF.loaded)loadParams(true);if(isTab("explorer"))exLoad(true,true);if(isTab("results")&&RS.pick.length)loadPlot()}  // a run finished: results and last-run columns change
  Q.fin=fin;
  if(isTab("run")){renderQueue();await showJob()}}
@@ -759,15 +940,16 @@ function jobTime(x){return x.status==="running"?(x.progress!=null?`<span class="
 /* the note of a job that a server restart re-queued or gave up; an unknown note of a newer server shows as it is */
 function jobNote(x){return x.restarts?t(x.status==="aborted"?"note_aborted":"note_requeued"):x.note||""}
 function jobRow(x){const rm=esc(t("remove_job")),rq=esc(t("requeue"));
- const acts=x.status==="queued"?`<button type="button" class="rowact" data-deq="${x.id}" title="${rm}" aria-label="${rm}">✕</button>`:x.status==="running"?"":
+ const st=esc(t("release_job"));
+ const acts=x.status==="held"?`<button type="button" class="rowact" data-release="${x.id}" title="${st}">▶ ${st}</button><button type="button" class="rowact" data-deq="${x.id}" title="${rm}" aria-label="${rm}">✕</button>`:x.status==="queued"?`<button type="button" class="rowact" data-deq="${x.id}" title="${rm}" aria-label="${rm}">✕</button>`:x.status==="running"?"":
   ((x.outputs||[]).some(o=>DATAEXT.test(o))?`<button type="button" class="rowact" data-plotjob="${x.id}">${esc(t("plot_short"))}</button>`:"")+`<button type="button" class="rowact" data-requeue="${x.id}" title="${rq}" aria-label="${rq}">↻</button>`;
  return `<tr data-id="${x.id}" class="${Q.sel===x.id?"sel":""}" style="cursor:pointer"><td>${x.id}</td><td class="f" title="${esc(x.file)}${x.subdir?" → "+esc(x.subdir):""}${jobNote(x)?" · "+esc(jobNote(x)):""}">${pathHtml(x.file)}${x.subdir?` <span class="mute">→ ${esc(x.subdir)}</span>`:""}${jobNote(x)?` <span class="mute">· ${esc(jobNote(x))}</span>`:""}</td><td>${esc(x.binary)}</td><td class="st-${x.status}">${t("st_"+x.status)}</td><td class="mute">${jobTime(x)}</td><td class="acts">${acts}</td></tr>`}
 const moreRow=(n,k)=>`<tr class="more"><td colspan="6"><button type="button" data-${k}="1">${esc(t("show_more").replace("{n}",n))}</button></td></tr>`;
 function extRow(x){return `<tr class="ext" title="${esc(t("ext_title"))} · PID ${x.pid}"><td class="mute">–</td><td class="f" title="${esc(x.file||x.cwd)}">${pathHtml(x.file||x.cwd)}</td><td>${esc(x.program)}</td><td class="st-running">${t("st_external")}</td><td class="mute">${x.elapsed!=null?fmtDur(x.elapsed):""}</td><td></td></tr>`}
 function setBody(id,html,force){if(force||Q.html[id]!==html){Q.html[id]=html;$(id).innerHTML=html}}
 function renderQueue(force){const j=JOBS;if(!j||!isTab("run"))return;
- const running=j.jobs.filter(x=>x.status==="running"),waiting=j.jobs.filter(x=>x.status==="queued");
- let fin=j.jobs.filter(x=>x.status!=="running"&&x.status!=="queued").reverse();if(Q.show==="failed")fin=fin.filter(x=>FAILED.includes(x.status));
+ const running=j.jobs.filter(x=>x.status==="running"),waiting=j.jobs.filter(x=>x.status==="queued"||x.status==="held");
+ let fin=j.jobs.filter(x=>x.status!=="running"&&x.status!=="queued"&&x.status!=="held").reverse();if(Q.show==="failed")fin=fin.filter(x=>FAILED.includes(x.status));
  const ext=j.external||[],act=running.length||waiting.length||ext.length;
  setBody("qRun",act?sec(`${t("q_active")} · ${t("q_n_active").replace("{r}",running.length+ext.length).replace("{w}",waiting.length)}`)+running.map(jobRow).join("")+ext.map(extRow).join(""):"",force);
  const ws=Math.min(Q.moreWait,waiting.length);
@@ -780,8 +962,9 @@ function renderQueue(force){const j=JOBS;if(!j||!isTab("run"))return;
 const jobById=id=>JOBS&&JOBS.jobs.find(x=>x.id===id);
 async function requeue(x){const j=await api("/api/enqueue",{files:[x.file],binary:x.binary,subdir:x.subdir||"",skip:false});if(j.added.length)toast(`${x.file.split("/").pop()}: ${t("requeued")}`,"ok");poll()}
 $("qTable").addEventListener("click",async e=>{const b=e.target.closest("button");
- if(b){e.stopPropagation();const x=jobById(+(b.dataset.deq||b.dataset.requeue||b.dataset.plotjob));
+ if(b){e.stopPropagation();const x=jobById(+(b.dataset.deq||b.dataset.requeue||b.dataset.plotjob||b.dataset.release));
   if(b.dataset.more){Q.more+=100;poll()}else if(b.dataset.morewait){Q.moreWait+=200;renderQueue()}else if(b.dataset.deq){await api("/api/dequeue",{ids:[+b.dataset.deq]});poll()}
+  else if(b.dataset.release){await api("/api/release",{ids:[+b.dataset.release]});poll()}
   else if(b.dataset.requeue&&x)await requeue(x);else if(b.dataset.plotjob&&x)plotPaths(x.outputs.filter(o=>DATAEXT.test(o)));return}
  const tr=e.target.closest("tr[data-id]");if(tr){Q.sel=+tr.dataset.id;renderQueue(true);showJob(true)}});
 /* log, hints, and actions of the selected job (or the running one); a finished job's log is fetched once */
@@ -812,6 +995,7 @@ function renderLive(run){const box=$("liveBox");if(!run||!run.live){box.hidden=t
 const ERRL=/(\berror\b|exception|quitting|exiting|segmentation|abort|unknown parameter)/i,WRNL=/\bwarning\b|WWWW/i;
 function colorLog(txt){return txt.split("\n").map(l=>ERRL.test(l)&&!/not necessarily an error/i.test(l)?`<span class="log-err">${esc(l)}</span>`:WRNL.test(l)?`<span class="log-wrn">${esc(l)}</span>`:esc(l)).join("\n")}
 armed($("qStop"),async()=>{await api("/api/stop",{});poll()});
+$("qRelease").onclick=async()=>{await api("/api/release",{all:true});poll()};
 armed($("qRemove"),async()=>{const j=await api("/api/dequeue",{all:true});toast(t("removed_n").replace("{n}",j.removed||0),"ok");poll()});
 armed($("qClear"),async()=>{await api("/api/clearhistory",{});Q.sel=null;Q.more=30;poll()});
 
@@ -1345,6 +1529,7 @@ for(const id of ["mcView","mcCmp","mcNorm"])if(recall(id)&&[...$(id).options].so
 let GENS=[];
 async function loadGens(){GENS=await api("/api/generators");const s=$("genSel"),cur=s.value;s.innerHTML="";GENS.forEach(g=>s.add(new Option(L(g.name),g.id)));if(cur)s.value=cur;renderGen()}
 function renderGen(){const g=GENS.find(x=>x.id===$("genSel").value);if(!g){$("genForm").innerHTML="";return}$("genDesc").textContent=L(g.description)||"";
+ $("genBackendL").hidden=!g.fluka;if(!g.fluka)$("genBackend").value="topas";else $("genBackend").value=recall("genBackend")||"topas";
  if(!$("genFolder").value)$("genFolder").value=recall("genFolder")||"";
  $("genForm").innerHTML=g.fields.map(f=>{const lab=esc(L(f.label)),id="gf_"+f.key;
   if(f.type==="select")return `<label>${lab}<select id="${id}">${f.options.map(([v,n])=>`<option value="${esc(v)}" ${v==f.default?"selected":""}>${esc(L(n))}</option>`).join("")}</select></label>`;
@@ -1352,21 +1537,26 @@ function renderGen(){const g=GENS.find(x=>x.id===$("genSel").value);if(!g){$("ge
   if(f.type==="bool")return `<label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="${id}" ${f.default?"checked":""}> ${lab}</label>`;
   return `<label>${lab}<input id="${id}" value="${esc(f.default??"")}" ${f.type==="number"?'inputmode="decimal"':""}></label>`}).join("")}
 $("genSel").onchange=renderGen;
+$("genBackend").onchange=()=>store("genBackend",$("genBackend").value);
 function genValues(){const g=GENS.find(x=>x.id===$("genSel").value),v={};for(const f of g.fields){const id="gf_"+f.key;
  if(f.type==="multi")v[f.key]=[...document.querySelectorAll(`input[name="${id}"]:checked`)].map(e=>e.value);else if(f.type==="bool")v[f.key]=$(id).checked;else if(f.type==="number")v[f.key]=parseFloat($(id).value.replace(",","."));else v[f.key]=$(id).value}return v}
-async function gen(preview){store("genFolder",$("genFolder").value);$("genToRuns").hidden=true;const folder=$("genFolder").value.trim().replace(/^\/+|\/+$/g,"");
- try{const j=await api("/api/generate",{id:$("genSel").value,values:genValues(),folder,overwrite:$("genOver").checked,preview});
+async function gen(preview){store("genFolder",$("genFolder").value);store("genBackend",$("genBackend").value);$("genToRuns").hidden=true;$("genToQueue").hidden=true;const folder=$("genFolder").value.trim().replace(/^\/+|\/+$/g,"");
+ try{const j=await api("/api/generate",{id:$("genSel").value,values:genValues(),folder,overwrite:$("genOver").checked,preview,backend:$("genBackend").value});
  if(preview){$("genOut").textContent=j.names.join("  ")+"\n\n"+j.example;$("genMsg").textContent=`${j.names.length} ${LANG==="de"?"Dateien":"files"}`}
  else{$("genMsg").textContent=`${j.written.length} ${t("created")}, ${j.skipped.length} ${t("skipped")}`;$("genOut").textContent=j.written.join("\n");
   /* the usual next step: select the new cases in Runs (skipped ones too, they may not have run yet) */
-  const cases=j.written.concat(j.skipped).filter(n=>n.endsWith(".txt")).map(n=>join(folder,n));
-  if(cases.length){const b=$("genToRuns");b.hidden=false;b.textContent=t("gen_to_runs").replace("{n}",cases.length);b.onclick=()=>goRunsWith(cases,folder)}}}catch(e){$("genMsg").textContent=t("error")+": "+e.message}}
+  const cases=j.written.concat(j.skipped).filter(n=>n.endsWith(".txt")&&n!=="FLUKA_not_written.txt").map(n=>join(folder,n));
+  if(cases.length){const b=$("genToRuns");b.hidden=false;b.textContent=t("gen_to_runs").replace("{n}",cases.length);b.onclick=()=>goRunsWith(cases,folder)}
+  /* FLUKA inputs go to the queue held: FLUKA runs only after its user presses Start there */
+  const inps=j.written.concat(j.skipped).filter(n=>n.endsWith(".inp")).map(n=>join(folder,n));
+  if(inps.length){const b=$("genToQueue");b.hidden=false;b.textContent=t("gen_to_queue").replace("{n}",inps.length);
+   b.onclick=async()=>{const r=await api("/api/enqueue",{files:inps,binary:"FLUKA",subdir:"",skip:false});toast(t("gen_queued_held").replace("{n}",r.added.length),"ok");b.hidden=true;poll()}}}}catch(e){$("genMsg").textContent=t("error")+": "+e.message}}
 $("genPrev").onclick=()=>gen(true);$("genMake").onclick=()=>gen(false);
 
 /* ---------- settings */
 async function loadSettings(){await loadInfo(true);const inc=new Set(INFO.cfg.include||[]);
  $("incBox").innerHTML=(INFO.folders||[]).map(f=>`<label><input type="checkbox" value="${esc(f)}" ${inc.has(f)?"checked":""}> ${esc(f)}</label>`).join("")||`<span class="mute">–</span>`;
- $("excBox").value=(INFO.cfg.exclude||INFO.default_exclude).join("\n");$("setToast").checked=INFO.cfg.toast!==false;$("setAwake").checked=INFO.cfg.keep_awake!==false;$("setDisplay").checked=INFO.cfg.keep_display===true;$("setRoot").textContent=INFO.root;$("ver").textContent=INFO.version;renderBins(INFO.cfg.binaries)}
+ $("excBox").value=(INFO.cfg.exclude||INFO.default_exclude).join("\n");$("setToast").checked=INFO.cfg.toast!==false;$("setAwake").checked=INFO.cfg.keep_awake!==false;$("setDisplay").checked=INFO.cfg.keep_display===true;$("setRoot").textContent=INFO.root;$("setFluka").value=INFO.cfg.fluka_dir||"";$("setFluka").placeholder=INFO.fluka_dir_default||"";$("ver").textContent=INFO.version;renderBins(INFO.cfg.binaries)}
 function renderBins(bins){$("binList").innerHTML=bins.map((b,i)=>`<div class="card" style="margin-bottom:10px" data-i="${i}"><div class="grid2">
  <label>${t("bin_name")}<input class="bn" value="${esc(b.name)}"></label><label>${t("bin_cmd")}<input class="bc" value="${esc(b.cmd)}"></label>
  <label style="grid-column:1/-1">${t("bin_env")}<textarea class="be" style="min-height:60px">${esc(Object.entries(b.env||{}).map(([k,v])=>k+"="+v).join("\n"))}</textarea></label></div>
@@ -1376,11 +1566,110 @@ function readBins(){return [...$("binList").querySelectorAll("[data-i]")].map(d=
  env:Object.fromEntries(d.querySelector(".be").value.split("\n").map(l=>l.trim()).filter(l=>l.includes("=")).map(l=>[l.slice(0,l.indexOf("=")).trim(),l.slice(l.indexOf("=")+1).trim()]))}))}
 $("scanSave").onclick=async()=>{const include=[...$("incBox").querySelectorAll("input:checked")].map(c=>c.value),exclude=$("excBox").value.split("\n").map(x=>x.trim()).filter(Boolean);
  try{await api("/api/config",{include,exclude});$("scanMsg").textContent=t("saved");RF.files=[];RF.loaded=false;NAMES.loaded=false;EX.loaded=false;EX.items=[];INFO_AT=0}catch(e){$("scanMsg").textContent=t("error")+": "+e.message}};
+$("flukaSave").onclick=async()=>{try{await api("/api/config",{fluka_dir:$("setFluka").value.trim()});$("flukaMsg").textContent=t("saved")}catch(e){$("flukaMsg").textContent=t("error")+": "+e.message}};
 $("setAwake").onchange=e=>api("/api/config",{keep_awake:e.target.checked}).then(()=>poll());
 $("setDisplay").onchange=e=>api("/api/config",{keep_display:e.target.checked}).then(()=>poll());
 $("binAdd").onclick=()=>renderBins(readBins().concat([{name:"",cmd:"",env:{}}]));
 $("binDetect").onclick=()=>{const have=readBins();for(const d of INFO.detected)if(!have.some(b=>b.cmd===d.cmd))have.push(d);renderBins(have)};
 $("binSave").onclick=async()=>{try{await api("/api/config",{binaries:readBins()});$("binMsg").textContent=t("saved");await loadInfo()}catch(e){$("binMsg").textContent=t("error")+": "+e.message}};
+
+/* ---------- LETd on MRI: one form for tools/mrt_overlay/run.sh; values are kept by the server (config.json) */
+Object.assign(I18N.de,{tab_letd:"LETd auf MRT",lt_title:"LETd-Ebene auf den Verlaufs-MRTs",
+ lt_intro:"Legt LETd, Dosis und den 4-mm-Ventrikelsaum aus einem plan_mc-Lauf auf die MRTs des Verlaufs-Viewers und erzeugt Verlauf.html neu. Nur Anzeige zur Forschung, keine Diagnose. Die Pfade bleiben auf diesem Rechner; die Werte vom letzten Mal sind vorbelegt.",
+ lt_f_mrt:"MRT-Bilder-Ordner",lt_h_mrt:"Darin werden cacheF, Verlauf-Daten und build_page.py gesucht.",lt_derive:"Pfade suchen",
+ lt_f_run:"plan_mc-Lauf",lt_h_run:"Ordner mit letd.npy, rbe_dose_1_1.npy und rbe_dose_1_1.dcm",lt_f_ct:"Planungs-CT",lt_h_ct:"DICOM-Ordner oder NIfTI",
+ lt_f_rs:"RT Structure Set",lt_h_rs:"Datei; ohne sie gibt es kein PTV, und die Verschreibung muss angegeben sein",lt_f_cache:"cacheF des Viewers",lt_h_cache:"mit ref_t1.nii.gz und log.json",
+ lt_f_view:"Verlauf-Daten",lt_h_view:"hier landen letd_all.js, marks_all.js, letd.json",lt_f_page:"build_page.py",lt_h_page:"erzeugt danach Verlauf.html neu",
+ lt_f_rx:"Verschreibung Gy(RBE)",lt_h_rx:"leer: Median der 1,1-Dosis im PTV",lt_f_fx:"Fraktionen",lt_h_fx:"der plan_mc-Lauf rechnet eine Fraktion; die Dosis-Ebenen zeigen die Summe",lt_f_out:"Ausgabeordner",lt_h_out:"Ergebnisse aus deinem Plan gehören in die Zone lokal des Arbeitsordners",
+ lt_f_kz:"Kennzahlen-Datei",lt_h_kz:"nur Zahlen, eine kennzahlen.json in der Zone robin",lt_f_synthseg:"Ventrikelsaum mit SynthSeg",lt_h_synthseg:"braucht etwa 10 GB Speicher in WSL und einige Minuten",
+ lt_f_build:"Verlauf.html danach neu erzeugen",lt_h_build:"mit build_page.py, damit die Ebene gleich im Verlauf erscheint",lt_optional:"optional",lt_check:"Prüfen",lt_start:"Starten",lt_stop:"Stoppen",lt_log:"Protokoll",lt_result:"Ergebnis",
+ lt_exam:"Untersuchung",lt_native:"Raster mm",lt_suitable:"geeignet",lt_check_rms:"Abweichung RMS mm",lt_check_ok:"unter 1,5 mm",lt_look:"Hinschau-Liste",lt_look_none:"Keine Region über den Schwellen.",
+ lt_open:"Verlauf.html öffnen",lt_ok:"Alle Pfade passen.",lt_bad:"Bitte die markierten Felder prüfen.",lt_found:"Gefunden: {n} von 3.",lt_none_found:"Nichts gefunden, bitte selbst eintragen.",
+ lt_running:"läuft",lt_done:"fertig",lt_failed:"fehlgeschlagen",lt_stopped:"gestoppt",lt_elapsed:"Laufzeit",lt_exam_n:"Untersuchung {i} von {n}",lt_out_at:"Ausgabe",
+ lt_reg:"Registrierung CT auf MRT: Streuung {s} mm",lt_rx:"Verschreibung {v} Gy(RBE) ({f})",lt_regions:"{n} Regionen, zusammen {v} ml",lt_region1:"1 Region, {v} ml",lt_noscript:"run.sh fehlt in dieser Installation.",
+ lt_s_check:"Prüfen",lt_s_export:"Export",lt_s_synthseg:"SynthSeg",lt_s_register:"Registrierung",lt_s_exams:"Untersuchungen",lt_s_write:"Schreiben",lt_s_page:"Verlauf.html",
+ lt_m_empty:"Pflichtfeld.",lt_m_not_found:"Nicht gefunden.",lt_m_missing:"Es fehlt: {0}",lt_m_no_dicom:"Keine DICOM-Dateien im Ordner.",lt_m_number:"Eine Zahl über 0.",
+ lt_m_rx_or_rs:"Ohne RT Structure Set bitte die Verschreibung angeben.",lt_m_public_zone:"Liegt in workspace/offen. Ergebnisse aus deinem Plan dürfen nicht in den öffentlichen Teil.",
+ lt_m_json:"Eine .json-Datei.",lt_m_no_script:"run.sh fehlt: {0}",lt_m_synthseg_missing:"SynthSeg nicht gefunden: der Lauf geht ohne Ventrikelsaum.",
+ lt_m_synthseg_memory:"WSL hat {0} GB, SynthSeg braucht etwa {1} GB.",lt_m_out_exists:"Der Ordner hat schon ein Ergebnis; es wird überschrieben.",lt_m_server_restart:"Der Server wurde während des Laufs beendet."});
+Object.assign(I18N.en,{tab_letd:"LETd on MRI",lt_title:"LETd layer on the follow-up MRIs",
+ lt_intro:"Puts LETd, dose and the 4 mm ventricle margin of a plan_mc run onto the MRIs of the follow-up viewer and rebuilds Verlauf.html. A research display, no diagnosis. The paths stay on this computer; the values of the last run are filled in.",
+ lt_f_mrt:"MRI images folder",lt_h_mrt:"cacheF, Verlauf-Daten and build_page.py are looked up in it.",lt_derive:"Find paths",
+ lt_f_run:"plan_mc run",lt_h_run:"folder with letd.npy, rbe_dose_1_1.npy and rbe_dose_1_1.dcm",lt_f_ct:"Planning CT",lt_h_ct:"DICOM folder or NIfTI",
+ lt_f_rs:"RT Structure Set",lt_h_rs:"file; without it there is no PTV, and the prescription must be given",lt_f_cache:"Viewer cacheF",lt_h_cache:"with ref_t1.nii.gz and log.json",
+ lt_f_view:"Verlauf-Daten",lt_h_view:"letd_all.js, marks_all.js, letd.json are written here",lt_f_page:"build_page.py",lt_h_page:"rebuilds Verlauf.html afterwards",
+ lt_f_rx:"Prescription Gy(RBE)",lt_h_rx:"empty: median 1.1 dose in the PTV",lt_f_fx:"Fractions",lt_h_fx:"the plan_mc run computes one fraction; the dose layers show the total",lt_f_out:"Output folder",lt_h_out:"results from your plan belong in the workspace zone lokal",
+ lt_f_kz:"Key figures file",lt_h_kz:"numbers only, a kennzahlen.json in the zone robin",lt_f_synthseg:"Ventricle margin with SynthSeg",lt_h_synthseg:"needs about 10 GB of memory in WSL and a few minutes",
+ lt_f_build:"Rebuild Verlauf.html afterwards",lt_h_build:"with build_page.py, so that the layer shows in the viewer at once",lt_optional:"optional",lt_check:"Check",lt_start:"Start",lt_stop:"Stop",lt_log:"Log",lt_result:"Result",
+ lt_exam:"Exam",lt_native:"Grid mm",lt_suitable:"suitable",lt_check_rms:"Offset RMS mm",lt_check_ok:"below 1.5 mm",lt_look:"Look list",lt_look_none:"No region above the thresholds.",
+ lt_open:"Open Verlauf.html",lt_ok:"All paths fit.",lt_bad:"Please check the marked fields.",lt_found:"Found: {n} of 3.",lt_none_found:"Nothing found, please enter them.",
+ lt_running:"running",lt_done:"done",lt_failed:"failed",lt_stopped:"stopped",lt_elapsed:"Elapsed",lt_exam_n:"Exam {i} of {n}",lt_out_at:"Output",
+ lt_reg:"Registration CT onto MRI: spread {s} mm",lt_rx:"Prescription {v} Gy(RBE) ({f})",lt_regions:"{n} regions, {v} ml in total",lt_region1:"1 region, {v} ml",lt_noscript:"run.sh is missing in this installation.",
+ lt_s_check:"Check",lt_s_export:"Export",lt_s_synthseg:"SynthSeg",lt_s_register:"Registration",lt_s_exams:"Exams",lt_s_write:"Write",lt_s_page:"Verlauf.html",
+ lt_m_empty:"Required.",lt_m_not_found:"Not found.",lt_m_missing:"Missing: {0}",lt_m_no_dicom:"No DICOM files in the folder.",lt_m_number:"A number above 0.",
+ lt_m_rx_or_rs:"Without an RT Structure Set, please give the prescription.",lt_m_public_zone:"Lies in workspace/offen. Results from your plan must not go to the public part.",
+ lt_m_json:"A .json file.",lt_m_no_script:"run.sh is missing: {0}",lt_m_synthseg_missing:"SynthSeg not found: the run goes without the ventricle margin.",
+ lt_m_synthseg_memory:"WSL has {0} GB, SynthSeg needs about {1} GB.",lt_m_out_exists:"The folder already holds a result; it will be overwritten.",lt_m_server_restart:"The server ended during the run."});
+const LT={built:false,filled:false,timer:null,job:null};
+const LT_FIELDS=[["mrt",1],["run"],["ct"],["rs",1],["cache"],["view"],["page"],["rx",1],["fx"],["out"],["kz"]];
+const LT_CHECKS=["synthseg","build"];
+function ltBuild(){if(LT.built)return;LT.built=true;let h="";
+ for(const [k,opt] of LT_FIELDS){const btn=k==="mrt"?`<button type="button" id="ltDerive" data-i18n="lt_derive">${esc(t("lt_derive"))}</button>`:"";
+  const sz=k==="rx"||k==="fx"?' style="flex:0 0 9em"':"";
+  h+=`<label for="lt_${k}"><span data-i18n="lt_f_${k}">${esc(t("lt_f_"+k))}</span>${opt?` <span class="opt" data-i18n="lt_optional">${esc(t("lt_optional"))}</span>`:""}</label>
+  <div class="in"><div><input type="text" id="lt_${k}" spellcheck="false" autocomplete="off"${sz}>${btn}</div><span class="msg" id="ltm_${k}" data-hint="lt_h_${k}"></span></div>`}
+ for(const k of LT_CHECKS)h+=`<span></span><div class="in"><label><input type="checkbox" id="lt_${k}"> <span data-i18n="lt_f_${k}">${esc(t("lt_f_"+k))}</span></label><span class="msg" id="ltm_${k}" data-hint="lt_h_${k}"></span></div>`;
+ $("ltForm").innerHTML=h;ltMarks([],[]);
+ $("ltDerive").onclick=()=>ltDerive(true);$("lt_mrt").addEventListener("change",()=>ltDerive(false));
+ $("lt_build").addEventListener("change",ltPageField);
+ $("ltCheck").onclick=ltCheck;$("ltStart").onclick=ltStart;armed($("ltStop"),async()=>{await api("/api/letd/stop",{});ltPoll()})}
+function ltPageField(){$("lt_page").disabled=!$("lt_build").checked}
+function ltForm(){const o={};for(const [k] of LT_FIELDS)o[k]=$("lt_"+k).value.trim();for(const k of LT_CHECKS)o[k]=$("lt_"+k).checked?"1":"0";return o}
+function ltFill(form){for(const [k] of LT_FIELDS)if(form[k]!=null)$("lt_"+k).value=form[k];for(const k of LT_CHECKS)$("lt_"+k).checked=form[k]==="1";ltPageField()}
+const ltText=m=>{let s=t("lt_m_"+m.msg);(m.args||[]).forEach((a,i)=>s=s.replace("{"+i+"}",a));return s};
+/* each field shows its hint, or the problem or note the server found for it; problems without a field are returned */
+function ltMarks(bad,notes){const by={};for(const m of notes)by[m.field]={c:"note",m};for(const m of bad)by[m.field]={c:"bad",m};
+ document.querySelectorAll("#ltForm .msg").forEach(e=>{const k=e.id.slice(4),x=by[k];e.className="msg"+(x?" "+x.c:"");e.textContent=x?ltText(x.m):t(e.dataset.hint);
+  const inp=$("lt_"+k);if(inp)inp.setAttribute("aria-invalid",x&&x.c==="bad"?"true":"false")});
+ return bad.filter(m=>!m.field).map(ltText).join(" ")}
+/* found paths fill empty fields on their own; the button overwrites, since the user asked for it */
+async function ltDerive(byUser){const mrt=$("lt_mrt").value.trim();if(!mrt)return;
+ try{const r=await api("/api/letd/derive",{mrt});if(r.error){ltMarks([{field:"mrt",msg:r.error}],[]);return}
+  let n=0;for(const k of ["cache","view","page"])if(r[k]){n++;if(byUser||!$("lt_"+k).value.trim())$("lt_"+k).value=r[k]}
+  $("ltMsg").textContent=n?t("lt_found").replace("{n}",n):t("lt_none_found")}catch(e){$("ltMsg").textContent=t("error")+": "+e.message}}
+async function ltCheck(){try{const r=await api("/api/letd/check",{form:ltForm()});const g=ltMarks(r.problems,r.notes);$("ltMsg").textContent=g||(r.problems.length?t("lt_bad"):t("lt_ok"))}
+ catch(e){$("ltMsg").textContent=t("error")+": "+e.message}}
+async function ltStart(){$("ltStart").disabled=true;
+ try{const r=await api("/api/letd/start",{form:ltForm()});
+  if(r.problems&&r.problems.length){const g=ltMarks(r.problems,r.notes||[]);$("ltMsg").textContent=g||t("lt_bad");$("ltStart").disabled=false;return}
+  ltMarks([],r.notes||[]);$("ltMsg").textContent="";ltShow(r.job)}
+ catch(e){$("ltMsg").textContent=t("error")+": "+e.message;$("ltStart").disabled=false}}
+async function ltLoad(){ltBuild();try{const r=await api("/api/letd");if(!LT.filled){ltFill(r.form);LT.filled=true}
+  if(!r.script)$("ltMsg").textContent=t("lt_noscript");ltShow(r.job)}catch(e){$("ltMsg").textContent=t("error")+": "+e.message}}
+async function ltPoll(){clearTimeout(LT.timer);LT.timer=null;try{ltShow((await api("/api/letd")).job)}catch(e){}}
+function ltShow(j){LT.job=j;const run=!!(j&&j.running);$("ltStart").disabled=run;$("ltStop").hidden=!run;$("letdCnt").hidden=!run;if(run)$("letdCnt").textContent="▶";
+ if(!j||!j.status){$("ltLive").hidden=true;$("ltRes").hidden=true;return}
+ $("ltLive").hidden=false;const st=j.steps||{};
+ $("ltSteps").innerHTML=Object.keys(st).filter(k=>st[k]!=="skip").map(k=>`<span class="${st[k]==="now"&&run?"on":st[k]==="done"?"done":""}">${esc(t("lt_s_"+k))}</span>`).join("");
+ const ex=j.exam;$("ltBar").hidden=!(run&&ex);if(run&&ex)$("ltBar").firstElementChild.style.width=(100*ex[0]/ex[1]).toFixed(0)+"%";
+ const el=run?(Date.now()/1000-j.t0):j.seconds,state=run?"running":j.status;
+ $("ltKv").innerHTML=`<span class="st-${esc(state)}">${esc(t("lt_"+state))}</span><span>${t("lt_elapsed")}: <b>${el!=null?fmtDur(el):"?"}</b></span>`
+  +(run&&ex?`<span>${esc(t("lt_exam_n").replace("{i}",ex[0]).replace("{n}",ex[1]))}</span>`:"")+`<span class="mute">${t("lt_out_at")}: ${esc(j.out||"")}</span>`
+  +(j.note?`<span class="log-err">${esc(t("lt_m_"+j.note))}</span>`:"")+(j.error?`<span class="log-err">${esc(j.error)}</span>`:"");
+ const pre=$("ltLog"),atEnd=pre.scrollTop+pre.clientHeight>=pre.scrollHeight-4;pre.textContent=j.log||"";if(atEnd)pre.scrollTop=pre.scrollHeight;
+ if(!run&&j.status==="failed")pre.parentElement.open=true;
+ ltResult(j);if(run&&isTab("letd"))LT.timer=setTimeout(ltPoll,2000)}
+function ltResult(j){const r=j.result;$("ltRes").hidden=!r;if(!r)return;const nf=n=>Number(n).toLocaleString(loc(),{maximumFractionDigits:2});
+ const reg=r.registration||{};let h="";
+ if(reg.spread_rms_mm!=null)h+=`<span>${esc(t("lt_reg").replace("{s}",nf(reg.spread_rms_mm)))}</span>`;
+ if(r.prescription_gy_rbe!=null)h+=`<span>${esc(t("lt_rx").replace("{v}",nf(r.prescription_gy_rbe)).replace("{f}",r.prescription_from||""))}</span>`;
+ if(j.html)h+=`<button class="pri" id="ltOpen">${esc(t("lt_open"))}</button>`;
+ $("ltResHead").innerHTML=h;if(j.html)$("ltOpen").onclick=()=>api("/api/letd/open",{}).catch(e=>toast(t("error")+": "+e.message,"err"));
+ const yes=v=>v==null?"–":v?`<span class="st-done">✓</span>`:`<span class="st-failed">✗</span>`;
+ $("ltExams").innerHTML=(r.exams||[]).map(e=>`<tr><td>${esc(e.track)} ${esc(e.day)}</td><td>${esc((e.native_mm||[]).map(nf).join(" × "))}</td><td>${yes(e.suitable)}</td><td>${e.check_rms_mm!=null?nf(e.check_rms_mm):"–"}</td><td>${yes(e.check_ok)}</td></tr>`).join("");
+ const look=r.look_list||[];
+ $("ltLook").innerHTML=look.length?`<p>${esc(t(look.length===1?"lt_region1":"lt_regions").replace("{n}",look.length).replace("{v}",nf(look.reduce((a,x)=>a+(x.volume_ml||0),0))))}</p>`:`<p class="mute">${esc(t("lt_look_none"))}</p>`;
+ $("ltHint").textContent=r.hinweis||""}
 
 /* ---------- start */
 applyI18n();if(!routeFromHash())showTab(recall("tab")||"files",{replace:true});poll();
