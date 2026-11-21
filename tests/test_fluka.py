@@ -267,12 +267,12 @@ def test_fluka_job_runs_merges_and_writes_the_csv(queue):
     assert "PATH" not in wb.fluka_script("x")
     sw = (out / "usbsuw.stdin").read_text().splitlines()
     assert sw == [f"fk_p063_rifi0{c:03d}_fort.21" for c in range(1, 6)] + ["", "fk_p063_rifi0_21.bnn"]
-    csv = (out / "IDD_fk_p063_rifi0.csv").read_text().splitlines()
-    assert "cases/out/IDD_fk_p063_rifi0.csv" in job["outputs"]
+    csv = (out / "IDD_fk_p063_rifi0_fluka.csv").read_text().splitlines()
+    assert "cases/out/IDD_fk_p063_rifi0_fluka.csv" in job["outputs"]
     k2 = [float(v) for v in csv[8].split(",")]
     assert k2[3] == pytest.approx(4e-3 * 1.602176634e-7 * 1005)     # summed over the 5 x 201 primaries that ran
     # and the workbench reads it like a TOPAS result
-    r = wb.read_topas_csv(str(out / "IDD_fk_p063_rifi0.csv"))
+    r = wb.read_topas_csv(str(out / "IDD_fk_p063_rifi0_fluka.csv"))
     assert r is not None
 
 

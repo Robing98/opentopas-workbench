@@ -562,13 +562,14 @@ def fluka_script(name):
 
 
 def fluka_convert(param, out):
-    """usbrea's text output to the workbench CSV, named like the TOPAS scorer file of the same case."""
+    """usbrea's text output to the workbench CSV, named like the TOPAS scorer file of the same case plus _fluka, so
+    both results of a case can sit in one folder (IDD_NAME.csv and IDD_NAME_fluka.csv)."""
     fk = fluka_module()
     with open(param) as fh: m = fk.read_case(fh.read())
     name = os.path.splitext(os.path.basename(param))[0]
     with open(os.path.join(out, f"{name}_{FLUKA_UNIT}.txt")) as fh:
         vals, errs = fk.read_usbrea(fh.read(), m["phantom"]["zbins"])
-    path = os.path.join(out, m["score"]["name"] + ".csv")
+    path = os.path.join(out, m["score"]["name"] + "_fluka.csv")
     with open(path, "w") as fh: fh.write(fk.to_csv(vals, errs, m))
     return path
 
