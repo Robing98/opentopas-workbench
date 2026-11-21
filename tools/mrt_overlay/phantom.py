@@ -150,14 +150,16 @@ def pet_values(seed=0):
     return np.clip(v, 0, None) * 5000.0
 
 
-def write_pet(folder, mirrored=False, seed=0, day="20200301"):
-    """The PET as an old scanner writes it: one file per slice, ImagePositionPatient from 0,0,0, unit orientation,
-    uint16 with a RescaleSlope of its own per slice, Units NONE. `mirrored` flips columns (left and right)."""
+def write_pet(folder, mirrored=False, seed=0, day="20200301", upside_down=False):
+    """The PET as an old scanner writes it: one file per slice, ImagePositionPatient 0,0,z with z rising with the
+    InstanceNumber, unit orientation, uint16 with a RescaleSlope of its own per slice, Units NONE. `mirrored` flips
+    columns (left and right), `upside_down` the slice order (head and foot), as a scanner that counted the other way."""
     import pydicom
     from pydicom.dataset import FileDataset, FileMetaDataset, Dataset
     from pydicom.uid import ExplicitVRLittleEndian, generate_uid
     v = pet_values(seed)
     if mirrored: v = v[:, :, ::-1]
+    if upside_down: v = v[::-1]
     os.makedirs(folder, exist_ok=True)
     series, study = generate_uid(), generate_uid()
     order = np.random.default_rng(seed + 1).permutation(v.shape[0])     # file names do not follow the slices

@@ -2,7 +2,7 @@
 
 The requirements tested: a PET whose header gives no position (origin 0, unit orientation, shuffled files, a slope
 per slice) is read in slice order with its values; the registration finds a known rotation and shift; a PET with
-left and right swapped stops the run; the ratio volume lands in the viewer files with one entry per PET date.
+left and right swapped, or standing on its head, stops the run; the ratio volume lands in the viewer files with one entry per PET date.
 """
 import base64
 import io
@@ -93,6 +93,16 @@ def test_pet_command_finds_known_transform_and_writes_viewer_files(cache, pet_di
     (s,) = meta["scans"]
     assert s["day"] == DAY and s["fixed_t1"] == "2019-12-01" and s["suv_per_ratio"] is None
     assert s["registration"]["abstand_relativ"] >= pe.MIRROR_MARGIN and s["registration"]["starts"] == 9
+    assert s["registration"]["abstand_kopfstehend_relativ"] >= pe.MIRROR_MARGIN
+    # the control sheet: T1 above, PET on T1 below, three views; colour only in the lower row
+    from PIL import Image
+    run = json.load(open(os.path.join(out, f"pet_{DAY}.json"), encoding="utf-8"))
+    im = np.asarray(Image.open(run["sheet"]).convert("RGB")).astype(int)
+    assert im.shape[0] == 24 + 2 * pe.SHEET_PX + 3 * 6
+    colour = im[..., 0] - im[..., 1] > 40                      # red to orange; the yellow R and L marks are not
+    half = 24 + 6 + pe.SHEET_PX
+    assert colour[:half].sum() == 0 and colour[half:].sum() > 200
+    assert "sheet" not in s                                      # the viewer's pet.json names no local path
     # the viewer file: ratio bytes on the grid; the lesion on the patient's right is hot, its mirror place is not
     vol = decode(open(os.path.join(data, f"pet_{DAY}.js")).read(), brain.shape) * meta["per_byte"]
     c_r = ph.PET_HOT[2][0]
@@ -109,6 +119,16 @@ def test_mirrored_pet_stops_the_run(cache, tmp_path):
     with pytest.raises(SystemExit, match="Seitenprüfung"):
         pe.run(d, c, data)
     assert not os.path.exists(data)                  # nothing written
+
+
+def test_upside_down_pet_stops_the_run(cache, tmp_path):
+    # slice order reversed (z falls with the anatomy): no rigid turn undoes it, the head to foot check must stop
+    c, *_ = cache
+    d, data = str(tmp_path / "pet"), str(tmp_path / "data")
+    ph.write_pet(d, upside_down=True)
+    with pytest.raises(SystemExit, match="Kopf-Fuß"):
+        pe.run(d, c, data, start_deg=(0.0,))
+    assert not os.path.exists(data)
 
 
 def test_second_pet_date_adds_an_entry(cache, pet_dir, tmp_path, monkeypatch):

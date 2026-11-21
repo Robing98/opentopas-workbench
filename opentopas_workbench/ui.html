@@ -422,6 +422,29 @@ kbd{font:12.5px ui-monospace,Consolas,monospace;padding:1px 6px;border:1px solid
     <div id="ltLook"></div>
     <p class="mute" style="font-size:13px" id="ltHint"></p>
   </div>
+  <!-- PET on the same MRIs: tools/mrt_overlay/run_pet.sh from one form (pet_run.py) -->
+  <div class="card" id="ptCard">
+    <h2 data-i18n="pt_title"></h2>
+    <p class="mute" style="font-size:13px;margin-top:0" data-i18n="pt_intro"></p>
+    <div class="lf" id="ptForm"></div>
+    <div class="row">
+      <button id="ptCheck" data-i18n="lt_check"></button><button class="pri" id="ptStart" data-i18n="lt_start"></button>
+      <button id="ptStop" data-i18n="lt_stop" hidden></button><span id="ptMsg" class="mute" role="status"></span>
+    </div>
+    <div id="ptLive" class="live" hidden>
+      <div class="ph" id="ptSteps"></div>
+      <div class="big" id="ptBar" hidden><i></i></div>
+      <div class="kv" id="ptKv"></div>
+      <details><summary data-i18n="lt_log"></summary><pre id="ptLog"></pre></details>
+    </div>
+  </div>
+  <div class="card" id="ptRes" hidden>
+    <h2 data-i18n="pt_result"></h2>
+    <div class="row" id="ptResHead"></div>
+    <div class="kv" id="ptMi"></div>
+    <img id="ptSheet" alt="" style="max-width:100%;margin-top:8px;display:block" hidden>
+    <p class="mute" style="font-size:13px" id="ptHint"></p>
+  </div>
 </section>
 
 <!-- RIFI DESIGNER -->
@@ -741,7 +764,7 @@ function syncHash(push){if(!CUR)return;const h=tabHash(CUR);if(location.hash===h
 function showTab(id,opt){opt=opt||{};if(!TABS.includes(id))id="files";const changed=CUR!==id;CUR=id;
  document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id===id));document.querySelectorAll("nav [role=tab]").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===id));store("tab",id);
  if(!opt.fromHash)syncHash(changed&&!opt.replace);
- if(id==="files"&&!opt.noload)fmLoad(FM.path);if(id==="run"){loadParams();renderQueue(true);showJob(true)}if(id==="results"){resLoad(RS.path);loadViews()}if(id==="explorer")exLoad(false);if(id==="gen")loadGens();if(id==="beam")bpLoad(false);if(id==="machines"&&!MC.loaded)mcLoad(null);if(id==="settings")loadSettings();if(id==="letd")ltLoad();if(id==="rifi")rdLoad();
+ if(id==="files"&&!opt.noload)fmLoad(FM.path);if(id==="run"){loadParams();renderQueue(true);showJob(true)}if(id==="results"){resLoad(RS.path);loadViews()}if(id==="explorer")exLoad(false);if(id==="gen")loadGens();if(id==="beam")bpLoad(false);if(id==="machines"&&!MC.loaded)mcLoad(null);if(id==="settings")loadSettings();if(id==="letd"){ltLoad();ptLoad()}if(id==="rifi")rdLoad();
  if(changed&&id==="run")poll();}
 /* #run, #results?f=a.csv&f=b.csv, #files?p=dir/case.txt */
 function routeFromHash(){const h=location.hash;if(!h||h===ROUTED)return !!h&&TABS.includes(h.slice(1).split("?")[0]);ROUTED=h;
@@ -1670,6 +1693,88 @@ function ltResult(j){const r=j.result;$("ltRes").hidden=!r;if(!r)return;const nf
  const look=r.look_list||[];
  $("ltLook").innerHTML=look.length?`<p>${esc(t(look.length===1?"lt_region1":"lt_regions").replace("{n}",look.length).replace("{v}",nf(look.reduce((a,x)=>a+(x.volume_ml||0),0))))}</p>`:`<p class="mute">${esc(t("lt_look_none"))}</p>`;
  $("ltHint").textContent=r.hinweis||""}
+
+/* ---------- PET on MRI, in the LETd tab: one form for tools/mrt_overlay/run_pet.sh (pet_run.py) */
+Object.assign(I18N.de,{tab_letd:"LETd/PET auf MRT",pt_title:"PET-Ebene auf den Verlaufs-MRTs",
+ pt_intro:"Liest eine PET-Serie (DICOM, Modality PT), registriert sie starr auf die zeitlich nächste 3D-T1 des Viewers, prüft Kopf-Fuß und links-rechts und legt das Verhältnis zur Referenzregion als schaltbare Ebene in Verlauf.html. Kein SUV, nur Anzeige, keine Befundung.",
+ pt_f_mrt:"MRT-Bilder-Ordner",pt_h_mrt:"Darin werden cacheF, Verlauf-Daten und build_page.py gesucht.",pt_f_pet:"PET-Ordner",pt_h_pet:"Ordner mit der PET-Serie, auch in Unterordnern",
+ pt_f_cache:"cacheF des Viewers",pt_h_cache:"mit ref_t1.nii.gz, log.json, mask.npy und t1_*.npy",pt_f_view:"Verlauf-Daten",pt_h_view:"hier landen pet.json und pet_<Datum>.js",
+ pt_f_page:"build_page.py",pt_h_page:"erzeugt danach Verlauf.html neu",pt_f_ref:"Referenzregion",pt_h_ref:"Vorgabe: Median im Hirn",
+ pt_ref_brain:"Median im Hirn",pt_ref_striatum:"Striatum (SynthSeg)",pt_ref_contralateral:"Gegenseite",pt_f_side:"Seite des Befunds",pt_h_side:"nur für Gegenseite: diese Seite zählt nicht",
+ pt_side_links:"links",pt_side_rechts:"rechts",pt_f_labels:"SynthSeg-Datei",pt_h_labels:"nur für Striatum: Labels der Referenz-T1 des Viewers",
+ pt_f_out:"Ausgabeordner",pt_h_out:"Kontrollblatt, Transformation und Protokoll; gehört in die Zone eigen",pt_f_build:"Verlauf.html danach neu erzeugen",pt_h_build:"mit build_page.py",
+ pt_result:"PET-Ergebnis",pt_s_read:"Einlesen",pt_s_register:"Registrierung",pt_s_headfoot:"Kopf-Fuß",pt_s_side:"Links-rechts",pt_s_write:"Schreiben",pt_s_page:"Verlauf.html",pt_s_check:"Prüfen",
+ pt_start_n:"Start {i} von {n}",pt_head:"PET {d}, {tr}, auf T1 {t}",pt_mi:"MI wie gelesen",pt_mi_m:"gespiegelt",pt_mi_z:"kopfstehend",pt_gap:"Abstand {v} %",
+ pt_sheet_alt:"Kontrollblatt: T1 oben, PET auf T1 unten, axial, koronar, sagittal",pt_noscript:"run_pet.sh fehlt in dieser Installation.",
+ lt_m_no_t1:"Keine 3D-T1 (t1_*.npy) im Cache.",lt_m_choice:"Bitte auswählen.",lt_m_pet_adds:"pet.json gibt es schon: die PET kommt als weiterer Termin dazu, ein gleiches Datum wird ersetzt."});
+Object.assign(I18N.en,{tab_letd:"LETd/PET on MRI",pt_title:"PET layer on the follow-up MRIs",
+ pt_intro:"Reads a PET series (DICOM, modality PT), registers it rigidly onto the viewer's 3D T1 nearest in time, checks head to foot and left to right, and puts the ratio to a reference region into Verlauf.html as a layer to switch on. No SUV, display only, no reading.",
+ pt_f_mrt:"MRI images folder",pt_h_mrt:"cacheF, Verlauf-Daten and build_page.py are looked up in it.",pt_f_pet:"PET folder",pt_h_pet:"folder with the PET series, subfolders too",
+ pt_f_cache:"Viewer cacheF",pt_h_cache:"with ref_t1.nii.gz, log.json, mask.npy and t1_*.npy",pt_f_view:"Verlauf-Daten",pt_h_view:"pet.json and pet_<date>.js are written here",
+ pt_f_page:"build_page.py",pt_h_page:"rebuilds Verlauf.html afterwards",pt_f_ref:"Reference region",pt_h_ref:"default: median in the brain",
+ pt_ref_brain:"Median in the brain",pt_ref_striatum:"Striatum (SynthSeg)",pt_ref_contralateral:"Opposite side",pt_f_side:"Side of the finding",pt_h_side:"opposite side only: this side is left out",
+ pt_side_links:"left",pt_side_rechts:"right",pt_f_labels:"SynthSeg file",pt_h_labels:"striatum only: labels of the viewer's reference T1",
+ pt_f_out:"Output folder",pt_h_out:"control sheet, transform and log; belongs in the zone eigen",pt_f_build:"Rebuild Verlauf.html afterwards",pt_h_build:"with build_page.py",
+ pt_result:"PET result",pt_s_read:"Read",pt_s_register:"Registration",pt_s_headfoot:"Head to foot",pt_s_side:"Left to right",pt_s_write:"Write",pt_s_page:"Verlauf.html",pt_s_check:"Check",
+ pt_start_n:"Start {i} of {n}",pt_head:"PET {d}, {tr}, on T1 {t}",pt_mi:"MI as read",pt_mi_m:"mirrored",pt_mi_z:"upside down",pt_gap:"gap {v} %",
+ pt_sheet_alt:"Control sheet: T1 above, PET on T1 below, axial, coronal, sagittal",pt_noscript:"run_pet.sh is missing in this installation.",
+ lt_m_no_t1:"No 3D T1 (t1_*.npy) in the cache.",lt_m_choice:"Please choose.",lt_m_pet_adds:"pet.json exists: the PET is added as one more date, the same date is replaced."});
+const PT={built:false,filled:false,timer:null,job:null};
+const PT_FIELDS=[["mrt",1],["pet"],["cache"],["view"],["page"],["ref",0,["brain","striatum","contralateral"]],["side",1,["","links","rechts"]],["labels",1],["out"]];
+function ptBuild(){if(PT.built)return;PT.built=true;let h="";
+ for(const [k,opt,choices] of PT_FIELDS){const btn=k==="mrt"?`<button type="button" id="ptDerive" data-i18n="lt_derive">${esc(t("lt_derive"))}</button>`:"";
+  const inp=choices?`<select id="pt_${k}">${choices.map(c=>`<option value="${c}"${c?` data-i18n="pt_${k}_${c}"`:""}>${c?esc(t("pt_"+k+"_"+c)):""}</option>`).join("")}</select>`
+   :`<input type="text" id="pt_${k}" spellcheck="false" autocomplete="off">`;
+  h+=`<label for="pt_${k}"><span data-i18n="pt_f_${k}">${esc(t("pt_f_"+k))}</span>${opt?` <span class="opt" data-i18n="lt_optional">${esc(t("lt_optional"))}</span>`:""}</label>
+  <div class="in"><div>${inp}${btn}</div><span class="msg" id="ptm_${k}" data-hint="pt_h_${k}"></span></div>`}
+ h+=`<span></span><div class="in"><label><input type="checkbox" id="pt_build"> <span data-i18n="pt_f_build">${esc(t("pt_f_build"))}</span></label><span class="msg" id="ptm_build" data-hint="pt_h_build"></span></div>`;
+ $("ptForm").innerHTML=h;ptMarks([],[]);
+ $("ptDerive").onclick=()=>ptDerive(true);$("pt_mrt").addEventListener("change",()=>ptDerive(false));
+ $("pt_build").addEventListener("change",ptFieldState);$("pt_ref").addEventListener("change",ptFieldState);
+ $("ptCheck").onclick=ptCheck;$("ptStart").onclick=ptStart;armed($("ptStop"),async()=>{await api("/api/pet/stop",{});ptPoll()})}
+function ptFieldState(){$("pt_page").disabled=!$("pt_build").checked;const r=$("pt_ref").value;$("pt_side").disabled=r!=="contralateral";$("pt_labels").disabled=r!=="striatum"}
+function ptForm(){const o={};for(const [k] of PT_FIELDS)o[k]=$("pt_"+k).value.trim();o.build=$("pt_build").checked?"1":"0";return o}
+function ptFill(form){for(const [k] of PT_FIELDS)if(form[k]!=null)$("pt_"+k).value=form[k];if(!$("pt_ref").value)$("pt_ref").value="brain";$("pt_build").checked=form.build==="1";ptFieldState()}
+function ptMarks(bad,notes){const by={};for(const m of notes)by[m.field]={c:"note",m};for(const m of bad)by[m.field]={c:"bad",m};
+ document.querySelectorAll("#ptForm .msg").forEach(e=>{const k=e.id.slice(4),x=by[k];e.className="msg"+(x?" "+x.c:"");e.textContent=x?ltText(x.m):t(e.dataset.hint);
+  const inp=$("pt_"+k);if(inp)inp.setAttribute("aria-invalid",x&&x.c==="bad"?"true":"false")});
+ return bad.filter(m=>!m.field).map(ltText).join(" ")}
+async function ptDerive(byUser){const mrt=$("pt_mrt").value.trim();if(!mrt)return;
+ try{const r=await api("/api/pet/derive",{mrt});if(r.error){ptMarks([{field:"mrt",msg:r.error}],[]);return}
+  let n=0;for(const k of ["cache","view","page"])if(r[k]){n++;if(byUser||!$("pt_"+k).value.trim())$("pt_"+k).value=r[k]}
+  $("ptMsg").textContent=n?t("lt_found").replace("{n}",n):t("lt_none_found")}catch(e){$("ptMsg").textContent=t("error")+": "+e.message}}
+async function ptCheck(){try{const r=await api("/api/pet/check",{form:ptForm()});const g=ptMarks(r.problems,r.notes);$("ptMsg").textContent=g||(r.problems.length?t("lt_bad"):t("lt_ok"))}
+ catch(e){$("ptMsg").textContent=t("error")+": "+e.message}}
+async function ptStart(){$("ptStart").disabled=true;
+ try{const r=await api("/api/pet/start",{form:ptForm()});
+  if(r.problems&&r.problems.length){const g=ptMarks(r.problems,r.notes||[]);$("ptMsg").textContent=g||t("lt_bad");$("ptStart").disabled=false;return}
+  ptMarks([],r.notes||[]);$("ptMsg").textContent="";ptShow(r.job)}
+ catch(e){$("ptMsg").textContent=t("error")+": "+e.message;$("ptStart").disabled=false}}
+async function ptLoad(){ptBuild();try{const r=await api("/api/pet");if(!PT.filled){ptFill(r.form);PT.filled=true}
+  if(!r.script)$("ptMsg").textContent=t("pt_noscript");ptShow(r.job)}catch(e){$("ptMsg").textContent=t("error")+": "+e.message}}
+async function ptPoll(){clearTimeout(PT.timer);PT.timer=null;try{ptShow((await api("/api/pet")).job)}catch(e){}}
+function ptShow(j){const was=PT.job&&PT.job.running;PT.job=j;const run=!!(j&&j.running);$("ptStart").disabled=run;$("ptStop").hidden=!run;
+ if(!j||!j.status){$("ptLive").hidden=true;$("ptRes").hidden=true;return}
+ $("ptLive").hidden=false;const st=j.steps||{};
+ $("ptSteps").innerHTML=Object.keys(st).filter(k=>st[k]!=="skip").map(k=>`<span class="${st[k]==="now"&&run?"on":st[k]==="done"?"done":""}">${esc(t("pt_s_"+k))}</span>`).join("");
+ const sn=j.start_n;$("ptBar").hidden=!(run&&sn);if(run&&sn)$("ptBar").firstElementChild.style.width=(100*sn[0]/sn[1]).toFixed(0)+"%";
+ const el=run?(Date.now()/1000-j.t0):j.seconds,state=run?"running":j.status;
+ $("ptKv").innerHTML=`<span class="st-${esc(state)}">${esc(t("lt_"+state))}</span><span>${t("lt_elapsed")}: <b>${el!=null?fmtDur(el):"?"}</b></span>`
+  +(run&&sn?`<span>${esc(t("pt_start_n").replace("{i}",sn[0]).replace("{n}",sn[1]))}</span>`:"")+`<span class="mute">${t("lt_out_at")}: ${esc(j.out||"")}</span>`
+  +(j.note?`<span class="log-err">${esc(t("lt_m_"+j.note))}</span>`:"")+(j.error?`<span class="log-err">${esc(j.error)}</span>`:"");
+ const pre=$("ptLog"),atEnd=pre.scrollTop+pre.clientHeight>=pre.scrollHeight-4;pre.textContent=j.log||"";if(atEnd)pre.scrollTop=pre.scrollHeight;
+ if(!run&&j.status==="failed")pre.parentElement.open=true;
+ ptResult(j,was&&!run);if(run&&isTab("letd"))PT.timer=setTimeout(ptPoll,2000)}
+/* the sheet is fetched once per finished run: the img cannot send the token header, so it goes as a query value */
+function ptResult(j,fresh){const r=j.result;$("ptRes").hidden=!r;if(!r)return;const nf=n=>Number(n).toLocaleString(loc(),{maximumFractionDigits:4});
+ const reg=r.registration||{};let h=`<span>${esc(t("pt_head").replace("{d}",r.day||"?").replace("{tr}",r.tracer||"?").replace("{t}",r.fixed_t1||"?"))}</span><span class="mute">${esc(r.reference||"")}</span>`;
+ if(j.html)h+=`<button class="pri" id="ptOpen">${esc(t("lt_open"))}</button>`;
+ $("ptResHead").innerHTML=h;if(j.html)$("ptOpen").onclick=()=>api("/api/pet/open",{}).catch(e=>toast(t("error")+": "+e.message,"err"));
+ const pc=v=>v==null?"":` (${esc(t("pt_gap").replace("{v}",nf(100*v)))})`;
+ $("ptMi").innerHTML=reg.mi!=null?`<span>${esc(t("pt_mi"))}: <b>${nf(reg.mi)}</b></span><span>${esc(t("pt_mi_z"))}: ${nf(reg.mi_kopfstehend)}${pc(reg.abstand_kopfstehend_relativ)}</span><span>${esc(t("pt_mi_m"))}: ${nf(reg.mi_gespiegelt)}${pc(reg.abstand_relativ)}</span>`:"";
+ const img=$("ptSheet");img.alt=t("pt_sheet_alt");
+ if(r.sheet&&(fresh||!img.src)){img.src="/api/pet/sheet?token="+encodeURIComponent(TOKEN)+"&t="+(j.end||"");img.hidden=false}else if(!r.sheet)img.hidden=true;
+ $("ptHint").textContent=r.hinweis||""}
 
 /* ---------- start */
 applyI18n();if(!routeFromHash())showTab(recall("tab")||"files",{replace:true});poll();

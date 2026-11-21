@@ -133,7 +133,8 @@ def cmd_viewer(a):
 
 def cmd_pet(a):
     e = pe.run(a.pet, a.cache, a.viewer_data, out=a.out, day=a.day, ref=a.ref, labels=a.labels, side=a.side,
-               fixed_day=a.fixed_day, weight_kg=a.weight_kg, activity_mbq=a.activity_mbq, margin=a.mirror_margin)
+               fixed_day=a.fixed_day, weight_kg=a.weight_kg, activity_mbq=a.activity_mbq, margin=a.mirror_margin,
+               start_deg=tuple(float(x) for x in a.starts.split(",")))
     print(json.dumps({k: e[k] for k in ("day", "tracer", "fixed_t1", "reference", "registration")}, indent=1,
                      ensure_ascii=False))
 
@@ -174,7 +175,9 @@ def main(argv=None):
     p.add_argument("--side", choices=("links", "rechts"), help="for --ref contralateral: the side NOT to use")
     p.add_argument("--weight-kg", type=float); p.add_argument("--activity-mbq", type=float)
     p.add_argument("--mirror-margin", type=float, default=pe.MIRROR_MARGIN,
-                   help="how much better (relative MI) the unflipped PET must fit than the flipped one")
+                   help="how much better (relative MI) the PET as read must fit than flipped or upside down")
+    p.add_argument("--starts", default=",".join(f"{d:g}" for d in pe.START_DEG),
+                   help="start rotations about x and z in degrees, comma separated; each pair is one start")
     p.set_defaults(f=cmd_pet)
     a = ap.parse_args(argv)
     a.f(a)

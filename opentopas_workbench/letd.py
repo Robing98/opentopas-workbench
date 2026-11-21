@@ -290,15 +290,17 @@ def start(form, on_end=None):
     return status()
 
 
-def _spawn(cmd, log, env, cwd=None):
+def _spawn(cmd, log, env, cwd=None, job=None):
+    """Runs one process of a job and waits. `job` is JOB here; the PET run (pet_run.py) passes its own."""
+    job = JOB if job is None else job
     proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, env=env, cwd=cwd, start_new_session=True,
                             stdin=subprocess.DEVNULL)
     with LOCK:
-        JOB["proc"] = proc; stopped = JOB["stop"]
+        job["proc"] = proc; stopped = job["stop"]
     # a Stop between the start and this point found no process to end: end it here
     if stopped: _kill(proc)
     rc = proc.wait()
-    with LOCK: JOB["proc"] = None
+    with LOCK: job["proc"] = None
     return rc
 
 
@@ -332,12 +334,13 @@ def _kill(proc):
     except OSError: pass
 
 
-def stop():
+def stop(job=None):
     """Ends the run. True while a run is going, even between two of its processes: _spawn sees the flag."""
+    job = JOB if job is None else job
     with LOCK:
-        proc, t = JOB["proc"], JOB["thread"]
+        proc, t = job["proc"], job["thread"]
         running = t is not None and t.is_alive()
-        if running: JOB["stop"] = True
+        if running: job["stop"] = True
     if proc is not None: _kill(proc)
     return running
 
@@ -352,11 +355,11 @@ def restore(last):
     with LOCK: JOB["state"] = st
 
 
-def open_html():
+def open_html(job=None):
     """Opens the Verlauf.html of the last run in the default browser; under WSL the Windows one, which cannot read a
     WSL path. Only that file: the page does not choose what is opened. explorer.exe, not cmd /c start, because cmd
     reads & ^ % in a folder name as commands."""
-    st = JOB["state"] or {}
+    st = (JOB if job is None else job)["state"] or {}
     p = st.get("html") or ""
     if not p or not os.path.isfile(p) or not p.lower().endswith(".html"): raise ValueError("not_found")
     if shutil.which("explorer.exe") and p.startswith("/mnt/"):

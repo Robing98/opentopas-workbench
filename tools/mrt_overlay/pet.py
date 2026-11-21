@@ -7,7 +7,11 @@ SUV; the layer shows the ratio to the median of a reference region instead.
 
 The registration is rigid (Euler3D, Mattes MI) with the T1 fixed, so its transform maps viewer grid points into the
 PET and sitk.Resample(pet, grid, transform) puts the PET onto the grid. A rigid transform cannot mirror, so the same
-search with the PET flipped left to right is the side check: the unflipped PET must fit clearly better.
+search with the PET flipped left to right is the side check: the unflipped PET must fit clearly better. The same
+holds for the slice order: the slices are sorted by the z of ImagePositionPatient, and the search with the slice
+order reversed is the head to foot check.
+
+Progress goes to stdout as "## STEP name" and "## START i/n" lines, which the workbench tab reads.
 """
 import datetime
 import glob
@@ -121,8 +125,13 @@ def _search(fixed, moving, mask, start, seed, levels, iterations):
     return sitk.Euler3DTransform(t)
 
 
-def rigid(fixed, moving, mask, levels=LEVELS, iterations=200, start_deg=START_DEG):
-    """Best of the starts by fully sampled MI. Returns (transform grid -> PET, MI, [MI per start])."""
+def _progress(line):
+    print(line, flush=True)
+
+
+def rigid(fixed, moving, mask, levels=LEVELS, iterations=200, start_deg=START_DEG, count=None):
+    """Best of the starts by fully sampled MI. Returns (transform grid -> PET, MI, [MI per start]).
+    `count` is [done, total] over all searches of a run, for the "## START" progress lines."""
     f, m = sitk.Cast(fixed, sitk.sitkFloat32), sitk.Cast(moving, sitk.sitkFloat32)
     mm = _metric_mask(mask)
     init = sitk.Euler3DTransform(sitk.CenteredTransformInitializer(
@@ -132,9 +141,14 @@ def rigid(fixed, moving, mask, levels=LEVELS, iterations=200, start_deg=START_DE
         s = sitk.Euler3DTransform(init)
         s.SetRotation(np.radians(rx), 0.0, np.radians(rz))
         try: t = _search(f, m, mm, s, i + 1, levels, iterations)
-        except RuntimeError: continue
+        except RuntimeError:
+            if count is not None:
+                count[0] += 1; _progress(f"## START {count[0]}/{count[1]}")
+            continue
         v = _full_mi(f, m, mm, t)
         values.append(round(v, 5))
+        if count is not None:
+            count[0] += 1; _progress(f"## START {count[0]}/{count[1]}")
         if best is None or v < best[1]: best = (t, v)
     if best is None: raise SystemExit("PET registration failed from every start")
     return best[0], best[1], values
@@ -146,14 +160,38 @@ def mirror(img):
     return geo.like(sitk.GetArrayFromImage(img)[:, :, ::-1], img)
 
 
+def upside_down(img):
+    """The image with its slice order reversed on the same geometry: head and foot swapped, as a wrong slice sort
+    would give. Like a mirror, no rigid transform can undo it."""
+    return geo.like(sitk.GetArrayFromImage(img)[::-1], img)
+
+
+def _gain(v, other):
+    return (other - v) / abs(v) if v else 0.0
+
+
 def side_check(fixed, moving, mask, margin=MIRROR_MARGIN, **kw):
-    """Register the PET as read and flipped left to right. Returns (transform, quality); stops the run when the
-    unflipped PET does not fit clearly better, since then left and right of the PET are not settled."""
-    t, v, starts = rigid(fixed, moving, mask, **kw)
-    _, vm, _ = rigid(fixed, mirror(moving), mask, **kw)
-    gain = (vm - v) / abs(v) if v else 0.0
+    """Register the PET as read, with its slice order reversed, and flipped left to right. Returns (transform,
+    quality). Stops the run when the PET as read does not fit clearly better than either variant: then head and foot
+    (the slice order) or left and right of the PET are not settled. Head to foot comes first, since a PET standing
+    on its head fails the side check too and the message would name the wrong cause."""
+    n = len(kw.get("start_deg", START_DEG)) ** 2
+    count = [0, 3 * n]
+    _progress("## STEP register")
+    t, v, starts = rigid(fixed, moving, mask, count=count, **kw)
+    _progress("## STEP headfoot")
+    _, vz, _ = rigid(fixed, upside_down(moving), mask, count=count, **kw)
+    gz = _gain(v, vz)
+    if gz < margin:
+        raise SystemExit(f"Kopf-Fuß-Prüfung nicht bestanden: das PET mit umgekehrter Schichtfolge passt fast so gut "
+                         f"oder besser (MI {v:.4f} gegen kopfstehend {vz:.4f}, Abstand {gz:.1%}, nötig {margin:.0%}). "
+                         "Die Schichtreihenfolge ist nicht sicher; der Lauf schreibt nichts.")
+    _progress("## STEP side")
+    _, vm, _ = rigid(fixed, mirror(moving), mask, count=count, **kw)
+    gain = _gain(v, vm)
     q = {"metric": "Mattes MI, 40 Bins, voll abgetastet (niedriger ist besser)", "mi": round(v, 5),
-         "mi_gespiegelt": round(vm, 5), "abstand_relativ": round(gain, 4), "grenze_relativ": margin,
+         "mi_gespiegelt": round(vm, 5), "abstand_relativ": round(gain, 4), "mi_kopfstehend": round(vz, 5),
+         "abstand_kopfstehend_relativ": round(gz, 4), "grenze_relativ": margin,
          "starts": len(starts), "mi_je_start": starts}
     if gain < margin:
         raise SystemExit(f"Seitenprüfung nicht bestanden: das gespiegelte PET passt fast so gut oder besser "
@@ -202,6 +240,68 @@ def to_byte(ratio):
     return np.clip(np.rint(ratio * 255.0 / RATIO_MAX), 0, 255).astype(np.uint8)
 
 
+# ---------- control sheet ----------
+SHEET_PX = 300                          # height of one panel
+SHEET_FROM = 1.0                        # ratio where the colour starts: below it the T1 shows alone
+SHEET_FULL = 0.6                        # the colour reaches full strength this far above SHEET_FROM
+
+
+def _lut():
+    """Black body colours for ratio SHEET_FROM .. RATIO_MAX: red, yellow, white."""
+    x = np.linspace(1 / 3, 1, 256)
+    return (np.stack([np.clip(3 * x, 0, 1), np.clip(3 * x - 1, 0, 1), np.clip(3 * x - 2, 0, 1)], 1) * 255).astype(np.uint8)
+
+
+def _panel(t1, ratio, spacing_hw, flip_rows):
+    """One RGB panel: T1 grey, ratio in colour over it from SHEET_FROM up, rows flipped so that cranial is at the top."""
+    from PIL import Image
+    if flip_rows: t1, ratio = t1[::-1], ratio[::-1]
+    lo, hi = np.percentile(t1[t1 > 0], (1, 99.5)) if (t1 > 0).any() else (0.0, 1.0)
+    g = (np.clip((t1 - lo) / max(hi - lo, 1e-6), 0, 1) * 255).astype(np.uint8)
+    rgb = np.repeat(g[..., None], 3, -1).astype(np.float32)
+    # the colour fades in above SHEET_FROM, so that the brain at the reference level keeps its T1 grey
+    a = (np.clip((ratio - SHEET_FROM) / SHEET_FULL, 0, 1) * 0.7)[..., None]
+    k = np.clip((ratio - SHEET_FROM) / (RATIO_MAX - SHEET_FROM) * 255, 0, 255).astype(int)
+    rgb = (1 - a) * rgb + a * _lut()[k]
+    im = Image.fromarray(rgb.astype(np.uint8))
+    h, w = t1.shape
+    scale = SHEET_PX / (h * spacing_hw[0])
+    return im.resize((max(1, round(w * spacing_hw[1] * scale)), SHEET_PX), Image.BILINEAR)
+
+
+def control_sheet(t1, ratio, brain, spacing, path, title=""):
+    """PNG with the PET on the T1 through the centre of the brain: axial, coronal, sagittal, the T1 alone above and
+    with the PET below, R and L on the panels. It is for checking the fit and the side by eye, not for reading.
+
+    Arrays are [z, y, x] on the LPS grid: column 0 is the patient's right, row 0 anterior, z grows cranially. So the
+    axial and coronal panels show the patient's right on the image's left (radiological view)."""
+    from PIL import Image, ImageDraw
+    z, y, x = (int(round(c)) for c in np.mean(np.nonzero(brain), 1))
+    sx, sy, sz = spacing
+    cuts = [(t1[z], ratio[z], (sy, sx), False, ("R", "L")),           # axial: rows anterior..posterior
+            (t1[:, y], ratio[:, y], (sz, sx), True, ("R", "L")),      # coronal
+            (t1[:, :, x], ratio[:, :, x], (sz, sy), True, ("A", "P"))]  # sagittal
+    zero = np.zeros_like
+    tops = [_panel(a, zero(b), hw, f) for a, b, hw, f, _ in cuts]
+    bots = [_panel(a, b, hw, f) for a, b, hw, f, _ in cuts]
+    gap, head = 6, 24
+    width = sum(p.width for p in tops) + gap * (len(tops) + 1)
+    sheet = Image.new("RGB", (width, head + 2 * SHEET_PX + 3 * gap), (20, 20, 20))
+    d = ImageDraw.Draw(sheet)
+    d.text((gap, 6), title, fill=(230, 230, 230))
+    left = gap
+    for top, bot, (*_, marks) in zip(tops, bots, cuts):
+        for row, p in ((0, top), (1, bot)):
+            yy = head + gap + row * (SHEET_PX + gap)
+            sheet.paste(p, (left, yy))
+            d.text((left + 4, yy + SHEET_PX // 2), marks[0], fill=(255, 255, 0))
+            d.text((left + p.width - 12, yy + SHEET_PX // 2), marks[1], fill=(255, 255, 0))
+        left += top.width + gap
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    sheet.save(path)
+    return path
+
+
 # ---------- the run ----------
 def nearest_t1(log, cache, day, fixed_day=None):
     """The 3D T1 exam of the viewer cache nearest in time to `day` (or the one named), as (day, path)."""
@@ -221,6 +321,7 @@ def nearest_t1(log, cache, day, fixed_day=None):
 def run(pet_dir, cache, viewer_data, out=None, day=None, ref="brain", labels=None, side=None, fixed_day=None,
         weight_kg=None, activity_mbq=None, margin=MIRROR_MARGIN, **kw):
     """Read, register with the side check, write pet_<day>.js and the entry of pet.json. Returns that entry."""
+    _progress("## STEP read")
     pet, facts = read_pet(pet_dir)
     day = day or facts["day"]
     if weight_kg or activity_mbq:       # checked before the long registration
@@ -238,6 +339,7 @@ def run(pet_dir, cache, viewer_data, out=None, day=None, ref="brain", labels=Non
     ones = sitk.Image(pet.GetSize(), sitk.sitkUInt8) + 1
     ones.CopyInformation(pet)
     covered = sitk.GetArrayFromImage(sitk.Resample(ones, grid, t, sitk.sitkNearestNeighbor, 0)).astype(bool)
+    _progress("## STEP write")
     region, region_name = reference_mask(ref, brain, grid, labels, side)
     ratio, ref_value = ratio_volume(on_grid, region, covered)
     # SUV = C [Bq/ml] x weight [g] / activity [Bq]; per unit of ratio, C = ratio x reference value
@@ -259,5 +361,9 @@ def run(pet_dir, cache, viewer_data, out=None, day=None, ref="brain", labels=Non
         os.makedirs(out, exist_ok=True)
         sitk.WriteImage(geo.like(ratio.astype(np.float32), grid), os.path.join(out, f"pet_ratio_{day}.nii.gz"))
         sitk.WriteTransform(t, os.path.join(out, f"grid_to_pet_{day}.tfm"))
+        entry["sheet"] = control_sheet(sitk.GetArrayFromImage(fixed), ratio, brain, grid.GetSpacing(),
+                                       os.path.join(out, f"pet_kontrolle_{day}.png"),
+                                       # the default font of PIL has no umlauts
+                                       f"PET {day} auf T1 {t1_day}: Farbe ab {SHEET_FROM:g} x Referenz. R = rechts")
         json.dump(entry, open(os.path.join(out, f"pet_{day}.json"), "w", encoding="utf-8"), indent=1, ensure_ascii=False)
     return entry
