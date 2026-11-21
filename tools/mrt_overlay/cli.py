@@ -4,6 +4,7 @@
   python -m mrt_overlay.cli series EXAMDIR
   python -m mrt_overlay.cli onto MRI CT CTFRAME OUT [--rtstruct RS] [--labels SEG] [--prescription GY]
   python -m mrt_overlay.cli viewer CACHEF CT CTFRAME OUT [--rtstruct RS] [--labels SEG] [--viewer-data DIR]
+  python -m mrt_overlay.cli pet PETDIR CACHEF VIEWERDATA [--ref brain|striatum|contralateral] [--out DIR]
 """
 import argparse
 import json
@@ -13,7 +14,7 @@ import sys
 import numpy as np
 import SimpleITK as sitk
 
-from . import export as ex, geometry as geo, layer as ly, register as rg, series as se, ventricles as ve
+from . import export as ex, geometry as geo, layer as ly, pet as pe, register as rg, series as se, ventricles as ve
 
 
 def _ptv(a, grid_ct):
@@ -121,6 +122,13 @@ def cmd_viewer(a):
     print(json.dumps({k: info[k] for k in ("registration", "prescription_gy_rbe", "look_list")}, indent=1))
 
 
+def cmd_pet(a):
+    e = pe.run(a.pet, a.cache, a.viewer_data, out=a.out, day=a.day, ref=a.ref, labels=a.labels, side=a.side,
+               fixed_day=a.fixed_day, weight_kg=a.weight_kg, activity_mbq=a.activity_mbq, margin=a.mirror_margin)
+    print(json.dumps({k: e[k] for k in ("day", "tracer", "fixed_t1", "reference", "registration")}, indent=1,
+                     ensure_ascii=False))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -145,6 +153,20 @@ def main(argv=None):
             p.add_argument("--no-check", dest="check", action="store_false", help="skip the check per exam")
             p.add_argument("--kennzahlen", help="kennzahlen.json path (numbers only)")
         p.set_defaults(f=f)
+    p = sub.add_parser("pet", help="PET series onto the viewer grid as a ratio layer, with the side check")
+    p.add_argument("pet", help="folder of the PET DICOM series (Modality PT)")
+    p.add_argument("cache", help="cacheF folder of the viewer (log.json, ref_t1.nii.gz, mask.npy, t1_*.npy)")
+    p.add_argument("viewer_data", help="Verlauf-Daten folder of the viewer: pet_<day>.js and pet.json land there")
+    p.add_argument("--out", help="folder for the ratio NIfTI, the transform and the run's JSON")
+    p.add_argument("--day", help="date of the PET, YYYY-MM-DD (default: from the header)")
+    p.add_argument("--fixed-day", help="date of the 3D T1 to register on (default: the nearest in time)")
+    p.add_argument("--ref", choices=("brain", "striatum", "contralateral"), default="brain")
+    p.add_argument("--labels", help="SynthSeg label map of the viewer's reference T1 (for --ref striatum)")
+    p.add_argument("--side", choices=("links", "rechts"), help="for --ref contralateral: the side NOT to use")
+    p.add_argument("--weight-kg", type=float); p.add_argument("--activity-mbq", type=float)
+    p.add_argument("--mirror-margin", type=float, default=pe.MIRROR_MARGIN,
+                   help="how much better (relative MI) the unflipped PET must fit than the flipped one")
+    p.set_defaults(f=cmd_pet)
     a = ap.parse_args(argv)
     a.f(a)
 
