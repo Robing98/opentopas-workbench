@@ -4,6 +4,8 @@ import bisect, hashlib, importlib.util, json, math, os, random, re
 
 import pytest
 
+np = pytest.importorskip("numpy")
+
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GEN = os.path.join(ROOT, "opentopas_workbench", "generators")
 SNAP = os.path.join(ROOT, "tests", "data", "fluka")
@@ -35,36 +37,52 @@ def geometry(text):
     return bodies, regions
 
 
-def inside(body, p):
-    kind, v = body
-    if kind == "RPP": return v[0] < p[0] < v[1] and v[2] < p[1] < v[3] and v[4] < p[2] < v[5]
-    n, q = v[:3], v[3:]
-    return sum(n[k] * (p[k] - q[k]) for k in range(3)) < 0          # PLA: inside is opposite the normal
+class Points:
+    """Many points at once, each body's inside test computed once for all of them (numpy), so a region of a thousand
+    zones is checked for thousands of points in a fraction of a second."""
+    def __init__(self, bodies, pts):
+        self.bodies, self.p, self.memo = bodies, np.asarray(pts, dtype=float).reshape(-1, 3), {}
+
+    def inside(self, name):
+        if name not in self.memo:
+            kind, v = self.bodies[name]; p = self.p
+            if kind == "RPP":
+                r = np.ones(len(p), bool)
+                for k in range(3): r &= (v[2 * k] < p[:, k]) & (p[:, k] < v[2 * k + 1])
+            else:
+                r = (p - np.array(v[3:])) @ np.array(v[:3]) < 0      # PLA: inside is opposite the normal
+            self.memo[name] = r
+        return self.memo[name]
 
 
-def evaluate(tokens, bodies, p):
+def evaluate(tokens, pts):
     """Union of zones ('|'), each an intersection of signed bodies or signed parenthesised expressions."""
+    n = len(pts.p)
     def expr(i):
-        zones, cur, ok = [], [], True
+        union, ok, open_ = np.zeros(n, bool), np.ones(n, bool), False
         while i < len(tokens) and tokens[i] != ")":
             t = tokens[i]
             if t == "|":
-                if cur: zones.append(ok)
-                cur, ok = [], True; i += 1; continue
+                if open_: union |= ok
+                ok, open_ = np.ones(n, bool), False; i += 1; continue
             sign = t[0]
             if t[1:] == "(" or (t[1:] == "" and tokens[i + 1] == "("):
-                j = i + (1 if t[1:] == "(" else 2)
-                val, i = expr(j); i += 1
+                val, i = expr(i + (1 if t[1:] == "(" else 2)); i += 1
             else:
-                val = inside(bodies[t[1:]], p); i += 1
-            ok = ok and (val if sign == "+" else not val); cur.append(t)
-        if cur: zones.append(ok)
-        return any(zones), i
+                val = pts.inside(t[1:]); i += 1
+            ok = ok & (val if sign == "+" else ~val); open_ = True
+        if open_: union |= ok
+        return union, i
     return expr(0)[0]
 
 
-def where(bodies, regions, p):
-    return [r for r, toks in regions.items() if evaluate(toks, bodies, p)]
+def where(bodies, regions, pts):
+    """For each point, the number of regions that hold it, and the name of the last one."""
+    pts = Points(bodies, pts)
+    count, last = np.zeros(len(pts.p), int), np.full(len(pts.p), "", dtype=object)
+    for r, toks in regions.items():
+        hit = evaluate(toks, pts); count += hit; last[hit] = r
+    return count, last
 
 
 # ------------------------------------------------------------------ geometry checks
@@ -77,11 +95,13 @@ def test_regions_tile_the_world(v):
     text = FK.write(RF.case_model("p", 63, v, 1000, 0.2, 1.5, "fk"))
     bodies, regions = geometry(text)
     rnd = random.Random(1)
+    pts = []
     for k in range(1500):
         z = rnd.uniform(-80.8, -79.0) if k % 3 else rnd.uniform(-139, 139)   # mostly in the filter layers
-        p = (rnd.uniform(-7, 7) if k % 2 else rnd.uniform(-29, 29), rnd.uniform(-7, 7), z)
-        hit = where(bodies, regions, p)
-        assert len(hit) == 1 and hit[0] != "BLKHOLE", (p, hit)
+        pts.append((rnd.uniform(-7, 7) if k % 2 else rnd.uniform(-29, 29), rnd.uniform(-7, 7), z))
+    count, last = where(bodies, regions, pts)
+    bad = [(pts[k], count[k], last[k]) for k in range(len(pts)) if count[k] != 1 or last[k] == "BLKHOLE"]
+    assert not bad, bad[:5]
 
 
 def expected_thickness(r, x, y):
@@ -108,8 +128,8 @@ def test_thickness_along_the_beam_matches_topas(v):
         for i, r in enumerate(m["filters"], 1):
             z0 = r["tz"] * 10 - r["height"] / 2; nz = 400
             dz = r["height"] / nz
-            got = sum(dz for j in range(nz) if evaluate(regions[f"RIFI{i}"], bodies,
-                                                        FK.to_fluka((x, y, (z0 + (j + 0.5) * dz) / 10))))
+            col = [FK.to_fluka((x, y, (z0 + (j + 0.5) * dz) / 10)) for j in range(nz)]
+            got = dz * int(evaluate(regions[f"RIFI{i}"], Points(bodies, col)).sum())
             assert got == pytest.approx(expected_thickness(r, x, y), abs=2 * dz), (v, i, x, y)
 
 
