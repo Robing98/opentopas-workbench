@@ -216,3 +216,68 @@ def test_usbrea_to_workbench_csv():
     k2 = [float(v) for v in csv[8].split(",")]
     assert k2[:3] == [0, 0, 2] and k2[3] == pytest.approx(4e-3 * 1.602176634e-7 * 1000) and k2[4] == pytest.approx(k2[3] * 0.005)
     with pytest.raises(ValueError, match="4 bins"): FK.read_usbrea("no numbers here\n1.0 2.0\n", 4)
+
+
+# ------------------------------------------------------------------ the FLUKA job of the workbench queue
+# Stand-ins for rfluka, usbsuw and usbrea: shell scripts that do what the job expects of the real programs. The tests
+# never start FLUKA; only its user does, from the queue.
+FAKE = {
+    "rfluka": '#!/bin/bash\necho "rfluka $@" >> calls.txt\nfor c in 001 002 003 004 005; do echo bin > "${@: -1}${c}_fort.21"; done\n',
+    "usbsuw": '#!/bin/bash\ncat > usbsuw.stdin\necho bnn > "$(tail -n 1 usbsuw.stdin)"\n',
+    "usbrea": '#!/bin/bash\nread inp; read out\n[ -f "$inp" ] || exit 3\ncat "$USBREA_TEXT" > "$out"\n',
+}
+
+
+@pytest.fixture
+def queue(tmp_path, monkeypatch):
+    from opentopas_workbench import server as wb
+    fk = tmp_path / "fluka_bin"; fk.mkdir()
+    for n, body in FAKE.items(): (fk / n).write_text(body); (fk / n).chmod(0o755)
+    (tmp_path / "usbrea.txt").write_text(USBREA)
+    monkeypatch.setenv("USBREA_TEXT", str(tmp_path / "usbrea.txt"))
+    ws = tmp_path / "ws"; ws.mkdir()
+    monkeypatch.setitem(wb.STATE, "root", str(ws))
+    monkeypatch.setitem(wb.STATE, "cfg", {"binaries": [], "lang": "en", "fluka_dir": str(fk), "keep_awake": False, "toast": False})
+    monkeypatch.setitem(wb.STATE, "jobs", [])
+    monkeypatch.setitem(wb.STATE, "proc", None)
+    m = RF.case_model("p", 63, "rifi0", 1003, 0.2, 1.5, "fk"); m["phantom"]["zbins"] = 4
+    (ws / "cases").mkdir(); (ws / "cases" / "fk_p063_rifi0.inp").write_text(FK.write(m))
+    return wb, ws
+
+
+def test_fluka_job_waits_for_the_start_by_hand(queue):
+    wb, ws = queue
+    wb.enqueue(["cases/fk_p063_rifi0.inp"], "OpenTOPAS (topas4)", "", False)
+    assert [(j["binary"], j["status"]) for j in wb.STATE["jobs"]] == [("FLUKA", "held")]
+    wb.worker_step()
+    assert wb.STATE["jobs"][0]["status"] == "held" and not (ws / "cases" / "calls.txt").exists()
+    assert wb.release_jobs({999}) == 0 and wb.release_jobs({wb.STATE["jobs"][0]["id"]}) == 1
+    assert wb.STATE["jobs"][0]["status"] == "queued"
+
+
+def test_fluka_job_runs_merges_and_writes_the_csv(queue):
+    wb, ws = queue
+    wb.enqueue(["cases/fk_p063_rifi0.inp"], "", "out", False)
+    wb.release_jobs()
+    wb.worker_step()
+    job = wb.STATE["jobs"][0]
+    out = ws / "cases" / "out"
+    assert job["status"] == "done", open(ws / job["log"]).read()
+    assert (out / "calls.txt").read_text() == "rfluka -N0 -M5 fk_p063_rifi0\n"
+    sw = (out / "usbsuw.stdin").read_text().splitlines()
+    assert sw == [f"fk_p063_rifi0{c:03d}_fort.21" for c in range(1, 6)] + ["", "fk_p063_rifi0_21.bnn"]
+    csv = (out / "IDD_fk_p063_rifi0.csv").read_text().splitlines()
+    assert "cases/out/IDD_fk_p063_rifi0.csv" in job["outputs"]
+    k2 = [float(v) for v in csv[8].split(",")]
+    assert k2[3] == pytest.approx(4e-3 * 1.602176634e-7 * 1005)     # summed over the 5 x 201 primaries that ran
+    # and the workbench reads it like a TOPAS result
+    r = wb.read_topas_csv(str(out / "IDD_fk_p063_rifi0.csv"))
+    assert r is not None
+
+
+def test_fluka_job_fails_when_usbrea_gives_nothing(queue, monkeypatch, tmp_path):
+    wb, ws = queue
+    (tmp_path / "usbrea.txt").write_text("no numbers\n")
+    wb.enqueue(["cases/fk_p063_rifi0.inp"], "", "", False); wb.release_jobs(); wb.worker_step()
+    job = wb.STATE["jobs"][0]
+    assert job["status"] == "failed" and "not converted" in open(ws / job["log"]).read()

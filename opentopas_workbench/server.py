@@ -11,7 +11,7 @@ Security: listens on 127.0.0.1 only, checks the Host header and requires a per-s
 and only touches files inside the workspace. The one exception is the Machines view: it reads matRad machine files
 (.mat) that the page names, by default from the matRad folder in the user's home, and writes nothing there.
 """
-import argparse, base64, csv, fnmatch, io, zipfile, importlib.util, json, os, re, secrets, shutil, signal, socketserver, subprocess, sys, threading, time, webbrowser
+import argparse, base64, csv, fnmatch, io, zipfile, importlib.util, json, os, re, secrets, shlex, shutil, signal, socketserver, subprocess, sys, threading, time, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -523,16 +523,80 @@ def job_worker():
         worker_step()
 
 
+# ------------------------------------------------------------------ FLUKA jobs
+# FLUKA is licensed to its user personally: the workbench never starts it on its own. A FLUKA input enters the queue
+# held, and only the Start button of the queue (/api/release) lets it run.
+FLUKA_BINARY = "FLUKA"
+FLUKA_DIR_DEFAULT = "/home/robin/fluka/fluka4-5.2/bin"
+FLUKA_CYCLES = 5    # rfluka -M, the CYCLES of generators/_fluka.py: START there is the count of one cycle
+FLUKA_UNIT = 21     # the USRBIN unit of generators/_fluka.py: rfluka names the cycle files NAME001_fort.21 and so on
+
+
+def fluka_dir(): return os.path.expanduser(STATE["cfg"].get("fluka_dir") or FLUKA_DIR_DEFAULT)
+
+
+def fluka_module():
+    spec = importlib.util.spec_from_file_location("wb_fluka", os.path.join(TOOL_DIR, "generators", "_fluka.py"))
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    return mod
+
+
+def fluka_script(name):
+    """The shell steps of one FLUKA job in its output folder: the cycles, then usbsuw merges the binary USRBIN files of
+    all cycles (file names one a line, a blank line, the output name) and usbrea prints the merged file as text (input
+    name, output name). Both read their answers from stdin, as the manual's description of the programs gives them."""
+    q = shlex.quote
+    merged, text = f"{name}_{FLUKA_UNIT}.bnn", f"{name}_{FLUKA_UNIT}.txt"
+    return "\n".join([
+        "set -e",
+        f"export PATH={q(fluka_dir())}:\"$PATH\"",
+        f"rfluka -N0 -M{FLUKA_CYCLES} {q(name)}",
+        f"ls {q(name)}[0-9][0-9][0-9]_fort.{FLUKA_UNIT} > {q(name)}.usbsuw.in",
+        f"printf '\\n%s\\n' {q(merged)} >> {q(name)}.usbsuw.in",
+        f"usbsuw < {q(name)}.usbsuw.in",
+        f"printf '%s\\n%s\\n' {q(merged)} {q(text)} | usbrea",
+        ""])
+
+
+def fluka_convert(param, out):
+    """usbrea's text output to the workbench CSV, named like the TOPAS scorer file of the same case."""
+    fk = fluka_module()
+    with open(param) as fh: m = fk.read_case(fh.read())
+    name = os.path.splitext(os.path.basename(param))[0]
+    with open(os.path.join(out, f"{name}_{FLUKA_UNIT}.txt")) as fh:
+        vals, errs = fk.read_usbrea(fh.read(), m["phantom"]["zbins"])
+    path = os.path.join(out, m["score"]["name"] + ".csv")
+    with open(path, "w") as fh: fh.write(fk.to_csv(vals, errs, m))
+    return path
+
+
+def release_jobs(ids=None):
+    """Held FLUKA jobs to queued: the start by the user's hand. None releases every held job."""
+    n = 0
+    with STATE["lock"]:
+        for j in STATE["jobs"]:
+            if j["status"] == "held" and (ids is None or j["id"] in ids): j["status"] = "queued"; n += 1
+        save_jobs()
+    return n
+
+
 def run_job(job):
-    binary = next((b for b in STATE["cfg"]["binaries"] if b["name"] == job["binary"]), None)
+    fluka = job["binary"] == FLUKA_BINARY
+    binary = None if fluka else next((b for b in STATE["cfg"]["binaries"] if b["name"] == job["binary"]), None)
     logdir = os.path.join(wb_dir(), "logs"); os.makedirs(logdir, exist_ok=True)
     job["log"] = relp(os.path.join(logdir, f"job{job['id']:05d}.log"))
     try:
         param = resolve(job["file"])
         out = resolve(os.path.join(os.path.dirname(job["file"]), job.get("subdir") or ""))
         os.makedirs(out, exist_ok=True)
-        if binary is None: raise RuntimeError(f"binary '{job['binary']}' not configured")
-        env = dict(os.environ, **{k: os.path.expanduser(v) for k, v in binary.get("env", {}).items()})
+        if binary is None and not fluka: raise RuntimeError(f"binary '{job['binary']}' not configured")
+        env = dict(os.environ, **{k: os.path.expanduser(v) for k, v in (binary or {}).get("env", {}).items()})
+        if fluka:   # rfluka runs in its output folder and takes the input's name without .inp
+            name = os.path.splitext(os.path.basename(param))[0]
+            if out != os.path.dirname(param): shutil.copy2(param, os.path.join(out, name + ".inp"))
+            cmd = ["bash", "-c", fluka_script(name)]
+        else:
+            cmd = [os.path.expanduser(binary["cmd"]), param]
         # copy companion geometry files (STL/PLY) so relative InputFile paths work in a subfolder
         if out != os.path.dirname(param):
             for f in os.listdir(os.path.dirname(param)):
@@ -544,14 +608,19 @@ def run_job(job):
         job["total"], job["energy"] = job_size(param, max_age=0)   # the file may have been edited right before the start
         t0 = time.time(); job["t0"] = t0
         with open(resolve(job["log"]), "w") as log:
-            log.write(f"# {job['start']}  {binary['cmd']} {param}\n# cwd: {out}\n"); log.flush()
-            proc = subprocess.Popen([os.path.expanduser(binary["cmd"]), param], cwd=out, stdout=log, stderr=subprocess.STDOUT,
+            log.write(f"# {job['start']}  {' '.join(cmd) if fluka else binary['cmd'] + ' ' + param}\n# cwd: {out}\n"); log.flush()
+            proc = subprocess.Popen(cmd, cwd=out, stdout=log, stderr=subprocess.STDOUT,
                                     env=env, start_new_session=True)
             with STATE["lock"]: STATE["proc"] = proc
             while True:   # this thread is the only one that feeds the keep-awake heartbeat, so it must not block for the whole run
                 try: rc = proc.wait(timeout=AWAKE_EVERY); break
                 except subprocess.TimeoutExpired: tend_awake()
         if STATE.get("closing"): return   # the server is ending: the record stays "running", so the next start runs the job again
+        if fluka and rc == 0 and not STATE["stop"]:
+            try: fluka_convert(param, out)
+            except (OSError, ValueError, KeyError) as e:
+                rc = 1
+                with open(resolve(job["log"]), "a") as log: log.write(f"\nFLUKA result not converted: {e}\n")
         job["seconds"] = round(time.time() - t0)
         job["outputs"] = sorted(relp(os.path.join(out, f)) for f, mt in snapshot().items()
                                 if before.get(f) != mt and not f.lower().endswith((".stl", ".ply")))
@@ -583,7 +652,9 @@ def enqueue(files, binary, subdir, skip_existing):
             if outs and os.path.isdir(od) and all(has_output(dir_names(od), o) for o in outs):
                 skipped.append(f); continue
         with STATE["lock"]:
-            STATE["jobs"].append({"id": STATE["next_id"], "file": f, "binary": binary, "subdir": subdir, "status": "queued",
+            fluka = f.lower().endswith(".inp")
+            STATE["jobs"].append({"id": STATE["next_id"], "file": f, "binary": FLUKA_BINARY if fluka else binary, "subdir": subdir,
+                                  "status": "held" if fluka else "queued",
                                   "queued": time.strftime("%Y-%m-%d %H:%M:%S")})
             STATE["next_id"] += 1
         added.append(f)
@@ -1064,7 +1135,7 @@ def load_generators():
 
 def gen_schema():
     return [{"id": k, "name": getattr(m, "NAME", {"en": k}), "description": getattr(m, "DESCRIPTION", {}),
-             "fields": getattr(m, "FIELDS", [])} for k, m in load_generators().items()]
+             "fields": getattr(m, "FIELDS", []), "fluka": hasattr(m, "generate_fluka")} for k, m in load_generators().items()]
 
 # ------------------------------------------------------------------ RiFi designer
 RIFI_DELTAS = [round(2.0 + 0.25 * i, 2) for i in range(21)]      # mm water, layer spacings of the ripple curves
@@ -1586,8 +1657,8 @@ class H(BaseHTTPRequestHandler):
                 with STATE["lock"]:
                     alljobs = list(STATE["jobs"]); running = STATE["proc"] is not None; rev = STATE["rev"]
                 # every waiting job is sent (a long queue must stay complete for "remove waiting"), history only up to hist
-                active = [j for j in alljobs if j["status"] in ("queued", "running")]
-                finished = [j for j in alljobs if j["status"] not in ("queued", "running")]
+                active = [j for j in alljobs if j["status"] in ("queued", "running", "held")]
+                finished = [j for j in alljobs if j["status"] not in ("queued", "running", "held")]
                 keep = {id(j) for j in active} | {id(j) for j in finished[max(0, len(finished) - hist):]}
                 jobs = [dict(j) for j in alljobs if id(j) in keep]
                 counts = {}
@@ -1684,6 +1755,8 @@ class H(BaseHTTPRequestHandler):
                 a, s = enqueue(b["files"], b["binary"], b.get("subdir", ""), b.get("skip", False))
                 return self.send(200, {"added": a, "skipped": s})
             if u.path == "/api/stop": stop_current(); return self.send(200, {"ok": True})
+            if u.path == "/api/release":
+                return self.send(200, {"ok": True, "released": release_jobs(None if b.get("all") else set(b.get("ids", [])))})
             if u.path == "/api/views":
                 os.makedirs(wb_dir(), exist_ok=True)
                 with open(os.path.join(wb_dir(), "views.json"), "w") as fh: json.dump(b.get("views", [])[:200], fh, indent=1)
@@ -1712,7 +1785,7 @@ class H(BaseHTTPRequestHandler):
                 ids, n = set(b.get("ids", [])), 0
                 with STATE["lock"]:
                     for j in STATE["jobs"]:
-                        if j["status"] == "queued" and (b.get("all") or j["id"] in ids): j["status"] = "removed"; n += 1
+                        if j["status"] in ("queued", "held") and (b.get("all") or j["id"] in ids): j["status"] = "removed"; n += 1
                     save_jobs()
                 return self.send(200, {"ok": True, "removed": n})
             if u.path == "/api/outputs":
@@ -1723,7 +1796,7 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, {"outputs": out})
             if u.path == "/api/clearhistory":
                 with STATE["lock"]:
-                    STATE["jobs"] = [j for j in STATE["jobs"] if j["status"] in ("queued", "running")]; save_jobs()
+                    STATE["jobs"] = [j for j in STATE["jobs"] if j["status"] in ("queued", "running", "held")]; save_jobs()
                 return self.send(200, {"ok": True})
             if u.path == "/api/config":
                 cfg = STATE["cfg"]
@@ -1732,6 +1805,7 @@ class H(BaseHTTPRequestHandler):
                 if "keep_display" in b: cfg["keep_display"] = bool(b["keep_display"])
                 if "toast" in b: cfg["toast"] = bool(b["toast"])
                 if "machines_dir" in b: cfg["machines_dir"] = str(b["machines_dir"] or "").strip()
+                if "fluka_dir" in b: cfg["fluka_dir"] = str(b["fluka_dir"] or "").strip()
                 for k in ("exclude", "include"):
                     if k in b: cfg[k] = [str(x).strip() for x in b[k] if str(x).strip()][:200]; invalidate_cache()
                 if "binaries" in b:
@@ -1748,7 +1822,11 @@ class H(BaseHTTPRequestHandler):
                 gens = load_generators()
                 mod = gens.get(b["id"])
                 if mod is None: raise ValueError("unknown generator")
-                files = mod.generate(b.get("values", {}))
+                if b.get("backend", "topas") == "fluka":
+                    if not hasattr(mod, "generate_fluka"): raise ValueError("this generator writes no FLUKA input yet")
+                    files = mod.generate_fluka(b.get("values", {}))
+                else:
+                    files = mod.generate(b.get("values", {}))
                 folder = b.get("folder", "")
                 if b.get("preview"):
                     first = next((t for _, t in files if isinstance(t, str)), "")
