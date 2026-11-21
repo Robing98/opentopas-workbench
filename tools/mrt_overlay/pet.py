@@ -269,13 +269,19 @@ def _panel(t1, ratio, spacing_hw, flip_rows):
     return im.resize((max(1, round(w * spacing_hw[1] * scale)), SHEET_PX), Image.BILINEAR)
 
 
-def control_sheet(t1, ratio, brain, spacing, path, title=""):
+def control_sheet(t1, ratio, brain, grid, path, title=""):
     """PNG with the PET on the T1 through the centre of the brain: axial, coronal, sagittal, the T1 alone above and
     with the PET below, R and L on the panels. It is for checking the fit and the side by eye, not for reading.
 
-    Arrays are [z, y, x] on the LPS grid: column 0 is the patient's right, row 0 anterior, z grows cranially. So the
-    axial and coronal panels show the patient's right on the image's left (radiological view)."""
+    Arrays are [z, y, x] on `grid`. They are turned to LPS first (the viewer's ref_t1 may be stored as RAS): then
+    column 0 is the patient's right, row 0 anterior, z grows cranially, and the axial and coronal panels show the
+    patient's right on the image's left (radiological view)."""
     from PIL import Image, ImageDraw
+    lps = lambda a: sitk.DICOMOrient(geo.like(np.asarray(a, np.float32), grid), "LPS")
+    t1_img = lps(t1)
+    spacing = t1_img.GetSpacing()
+    t1, ratio, brain = (sitk.GetArrayFromImage(i) for i in (t1_img, lps(ratio), lps(brain)))
+    brain = brain > 0.5
     z, y, x = (int(round(c)) for c in np.mean(np.nonzero(brain), 1))
     sx, sy, sz = spacing
     cuts = [(t1[z], ratio[z], (sy, sx), False, ("R", "L")),           # axial: rows anterior..posterior
@@ -348,6 +354,11 @@ def run(pet_dir, cache, viewer_data, out=None, day=None, ref="brain", labels=Non
              "registration": q, "units": facts["units"], "decay_correction": facts["decay_correction"],
              "sorted_by": facts["sorted_by"], "spacing_mm": facts["spacing_mm"], "suv_per_ratio": suv,
              "hinweis": "kein SUV" if suv is None else "SUV aus Gewicht und Aktivität von Hand, ohne Prüfung der Zerfallskorrektur"}
+    if out:
+        sheet = control_sheet(sitk.GetArrayFromImage(fixed), ratio, brain, grid,
+                              os.path.join(out, f"pet_kontrolle_{day}.png"),
+                              # the default font of PIL has no umlauts
+                              f"PET {day} auf T1 {t1_day}: Farbe ab {SHEET_FROM:g} x Referenz. R = rechts")
     os.makedirs(viewer_data, exist_ok=True)
     open(os.path.join(viewer_data, f"pet_{day}.js"), "w").write(ly.montage_js(to_byte(ratio), "pet", day))
     meta_path = os.path.join(viewer_data, "pet.json")
@@ -361,9 +372,6 @@ def run(pet_dir, cache, viewer_data, out=None, day=None, ref="brain", labels=Non
         os.makedirs(out, exist_ok=True)
         sitk.WriteImage(geo.like(ratio.astype(np.float32), grid), os.path.join(out, f"pet_ratio_{day}.nii.gz"))
         sitk.WriteTransform(t, os.path.join(out, f"grid_to_pet_{day}.tfm"))
-        entry["sheet"] = control_sheet(sitk.GetArrayFromImage(fixed), ratio, brain, grid.GetSpacing(),
-                                       os.path.join(out, f"pet_kontrolle_{day}.png"),
-                                       # the default font of PIL has no umlauts
-                                       f"PET {day} auf T1 {t1_day}: Farbe ab {SHEET_FROM:g} x Referenz. R = rechts")
+        entry["sheet"] = sheet
         json.dump(entry, open(os.path.join(out, f"pet_{day}.json"), "w", encoding="utf-8"), indent=1, ensure_ascii=False)
     return entry

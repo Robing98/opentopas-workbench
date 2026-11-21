@@ -1753,7 +1753,7 @@ async function ptStart(){$("ptStart").disabled=true;
 async function ptLoad(){ptBuild();try{const r=await api("/api/pet");if(!PT.filled){ptFill(r.form);PT.filled=true}
   if(!r.script)$("ptMsg").textContent=t("pt_noscript");ptShow(r.job)}catch(e){$("ptMsg").textContent=t("error")+": "+e.message}}
 async function ptPoll(){clearTimeout(PT.timer);PT.timer=null;try{ptShow((await api("/api/pet")).job)}catch(e){}}
-function ptShow(j){const was=PT.job&&PT.job.running;PT.job=j;const run=!!(j&&j.running);$("ptStart").disabled=run;$("ptStop").hidden=!run;
+function ptShow(j){PT.job=j;const run=!!(j&&j.running);$("ptStart").disabled=run;$("ptStop").hidden=!run;
  if(!j||!j.status){$("ptLive").hidden=true;$("ptRes").hidden=true;return}
  $("ptLive").hidden=false;const st=j.steps||{};
  $("ptSteps").innerHTML=Object.keys(st).filter(k=>st[k]!=="skip").map(k=>`<span class="${st[k]==="now"&&run?"on":st[k]==="done"?"done":""}">${esc(t("pt_s_"+k))}</span>`).join("");
@@ -1764,16 +1764,18 @@ function ptShow(j){const was=PT.job&&PT.job.running;PT.job=j;const run=!!(j&&j.r
   +(j.note?`<span class="log-err">${esc(t("lt_m_"+j.note))}</span>`:"")+(j.error?`<span class="log-err">${esc(j.error)}</span>`:"");
  const pre=$("ptLog"),atEnd=pre.scrollTop+pre.clientHeight>=pre.scrollHeight-4;pre.textContent=j.log||"";if(atEnd)pre.scrollTop=pre.scrollHeight;
  if(!run&&j.status==="failed")pre.parentElement.open=true;
- ptResult(j,was&&!run);if(run&&isTab("letd"))PT.timer=setTimeout(ptPoll,2000)}
-/* the sheet is fetched once per finished run: the img cannot send the token header, so it goes as a query value */
-function ptResult(j,fresh){const r=j.result;$("ptRes").hidden=!r;if(!r)return;const nf=n=>Number(n).toLocaleString(loc(),{maximumFractionDigits:4});
+ ptResult(j);if(run&&isTab("letd"))PT.timer=setTimeout(ptPoll,2000)}
+/* the sheet is fetched once per finished run (keyed by its end time, so a run seen only after it ended loads its own
+   sheet too): the img cannot send the token header, so it goes as a query value */
+function ptResult(j){const r=j.result;$("ptRes").hidden=!r;if(!r)return;const nf=n=>Number(n).toLocaleString(loc(),{maximumFractionDigits:4});
  const reg=r.registration||{};let h=`<span>${esc(t("pt_head").replace("{d}",r.day||"?").replace("{tr}",r.tracer||"?").replace("{t}",r.fixed_t1||"?"))}</span><span class="mute">${esc(r.reference||"")}</span>`;
  if(j.html)h+=`<button class="pri" id="ptOpen">${esc(t("lt_open"))}</button>`;
  $("ptResHead").innerHTML=h;if(j.html)$("ptOpen").onclick=()=>api("/api/pet/open",{}).catch(e=>toast(t("error")+": "+e.message,"err"));
  const pc=v=>v==null?"":` (${esc(t("pt_gap").replace("{v}",nf(100*v)))})`;
  $("ptMi").innerHTML=reg.mi!=null?`<span>${esc(t("pt_mi"))}: <b>${nf(reg.mi)}</b></span><span>${esc(t("pt_mi_z"))}: ${nf(reg.mi_kopfstehend)}${pc(reg.abstand_kopfstehend_relativ)}</span><span>${esc(t("pt_mi_m"))}: ${nf(reg.mi_gespiegelt)}${pc(reg.abstand_relativ)}</span>`:"";
  const img=$("ptSheet");img.alt=t("pt_sheet_alt");
- if(r.sheet&&(fresh||!img.src)){img.src="/api/pet/sheet?token="+encodeURIComponent(TOKEN)+"&t="+(j.end||"");img.hidden=false}else if(!r.sheet)img.hidden=true;
+ const src="/api/pet/sheet?token="+encodeURIComponent(TOKEN)+"&t="+encodeURIComponent(j.end||"");
+ if(r.sheet){if(img.getAttribute("src")!==src)img.src=src;img.hidden=false}else img.hidden=true;
  $("ptHint").textContent=r.hinweis||""}
 
 /* ---------- start */

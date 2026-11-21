@@ -171,3 +171,22 @@ def test_reference_median_ignores_grid_outside_the_pet():
     assert ref == 2.0 and float(ratio[0, 0, 0]) == 1.0
     with pytest.raises(SystemExit):
         pe.ratio_volume(pet_on_grid, brain, np.zeros_like(covered))
+
+
+def test_control_sheet_puts_the_patient_s_right_on_the_left_also_for_a_ras_grid(tmp_path):
+    # the viewer's ref_t1 may be stored as RAS (column 0 is the patient's left); the R mark must still be right
+    from PIL import Image
+    shape = (20, 30, 40)
+    for name, direction in (("lps", (1, 0, 0, 0, 1, 0, 0, 0, 1)), ("ras", (-1, 0, 0, 0, -1, 0, 0, 0, 1))):
+        grid = sitk.Image(shape[::-1], sitk.sitkFloat32); grid.SetDirection(direction); grid.SetOrigin((0.0, 0.0, 0.0))
+        idx = np.indices(shape)
+        x_mm = np.asarray(direction[0]) * idx[2]                         # physical x (LPS) of every voxel
+        ratio = np.where(x_mm < x_mm.mean(), 1.5, 0.5)                   # warm (red) on the patient's right half
+        t1 = np.full(shape, 100.0); brain = np.ones(shape, bool)
+        p = pe.control_sheet(t1, ratio, brain, grid, str(tmp_path / f"{name}.png"))
+        im = np.asarray(Image.open(p).convert("RGB")).astype(int)
+        row = im[24 + 6 + pe.SHEET_PX + 6 + pe.SHEET_PX // 4]            # a line through the lower axial panel
+        axial = row[6:6 + round(40 * pe.SHEET_PX / 30)]
+        red = axial[:, 0] - axial[:, 1] > 40
+        half = len(axial) // 2
+        assert red[:half].mean() > 0.9 and red[half:].mean() < 0.1, name
