@@ -33,9 +33,15 @@ Input files: TOPAS csv (laterally integrated, one X and Y bin), PTW .mcc, or two
 Options for tests with simulated data: --noise PCT (Gaussian noise relative to the peak), --coarse (1 mm steps in the
 plateau, 0.1 mm around the peak, like a typical water column scan). Results: kernfit.csv and plots in --out.
 """
-import argparse, glob, os, re, struct, sys
+import argparse, glob, importlib.util, os, re, struct, sys
 import numpy as np
 from scipy.optimize import least_squares, nnls
+
+# The geometry rules of the thickness kernel (sampling a ridge, which ridges add and which convolve) live in the
+# workbench's _rifi.py, shared with the RiFi designer of the web UI.
+_spec = importlib.util.spec_from_file_location("wb_rifi", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                                                     "opentopas_workbench", "generators", "_rifi.py"))
+RIFI = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(RIFI)
 
 SHAPES = ("gauss", "box", "pyramid")
 SPR_BY_MATERIAL = {"G4_PLEXIGLASS": None, "LUCITE": None, "PMMA": None, "G4_WATER": 1.0, "WATER": 1.0}   # None = --spr
@@ -178,19 +184,8 @@ def convolve_kernels(a, b):
 
 
 def ridge_samples(x, z, width=None, n=200001, pitch=None, offset=0.0):
-    """Thickness along one period of a TsRidgeFilter profile (TOPAS closes the profile at 0 on both ends).
-
-    With a ridge spacing (pitch) wider than the ridge, the gap between two ridges holds no material. offset (mm) is
-    where the ridge starts on the common grid, so plates of one period sampled with their own offsets add point by
-    point (a laminate, or plates slid against each other by a tilt)."""
-    x = np.asarray(x, float); z = np.asarray(z, float)
-    width = width or x[-1]
-    if x[0] > 0: x = np.r_[0.0, x]; z = np.r_[0.0, z]
-    if x[-1] < width: x = np.r_[x, width]; z = np.r_[z, 0.0]
-    period = max(pitch or width, width)
-    if period > width * (1 + 1e-9): x = np.r_[x, np.nextafter(width, np.inf), period]; z = np.r_[z, 0.0, 0.0]
-    xs = np.linspace(0, period, n + 1)[:-1] + period / (2 * n)
-    return np.interp(np.mod(xs - offset, period), x, z)
+    """Thickness along one period of a TsRidgeFilter profile, see _rifi.ridge_samples."""
+    return np.asarray(RIFI.ridge_samples(x, z, width, n=n, pitch=pitch, offset=offset))
 
 
 def read_stl(path):
@@ -287,19 +282,9 @@ def true_kernel(info, a):
         xs, hs = a.ridge.split(":")
         parts.append(hist_kernel(ridge_samples(np.array(xs.split(","), float), np.array(hs.split(","), float)) * a.spr)); desc.append("ridge (CLI)")
     if not parts and info:
-        groups = {}
-        for r in info.get("ridges", []):                       # same orientation: aligned, profiles add; crossed: independent
-            groups.setdefault(round(r["rotz"] % 180), []).append(r)
-        for rot, rs in sorted(groups.items()):
-            per = lambda r: max(r.get("pitch") or 0, r["width"] or r["x"][-1])
-            if all(abs(per(r) - per(rs[0])) < 1e-9 for r in rs):     # one period: the plates' positions set the sum
-                x0 = rs[0].get("x0") or 0.0
-                s = sum(ridge_samples(r["x"], r["z"], r["width"], pitch=r.get("pitch"), offset=(r.get("x0") or 0.0) - x0)
-                        * material_spr(r["material"], a.spr) for r in rs)
-                parts.append(hist_kernel(s)); desc.append("+".join(r["name"] for r in rs) + f" (RotZ {rot}°)")
-            else:
-                for r in rs:
-                    parts.append(hist_kernel(ridge_samples(r["x"], r["z"], r["width"], pitch=r.get("pitch")) * material_spr(r["material"], a.spr))); desc.append(r["name"])
+        for rot, rs, aligned in RIFI.group_ridges(info.get("ridges", [])):   # aligned profiles add, crossed ones convolve
+            parts.append(hist_kernel(RIFI.part_samples(rs, lambda m: material_spr(m, a.spr), 200001)))
+            desc.append("+".join(r["name"] for r in rs) + f" (RotZ {rot}°)" if aligned else rs[0]["name"])
         for c in info.get("cads", []):
             if c["format"] != "stl" or not os.path.exists(c["file"]): continue
             parts.append(hist_kernel(stl_thickness(read_stl(c["file"]) * c["units"]) * material_spr(c["material"], a.spr)))

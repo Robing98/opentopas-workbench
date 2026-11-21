@@ -33,4 +33,4 @@ packages = ["opentopas_workbench"]
 version = {attr = "opentopas_workbench.__version__"}
 
 [tool.setuptools.package-data]
-opentopas_workbench = ["ui.html", "generators/*.py"]
+opentopas_workbench = ["ui.html", "generators/*.py", "generators/*.json"]

@@ -17,6 +17,7 @@ A local web UI for [OpenTOPAS](https://github.com/OpenTOPAS/OpenTOPAS) and TOPAS
 - **Export**: plots as PNG or SVG in a print style, plotted data as CSV, results and images as ZIP. Plot settings can be saved as named views.
 - **Variations**: copy a parameter file with one parameter set to a list of values; output names get a matching suffix.
 - **Notifications and keep-awake**: browser or Windows notification when runs fail or the queue is done; system sleep is blocked while runs are queued or running, optionally the display stays on as well (see [Long runs on Windows laptops](#long-runs-on-windows-laptops)).
+- **RiFi designer**: build periodic ripple filters from layers, see the thickness kernel, the SOBP ripple and manufacturing notes at once, and use the filter in the generators. See [RiFi designer](#rifi-designer).
 - **Generators**: plugins that write parameter sets from a form.
   - `pencil_beam`: any particle from protons to oxygen, an energy list, phantom material, depth dose, and an optional 2D map. Sets `EMRangeMax` for light ions above the default table range.
   - `ripple_filter`: depth-dose studies with 1D, crossed, and 2D ripple filters (pins and pyramids written as binary STL, plus 1D ridges with the same thickness distribution as a 2D filter).
@@ -173,6 +174,25 @@ Issues and pull requests are welcome, see [CONTRIBUTING.md](CONTRIBUTING.md).
 ## License
 
 MIT, see [LICENSE](LICENSE).
+
+## RiFi designer
+
+The tab **RiFi designer** builds a periodic ripple filter and shows at once what it does to the depth dose, without a Monte Carlo run. For the depth dose only the distribution of water equivalent thickness across one period counts (the kernel); the convolution model behind it agrees with TOPAS to 0.4 percentage points in the ripple of protons.
+
+![RiFi designer: two crossed binary plates (stk4)](docs/rifi_designer_dark_en.png)
+
+1. **Load** a template (`t3`, `t4`, `t6`, Grevillot `rifi1` and `rifi2`, `bin4`, `stk4`, `stk4x3`, `stp4`, `stp3`, `pair4`, `pair4v`) or a filter from your library.
+2. Edit the **layers**. Each layer is one strip filter: a **profile** (points x, z over one ridge) or **steps** (area fraction and height of each step, e.g. 0.5 / 0 and 0.5 / 2 for a binary plate; zero-height steps at the end without a base plate stay open), its period, base plate, turn about the beam axis (0 or 90 degrees), sideways offset, and the air gap to the layer before. Layers with the same orientation add up point by point; crossed layers are independent.
+3. Read the result on the right, updated while you type:
+   - cross-section of every layer over three periods;
+   - the kernel as a histogram in mm water, with mean thickness, sigma_t and the design spacing (the layer spacing the kernel fills: its width, plus one step for discrete levels);
+   - the SOBP ripple against the layer spacing for 63, 80, 94 and 110 MeV protons: the depth dose without filter (TOPAS runs of the shape comparison, embedded in the package) convolved with the kernel, six layers;
+   - an estimate of the extra lateral width at the isocentre (filter 80 cm upstream), scaled with the square root of the mean thickness and calibrated on the TOPAS runs, with the spread of those runs;
+   - manufacturing notes: smallest feature width, steps and base plates that match no standard plate (0.5, 0.75, 1, 1.5, 2, 3 mm), and aligned layers with air between them (laminated layers must touch; crossed ones tolerate a gap).
+4. **Save to library** stores the definition in `.workbench/rifi/NAME.json` of the workspace. The generators `ripple_filter` and `nozzle` then offer it as variant `lib-NAME`; the TOPAS geometry is one `TsRidgeFilter` per layer, with the distance and turn of each layer (expand **TOPAS geometry** to see it).
+5. **SVG masks** downloads one mask per layer at original size (1 unit = 1 mm) for a laser cutter: stripes shaded by height, a cut line at every step, and four registration holes at the same place on every layer, so pins through them line the layers up.
+
+A definition is plain JSON (schema `rifi/v1`, described in `opentopas_workbench/generators/_rifi.py`); `#rifi?n=NAME` opens a template or library filter directly. The built-in variants are written from the same definitions and give the same parameter files as before. `tools/make_rifi_ref.py` rebuilds the embedded reference curves.
 
 ## Ripple filter tools
 

@@ -22,14 +22,15 @@ Phantom surface at the isocentre, filters 80 cm upstream.
 import importlib.util, math, os, re, struct
 
 
-def _monitor_helper():
-    """The shared monitor option in _monitors.py, loaded by path like the generators themselves."""
-    spec = importlib.util.spec_from_file_location("wbgen__monitors", os.path.join(os.path.dirname(os.path.abspath(__file__)), "_monitors.py"))
+def _helper(name):
+    """A shared module next to this file (_monitors.py, _rifi.py), loaded by path like the generators themselves."""
+    spec = importlib.util.spec_from_file_location("wbgen_" + name, os.path.join(os.path.dirname(os.path.abspath(__file__)), name + ".py"))
     mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
     return mod
 
 
-MON = _monitor_helper()
+MON = _helper("_monitors")
+R = _helper("_rifi")
 
 NAME = {"en": "Ripple filter study", "de": "Ripple-Filter-Studie"}
 DESCRIPTION = {
@@ -67,6 +68,9 @@ VARIANTS = {
     "xb4s10": {"en": "2 binary plates crossed without base, 2 + 1 mm, 10 mm air", "de": "2 Binärplatten gekreuzt ohne Grundplatte, 2 + 1 mm, 10 mm Luft"},
     "xb4s10n15": {"en": "2 binary plates crossed without base, 10 mm air, tilted 15 mrad", "de": "2 Binärplatten gekreuzt ohne Grundplatte, 10 mm Luft, 15 mrad geneigt"},
 }
+# Definitions saved with the RiFi designer of the web UI (workspace/.workbench/rifi), selectable as lib-NAME.
+LIBRARY = R.library()
+VARIANTS.update({"lib-" + k: {"en": f"{d['title'] or k} (library)", "de": f"{d['title'] or k} (Bibliothek)"} for k, d in LIBRARY.items()})
 PIN_BASE, PIN_TOP_HALF, PIN_RINGS = 0.1, 0.04, 8     # mm, mm, segments of the pin flank
 PIN_RE = re.compile(r"^(pin|pyr)(\d+(?:\.\d+)?)(e?)$")
 SHAPE_RE = re.compile(r"^(bin|stk|pair)(\d+(?:\.\d+)?)(x3|v)?$")
@@ -103,7 +107,7 @@ def range_mm(ion, e_u):
     return 0.022 * e_u ** 1.77 * a / z ** 2
 
 
-def ridge(name, xs, zs, width, n, tz, rotz=0, pitch=None, shift=0.0, tilt=0.0):
+def ridge(name, xs, zs, width, n, tz, rotz=0, pitch=None, shift=0.0, tilt=0.0, material="G4_PLEXIGLASS"):
     """A TsRidgeFilter of n + 1 ridges. With pitch > width the ridges stand apart and the gaps hold no material.
 
     shift (mm) moves the plate in x; TOPAS centres a ridge of width w on its displacement, so plates of different
@@ -119,7 +123,7 @@ def ridge(name, xs, zs, width, n, tz, rotz=0, pitch=None, shift=0.0, tilt=0.0):
     return f'''
 s:Ge/{name}/Type     = "TsRidgeFilter"
 s:Ge/{name}/Parent   = "World"
-s:Ge/{name}/Material = "G4_PLEXIGLASS"
+s:Ge/{name}/Material = "{material}"
 d:Ge/{name}/TransZ   = {tz} cm
 d:Ge/{name}/RotZ     = {rotz} deg
 {turn}dv:Ge/{name}/XPoints = {len(xs)} {" ".join(f"{v:.3f}" for v in xs)} mm
@@ -178,13 +182,78 @@ def shape_plates(v, lam):
     return [triangle(d if m.group(3) else d / 2, lam)] * 2
 
 
+# ---------------------------------------------------------------- filters as rifi/v1 definitions (_rifi.py)
+TEMPLATES = ["t3", "t4", "t6", "rifi1", "rifi2", "bin4", "stk4", "stk4x3", "stp4", "stp3", "pair4", "pair4v"]
+LIB = "lib-"          # variant prefix of a definition saved in the workspace library (RiFi designer)
+GREVILLOT = [[0.0, 0.0], [0.009, 0.0], [0.46, 1.6], [0.54, 1.6], [0.991, 0.0], [1.0, 0.0]]   # on a 0.4 mm base
+
+
+def _tri_layer(d, lam, **kw):
+    xs, zs = triangle(d, lam)
+    return dict(period=lam, base=BASE, profile=[[x, z - BASE] for x, z in zip(xs, zs)], **kw)
+
+
+def _bin_layer(step, lam, **kw):
+    return dict(period=lam, base=BASE, steps=[[0.5, 0.0], [0.5, step]], **kw)
+
+
+def _stacked(layers):
+    """Plates 17 mm apart centre to centre and turned as STACK, written as the air gaps of the definition."""
+    out = [dict(layers[0], rotz=STACK[0][1])]
+    for L, (tz, rot), (tz0, _) in zip(layers[1:], STACK[1:], STACK):
+        h0, h = R.layer_height(out[-1]), R.layer_height(L)
+        out.append(dict(L, rotz=rot, gap=round((tz0 - tz) * 10 - h0 / 2 - h / 2, 6)))
+    return out
+
+
+def template(v, lam):
+    """The definition of a built-in variant for the period lam, or None for the variants outside rifi/v1 (pins, tilt,
+    gaps): t<d>, rifi1, rifi2, bin<d>, stk<d>[x3], pair<d>[v], stp<d> (without g, s or n)."""
+    title = VARIANTS.get(v, {}).get("en", v)
+    d = {"schema": R.SCHEMA, "name": v, "title": title, "material": "G4_PLEXIGLASS", "spr": R.SPR_PMMA}
+    if v in ("rifi1", "rifi2"):
+        L = dict(period=1.0, base=0.4, profile=GREVILLOT, count=120)
+        d["layers"] = [L] if v == "rifi1" else _stacked([L, L])
+        return d
+    if re.match(r"^t\d+(?:\.\d+)?$", v):
+        d["layers"] = [_tri_layer(float(v[1:]), lam)]
+        return d
+    m = SHAPE_RE.match(v)
+    if m and not ((m.group(3) == "x3" and m.group(1) != "stk") or (m.group(3) == "v" and m.group(1) != "pair")):
+        kind, h = m.group(1), float(m.group(2))
+        if kind == "bin": d["layers"] = [_bin_layer(h / 2, lam)]
+        elif kind == "stk": d["layers"] = _stacked([_bin_layer(h / 2 ** (i + 1), lam) for i in range(3 if m.group(3) else 2)])
+        else: d["layers"] = _stacked([_tri_layer(h if m.group(3) else h / 2, lam)] * 2)
+        return d
+    m = STAIR_RE.match(v)
+    if m and not (m.group(2) or m.group(3) or m.group(4)):
+        s = float(m.group(1)) / 4
+        d["layers"] = [dict(period=4 * round(lam / 4, 3), base=0.0, steps=[[0.25, s], [0.25, 2 * s], [0.25, 3 * s], [0.25, 0.0]],
+                            count=int(120 / lam))]
+        return d
+    return None
+
+
+def definition_block(d):
+    """TOPAS geometry of a rifi/v1 definition: one TsRidgeFilter per layer, the first at 80 cm."""
+    rot = lambda r: int(r) if float(r).is_integer() else r
+    return "".join(ridge(r["name"], r["x"], r["z"], r["width"], r["n"], r["tz"], rot(r["rotz"]), pitch=r["pitch"],
+                         shift=r["shift"], material=r["material"]) for r in R.ridges(d))
+
+
+def definition(v, lam):
+    """The rifi/v1 definition behind variant v (built in, or lib-NAME from the workspace library), else None."""
+    if v.startswith(LIB):
+        d = LIBRARY.get(v[len(LIB):])
+        if d is None: raise ValueError(f"filter {v[len(LIB):]} is not in the library")
+        return d
+    return template(v, lam)
+
+
 def variant_block(v, lam):
-    grev = ([0.0, 0.009, 0.46, 0.54, 0.991, 1.0], [0.4, 0.4, 2.0, 2.0, 0.4, 0.4])
     if v == "rifi0": return ""
-    if v == "rifi1": return ridge("RiFi1", *grev, 1.0, 120, 80.0)
-    if v == "rifi2": return ridge("RiFi1", *grev, 1.0, 120, 80.0) + ridge("RiFi2", *grev, 1.0, 120, 78.3, 90)
-    if v.startswith("t"):
-        return ridge("RiFi1", *triangle(float(v[1:]), lam), lam, int(120 / lam), 80.0)
+    d = definition(v, lam)
+    if d is not None: return definition_block(R.validate(d))
     m = STAIR_RE.match(v)
     if m:
         p = COARSE if m.group(2) else lam
@@ -201,9 +270,6 @@ def variant_block(v, lam):
         tz2 = round(PIVOT - (s1 / 2 + gap + s2 / 2) / 10, 4)
         return (ridge("RiFi1", [0, half], [s1, s1], half, int(120 / lam), PIVOT, 0, pitch=lam, tilt=tilt)
                 + ridge("RiFi2", [0, half], [s2, s2], half, int(120 / lam), tz2, 90, pitch=lam, tilt=tilt))
-    if SHAPE_RE.match(v):
-        return "".join(ridge(f"RiFi{i + 1}", xs, zs, lam, int(120 / lam), tz, rot)
-                       for i, ((xs, zs), (tz, rot)) in enumerate(zip(shape_plates(v, lam), STACK)))
     m = PIN_RE.match(v)
     if m:
         kind, d, equiv = m.group(1), float(m.group(2)), m.group(3)
