@@ -13,6 +13,7 @@ A local web UI for [OpenTOPAS](https://github.com/OpenTOPAS/OpenTOPAS) and TOPAS
 - **Overview**: every result in the workspace in one table, filtered by particle, energy, folder, or file-name tags. Beam data come from the parameter file that wrote the output. R80, BPW80, deviations to a reference (for example the case without filter), a Bragg-Kleeman range check, your own formula columns, CSV export, and an image gallery with full-screen view.
 - **Results**: plot TOPAS CSV scorer output and measured curves (PTW `.mcc`, IBA `.asc`, column files). Overlay curves with normalisation, log axis, drag zoom, hover read-out, and difference or ratio to a reference. Bragg peak metrics (R80, BPW80, D80-D20, ΔR80, filter BPW80). 2D and 3D binnings show as a heat map.
 - **Beam profile**: the monitor planes and 3D dose grids of a folder. x and y profiles (integrated or as a cut through the centroid, linear or logarithmic for the halo) and the 2D map per plane; the envelope, sigma, FWHM, centroid, or halo share along the beam line for several cases at once; energy spectra; lateral dose profiles at a depth picked with a slider, and sigma against depth. Every profile gets a Gaussian core fit (sigma, mean), FWHM, rms, the share outside 3 sigma, and a double Gaussian (core and halo sigma, halo share) where the profile has a halo.
+- **Machines**: view matRad machine files (`.mat` base data) without MATLAB: depth doses per energy, lateral widths over depth, peak position and range over energy, all fields of `meta` and `data` as a tree, and two machines compared. See [Machines view](#machines-view).
 - **Export**: plots as PNG or SVG in a print style, plotted data as CSV, results and images as ZIP. Plot settings can be saved as named views.
 - **Variations**: copy a parameter file with one parameter set to a list of values; output names get a matching suffix.
 - **Notifications and keep-awake**: browser or Windows notification when runs fail or the queue is done; system sleep is blocked while runs are queued or running, optionally the display stays on as well (see [Long runs on Windows laptops](#long-runs-on-windows-laptops)).
@@ -21,7 +22,7 @@ A local web UI for [OpenTOPAS](https://github.com/OpenTOPAS/OpenTOPAS) and TOPAS
   - `ripple_filter`: depth-dose studies with 1D, crossed, and 2D ripple filters (pins and pyramids written as binary STL, plus 1D ridges with the same thickness distribution as a 2D filter).
   - `nozzle`: the horizontal HIT nozzle from public values (Parodi et al. 2012, Tessonnier et al. 2015): vacuum window, MWPC 1, three ionisation chambers, MWPC 2, then air, a ripple filter of any `ripple_filter` variant at any distance (default 108 cm), and a water phantom at the isocenter. Monitor models: water layers (Parodi method 1), MWPCs as tungsten on water (method 2), or single tungsten wires, and "none" as the reference. HIT momentum spread by energy, depth dose and the lateral fluence of the primaries at the isocenter, and an optional TOPAS phase space at the end of the monitors for a `PhaseSpace` source. The element positions apart from the end of the monitors (112 cm) are not public: they are a field.
   - All three can add beam profile monitors: thin scoring planes in a parallel world, so they do not change the physics, at a list of positions (cm before the isocenter) or before and after every component. Each plane scores a 2D fluence map (default 0.5 mm bins over ±40 mm), optionally split into protons, electrons, and other particles, and an energy spectrum. Outputs are named `mon_<position>_<case>_<p|e|o|all>.bin` and `mon_<position>s_<case>_<spec|espec>.csv`, with `p` for the decimal point (`19p52`).
-- **Navigation**: tabs follow the workflow from generating cases to comparing results; "plot results" links in Runs, the queue, and the Overview lead straight to the curves. The address keeps the tab, the open file, and the plotted curves, so Back, Forward, and bookmarks work. Press `?` for the keyboard shortcuts (`1` to `7` switch tabs, `/` focuses the filter).
+- **Navigation**: tabs follow the workflow from generating cases to comparing results; "plot results" links in Runs, the queue, and the Overview lead straight to the curves. The address keeps the tab, the open file, and the plotted curves, so Back, Forward, and bookmarks work. Press `?` for the keyboard shortcuts (`1` to `8` switch tabs, `/` focuses the filter).
 - **Large workspaces**: hundreds of cases and big non-TOPAS files (matRad `.mat`, DICOM) are fine. Only parameter files and scorer output are read, parsed facts are cached, and the lists refresh in the background.
 - English and German UI, light and dark theme.
 
@@ -70,6 +71,22 @@ The queue is kept in `WORKSPACE/.workbench/jobs.json` and continues when the wor
 To start with an empty queue, remove the waiting jobs in the Runs tab before you end the workbench, or right after the start.
 
 While a job runs, the first Ctrl+C in the terminal only prints a warning, and a second one within 3 seconds ends the workbench and stops the job. With no job running, one Ctrl+C is enough. A closing terminal and `kill` end the workbench at once.
+
+## Machines view
+
+The **Machines** tab shows matRad machine files, the base data matRad uses for proton and ion plans. It needs numpy and scipy, and h5py for files saved as MATLAB v7.3:
+
+```
+python3 -m pip install --user numpy scipy h5py
+```
+
+1. Open the **Machines** tab. It lists the `.mat` files of `%USERPROFILE%\matRad\machines` (on Linux and macOS `~/matRad/machines`), where matRad keeps your own machines. To use another folder, type it in the folder field and press **Load**; the folder is remembered. On WSL a Windows path such as `C:\Users\me\matRad\machines` works as typed.
+2. The list shows per file the radiation mode, data type, number of energies, energy range, depth grid, and file format (v7 or v7.3). Click a row or pick it as **A** to view it.
+3. The view plots the depth dose of the chosen energies (normalized to the maximum or absolute, depth in mm), a quantity over depth (`sigma`, `sigma1`, `sigma2`, `weight`, and for carbon `LET`, `alpha`, `beta`, whatever the file holds), and a quantity over energy (peak position, range, `offset`, `initFocus`). The tree lists every field of `meta` and of one `data` element, also fields the view does not know.
+4. Pick a second file as **B** to compare: the depth doses of the same or nearest energies on top of each other, the difference in percent, and the shift of R80 and of the peak. The numbers come from the same code as `tools/compare_idd_matrad.py`.
+5. Every plot exports as PNG or SVG, the plotted curves as CSV.
+
+The files are read where they lie. Nothing of them is copied into the workspace or written to a log; only the folder path is kept, in `WORKSPACE/.workbench/config.json`.
 
 ## MCP server
 
@@ -140,7 +157,7 @@ Field types: `text`, `number`, `select`, `multi` (checkboxes, value is a list), 
 
 ## Security
 
-The server listens on `127.0.0.1` only, rejects requests with a foreign `Host` header, requires a per-session token for every API call, and only reads or writes inside the workspace. It runs the TOPAS binaries you configure, so do not expose it to a network.
+The server listens on `127.0.0.1` only, rejects requests with a foreign `Host` header, requires a per-session token for every API call, and only reads or writes inside the workspace. The one exception is the Machines tab: it reads any `.mat` file the page names, also outside the workspace, and never writes there. It runs the TOPAS binaries you configure, so do not expose it to a network.
 
 ## Known limits
 

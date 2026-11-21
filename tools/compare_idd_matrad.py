@@ -15,20 +15,8 @@ import numpy as np
 MEV_J = 1.602176634e-13
 
 
-def load_machine(path):
-    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-    from matload import load_struct
-    m = load_struct(path, "machine")
-    data = m.data if isinstance(m.data, list) else list(np.atleast_1d(m.data))
-    def zvec(x):
-        z = x.Z
-        if hasattr(z, "_fieldnames"):  # some machines store several Z models in a struct
-            for k in ("doubleGauss", "profileORG", "singleGauss"):
-                if k in z._fieldnames: return np.ravel(np.asarray(getattr(z, k), float))
-            return np.ravel(np.asarray(getattr(z, z._fieldnames[0]), float))
-        return np.ravel(np.asarray(z, float))
-    off = lambda x: float(np.ravel(getattr(x, "offset", 0.0) or 0.0)[0]) if np.size(getattr(x, "offset", 0.0)) else 0.0
-    return [{"energy": float(np.ravel(x.energy)[0]), "depths": np.ravel(np.asarray(x.depths, float)), "Z": zvec(x), "offset": off(x)} for x in data]
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from opentopas_workbench.machines import idd_entries as load_machine, metrics  # noqa: E402  shared with the Machines view
 
 
 def read_idd(path):
@@ -52,19 +40,6 @@ def producer(path):
                 n = re.search(r"^\s*i:So/[^/]+/NumberOfHistoriesInRun\s*=\s*(\d+)", t, re.M)
                 return float(e.group(1)) * {"keV": 1e-3, "MeV": 1, "GeV": 1e3}[e.group(2)], int(n.group(1))
     raise ValueError(f"no parameter file for {path}")
-
-
-def metrics(z, y):
-    i = int(np.argmax(y)); m = y[i]; n = y / m
-    def cross(level, step):
-        k = i
-        while 0 <= k + step < len(n):
-            if n[k] >= level > n[k + step]: return z[k] + (z[k + step] - z[k]) * (n[k] - level) / (n[k] - n[k + step])
-            k += step
-        return np.nan
-    r80, r20, p80 = cross(.8, 1), cross(.2, 1), cross(.8, -1)
-    k0 = max(1, int(np.searchsorted(z, 2.0)))                     # entrance: mean over the first 2 mm
-    return {"peak": z[i], "r80": r80, "bpw80": r80 - p80, "dfo": r20 - r80, "pe": m / y[:k0].mean(), "z0": y[:k0].mean()}
 
 
 def main():

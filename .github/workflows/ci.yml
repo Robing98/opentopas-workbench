@@ -21,5 +21,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
-      - run: pip install pytest numpy scipy .
+      - run: pip install pytest numpy scipy h5py .
+      # the public matRad machines (GPL, not kept in this repository) for the Machines view tests, at a fixed matRad commit
+      - name: Public matRad machines
+        run: |
+          mkdir -p "$RUNNER_TEMP/matrad"
+          for f in protons_Generic carbon_Generic; do
+            curl -sfL -o "$RUNNER_TEMP/matrad/$f.mat" "https://raw.githubusercontent.com/e0404/matRad/008bfd7c2e8d5101912262a33adea5ef867d7f25/matRad/basedata/$f.mat"
+          done
+          echo "MATRAD_BASEDATA=$RUNNER_TEMP/matrad" >> "$GITHUB_ENV"
       - run: pytest -q
