@@ -246,6 +246,9 @@ def test_viewer_command_end_to_end(head, tmp_path):
     assert same["check_rms_mm"] < 1.5 and same["check_ok"]
     assert 3.8 < moved["check_rms_mm"] < 5.8 and not moved["check_ok"]
     assert info["look_list"] and os.path.exists(os.path.join(data, "letd_all.js"))
+    # the viewer's legend names only the contours that exist
+    meta = json.load(open(os.path.join(data, "letd.json")))
+    assert meta["margin"] is True and meta["ptv"] is False
     k = json.load(open(tmp_path / "robin" / "kennzahlen.json"))
     assert k["exams_unsuitable"] == 1 and k["exams_check_over_1_5mm"] == 1 and k["look_regions"] == len(info["look_list"])
     assert not any(isinstance(v, str) for v in k.values())         # numbers only, no names or paths

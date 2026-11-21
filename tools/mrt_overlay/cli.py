@@ -108,6 +108,7 @@ def cmd_viewer(a):
     if a.viewer_data:
         ly.write_viewer(a.viewer_data, layers, mk, {"exams": exams, "look_list": info["look_list"],
                                                     "prescription_gy_rbe": info["prescription_gy_rbe"],
+                                                    "ptv": info["ptv"], "margin": info["margin"],
                                                     "registration": q, "hinweis": info["hinweis"]})
     if a.kennzahlen:
         k = {"registration_spread_mm": q["spread_rms_mm"], "registration_metric": q["metric"],
