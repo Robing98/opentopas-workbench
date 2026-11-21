@@ -194,6 +194,27 @@ The tab **RiFi designer** builds a periodic ripple filter and shows at once what
 
 A definition is plain JSON (schema `rifi/v1`, described in `opentopas_workbench/generators/_rifi.py`); `#rifi?n=NAME` opens a template or library filter directly. The built-in variants are written from the same definitions and give the same parameter files as before. `tools/make_rifi_ref.py` rebuilds the embedded reference curves.
 
+## FLUKA backend
+
+The `ripple_filter` generator also writes its cases as FLUKA inputs (`.inp`): choose **Backend: FLUKA** in the Generators tab. The input comes from the same case model as the TOPAS file (`generators/_fluka.py`), with the card syntax of the public FLUKA manual (4-5); no user routine is needed. Cases without a 1:1 translation (2D pins from STL, tilted plates, ions beyond helium) are named in `FLUKA_not_written.txt` instead of being left out.
+
+- Frame: the TOPAS frame turned by 180 degrees about y, so the beam runs along +z, as FLUKA's BEAM card expects.
+- Filters: each layer is cut into slabs between the break points of its profile (planes `PLA`, one zone of PMMA and one of air per slab). `LATTICE` would need one `ROT-DEFI` per cell, more than its index range allows.
+- Materials: water, PMMA and air with the densities and mean excitation energies of the Geant4 materials (78, 74 and 85.7 eV, `MAT-PROP`).
+- Beam: Gaussian in position, angle and momentum (FWHM on the card, from the TOPAS sigma); `DEFAULTS HADROTHErapy`.
+- Scoring: `USRBIN` of `DOSE` on the TOPAS depth grid, 5 cycles.
+
+Thresholds of the two codes:
+
+| | TOPAS (Geant4) | FLUKA input |
+|---|---|---|
+| Production of e-, e+, gamma | range cut 0.05 mm (about 60 keV e- in water) | `EMFCUT` PROD-CUT: e+- 100 keV, gamma 10 keV |
+| Transport of e+-, gamma | to zero | `EMFCUT`: e+- 100 keV, gamma 10 keV |
+| Delta rays | range cut 0.05 mm | `DELTARAY` 100 keV |
+| Hadron transport | to zero | 100 keV (`HADROTHErapy`) |
+
+A FLUKA input enters the queue **on hold**: it runs only after you press **Start** in the Runs tab. The job calls `rfluka -N0 -M5`, merges the cycles with `usbsuw`, prints them with `usbrea`, and writes `IDD_NAME_fluka.csv` (Gy summed over the primaries that ran, like the TOPAS scorer), so Results and the comparisons read it like a TOPAS result. The programs are called from the folder set under **Settings, FLUKA** (`fluka_dir`), never from `PATH`. FLUKA is not part of the workbench; it needs its own licence and installation.
+
 ## Ripple filter tools
 
 In `tools/` (need numpy, scipy, matplotlib):
