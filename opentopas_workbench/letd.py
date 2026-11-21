@@ -39,7 +39,8 @@ def to_local(p):
     m = re.match(r"^([A-Za-z]):[\\/](.*)$", p)
     if m and os.path.isdir("/mnt"):
         p = f"/mnt/{m.group(1).lower()}/" + m.group(2).replace("\\", "/")
-    return os.path.normpath(os.path.expanduser(p))
+    # absolute here: run.sh changes into tools/, so a relative path would be checked in one place and written in another
+    return os.path.abspath(os.path.expanduser(p))
 
 
 def to_windows(p):
@@ -48,10 +49,18 @@ def to_windows(p):
     return f"{m.group(1).upper()}:\\" + m.group(2).replace("/", "\\") if m else p
 
 
-def in_public_zone(p):
-    """True for a path in workspace/offen: results from a patient's plan and MRIs must not land in the public part."""
-    parts = [s.lower() for s in os.path.normpath(p).split(os.sep) if s]
-    return any(a == "workspace" and b == "offen" for a, b in zip(parts, parts[1:]))
+def in_public_zone(p, root=None):
+    """True for a path in workspace/offen, or in offen of the workbench's own root: results from a patient's plan and
+    MRIs must not land in the public part. Links are followed, so a link into offen counts as offen."""
+    real = os.path.realpath(p)
+    parts = [s.lower() for s in real.split(os.sep) if s]
+    if any(a == "workspace" and b == "offen" for a, b in zip(parts, parts[1:])): return True
+    if root:
+        r = os.path.realpath(root)
+        for pub in (os.path.join(r, "offen"), os.path.join(r, "workspace", "offen")):
+            if os.path.normcase(real) == os.path.normcase(pub) or os.path.normcase(real).startswith(os.path.normcase(pub) + os.sep):
+                return True
+    return False
 
 
 def _walk(top, depth=SEARCH_DEPTH, limit=SEARCH_LIMIT):
@@ -102,7 +111,7 @@ def _num(v, kind):
         return None
 
 
-def check(form):
+def check(form, root=None):
     """(problems, notes) for a form. A problem stops the start and names the field; a note does not."""
     f = {k: str(form.get(k, "") or "") for k in FIELDS}
     p = {k: to_local(f[k]) for k in ("run", "ct", "rs", "cache", "view", "out", "kz", "page")}
@@ -115,7 +124,10 @@ def check(form):
         if miss: need("run", "missing", ", ".join(miss))
     if not p["ct"]: need("ct", "empty")
     elif os.path.isdir(p["ct"]):
-        if not any(n.lower().endswith(".dcm") or "." not in n for n in os.listdir(p["ct"])): need("ct", "no_dicom")
+        try: names = os.listdir(p["ct"])
+        except OSError: names = None
+        if names is None: need("ct", "not_found")
+        elif not any(n.lower().endswith(".dcm") or "." not in n for n in names): need("ct", "no_dicom")
     elif not (os.path.isfile(p["ct"]) and p["ct"].lower().endswith((".nii", ".nii.gz", ".nrrd", ".mha"))): need("ct", "not_found")
     if p["rs"] and not os.path.isfile(p["rs"]): need("rs", "not_found")
     if not p["cache"]: need("cache", "empty")
@@ -125,13 +137,14 @@ def check(form):
         if miss: need("cache", "missing", ", ".join(miss))
     if not p["view"]: need("view", "empty")
     elif not os.path.isdir(p["view"]): need("view", "not_found")
+    elif in_public_zone(p["view"], root): need("view", "public_zone")
     rx, fx = _num(f["rx"], float), _num(f["fx"], int)
     if f["rx"].strip() and rx is None: need("rx", "number")
     if not f["rx"].strip() and not p["rs"]: need("rx", "rx_or_rs")
     if fx is None: need("fx", "number")
     for k in ("out", "kz"):
         if not p[k]: need(k, "empty")
-        elif in_public_zone(p[k]): need(k, "public_zone")
+        elif in_public_zone(p[k], root): need(k, "public_zone")
     if p["kz"] and not p["kz"].lower().endswith(".json"): need("kz", "json")
     if f["build"] in ("1", "true", "True"):
         if not p["page"]: need("page", "empty")
@@ -148,7 +161,9 @@ def check(form):
 
 def synthseg_found():
     fs = os.path.expanduser("~/opt/freesurfer-7.4.1/freesurfer/bin/mri_synthseg")
-    return bool(os.environ.get("SYNTHSEG") or shutil.which("mri_synthseg") or os.path.exists(fs))
+    env = os.environ.get("SYNTHSEG", "")
+    if env == "none": return False
+    return bool(env or shutil.which("mri_synthseg") or os.path.exists(fs))
 
 
 def memory_gb():
@@ -278,7 +293,10 @@ def start(form, on_end=None):
 def _spawn(cmd, log, env, cwd=None):
     proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, env=env, cwd=cwd, start_new_session=True,
                             stdin=subprocess.DEVNULL)
-    with LOCK: JOB["proc"] = proc
+    with LOCK:
+        JOB["proc"] = proc; stopped = JOB["stop"]
+    # a Stop between the start and this point found no process to end: end it here
+    if stopped: _kill(proc)
     rc = proc.wait()
     with LOCK: JOB["proc"] = None
     return rc
@@ -290,7 +308,7 @@ def _run(cmd, env, on_end):
     try:
         with open(log_path, "w") as log:
             log.write(f"# {st['start']}  {' '.join(shlex.quote(c) for c in cmd)}\n"); log.flush()
-            rc = _spawn(cmd, log, env)
+            rc = _spawn(cmd, log, env) if not JOB["stop"] else -signal.SIGTERM
             if rc == 0 and st["build"] and not JOB["stop"]:
                 page = st["page_local"]
                 log.write("## STEP page\n"); log.flush()
@@ -309,29 +327,40 @@ def _run(cmd, env, on_end):
             except Exception: pass
 
 
-def stop():
-    with LOCK:
-        proc = JOB["proc"]; JOB["stop"] = True
-    if proc is None: return False
+def _kill(proc):
     try: os.killpg(proc.pid, signal.SIGTERM)   # run.sh starts Python and SynthSeg: the whole group must end
     except OSError: pass
-    return True
+
+
+def stop():
+    """Ends the run. True while a run is going, even between two of its processes: _spawn sees the flag."""
+    with LOCK:
+        proc, t = JOB["proc"], JOB["thread"]
+        running = t is not None and t.is_alive()
+        if running: JOB["stop"] = True
+    if proc is not None: _kill(proc)
+    return running
 
 
 def restore(last):
     """The record of the last run after a server start, so the tab shows its result and log again."""
     if not last or JOB["state"] is not None: return
     st = dict(last)
-    if st.get("status") == "running": st["status"] = "stopped"; st["note"] = "server_restart"
+    if st.get("status") == "running":
+        st["status"] = "stopped"; st["note"] = "server_restart"
+        st.setdefault("seconds", None)   # unknown: else the page counts the time since the start for ever
     with LOCK: JOB["state"] = st
 
 
-def open_html(path):
-    """Opens Verlauf.html in the default browser; under WSL the Windows one, which cannot read a WSL path."""
-    p = to_local(path)
-    if not os.path.isfile(p) or not p.lower().endswith(".html"): raise ValueError("not_found")
-    if shutil.which("cmd.exe") and p.startswith("/mnt/"):
-        subprocess.Popen(["cmd.exe", "/c", "start", "", to_windows(p)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd="/mnt/c")
+def open_html():
+    """Opens the Verlauf.html of the last run in the default browser; under WSL the Windows one, which cannot read a
+    WSL path. Only that file: the page does not choose what is opened. explorer.exe, not cmd /c start, because cmd
+    reads & ^ % in a folder name as commands."""
+    st = JOB["state"] or {}
+    p = st.get("html") or ""
+    if not p or not os.path.isfile(p) or not p.lower().endswith(".html"): raise ValueError("not_found")
+    if shutil.which("explorer.exe") and p.startswith("/mnt/"):
+        subprocess.Popen(["explorer.exe", to_windows(p)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd="/mnt/c")
     else:
         import webbrowser
         webbrowser.open("file://" + p)

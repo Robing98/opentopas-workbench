@@ -233,6 +233,57 @@ def test_stop_ends_the_whole_process_group(srv, ws, monkeypatch):
     assert job["status"] == "stopped" and time.time() - t0 < 15
 
 
+def test_stop_right_after_the_start_still_ends_the_run(ws, monkeypatch):
+    # Stop pressed before the run's first process exists: the process must not run to its end
+    fake = ws / "slow.sh"; fake.write_text("#!/usr/bin/env bash\nsleep 60 & wait\n")
+    monkeypatch.setattr(letd, "SCRIPT", str(fake))
+    gate = threading.Event()
+    real_spawn = letd._spawn
+    monkeypatch.setattr(letd, "_spawn", lambda *a, **k: (gate.wait(10), real_spawn(*a, **k))[1])
+    f = full_form(ws); f["build"] = "0"
+    letd.start(f)
+    assert letd.stop() is True
+    gate.set()
+    t0 = time.time(); letd.JOB["thread"].join(20)
+    assert letd.JOB["state"]["status"] == "stopped" and time.time() - t0 < 15
+
+
+def test_stop_while_a_process_is_being_started_ends_it(ws):
+    letd.JOB["stop"] = True
+    t0 = time.time()
+    with open(os.devnull, "w") as log:
+        rc = letd._spawn(["bash", "-c", "sleep 60 & wait"], log, dict(os.environ))
+    assert rc != 0 and time.time() - t0 < 15
+
+
+def test_relative_paths_become_absolute_so_run_sh_writes_where_they_were_checked(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert letd.to_local("out/x") == str(tmp_path / "out" / "x")
+
+
+def test_public_zone_follows_links_and_the_workbench_root(tmp_path):
+    pub = tmp_path / "workspace" / "offen"; pub.mkdir(parents=True)
+    link = tmp_path / "res"; link.symlink_to(pub)
+    assert letd.in_public_zone(str(link / "x"))
+    root = tmp_path / "ws"; (root / "offen").mkdir(parents=True)
+    assert letd.in_public_zone(str(root / "offen" / "x"), str(root))
+    assert not letd.in_public_zone(str(root / "offenbar"), str(root))
+
+
+def test_check_refuses_viewer_data_in_the_public_zone(tmp_path):
+    f = full_form(tmp_path)
+    view = tmp_path / "workspace" / "offen" / "Verlauf-Daten"; view.mkdir(parents=True)
+    f["view"] = str(view)
+    bad, _ = letd.check(f)
+    assert {"field": "view", "msg": "public_zone", "args": []} in bad
+
+
+def test_open_uses_the_page_of_the_last_run_only(srv, ws):
+    other = ws / "other.html"; other.write_text("<html>")
+    code, r = call(srv + "/api/letd/open", {"p": str(other)})
+    assert code != 200 or not r.get("ok")   # no run yet: nothing to open, whatever the page sends
+
+
 def test_derive_and_check_over_http(srv, ws):
     top = viewer_tree(ws / "MRT")
     r = call(srv + "/api/letd/derive", {"mrt": str(top)})[1]

@@ -1275,13 +1275,13 @@ Object.assign(I18N.de,{tab_letd:"LETd auf MRT",lt_title:"LETd-Ebene auf den Verl
  lt_f_run:"plan_mc-Lauf",lt_h_run:"Ordner mit letd.npy, rbe_dose_1_1.npy und rbe_dose_1_1.dcm",lt_f_ct:"Planungs-CT",lt_h_ct:"DICOM-Ordner oder NIfTI",
  lt_f_rs:"RT Structure Set",lt_h_rs:"Datei; ohne sie gibt es kein PTV, und die Verschreibung muss angegeben sein",lt_f_cache:"cacheF des Viewers",lt_h_cache:"mit ref_t1.nii.gz und log.json",
  lt_f_view:"Verlauf-Daten",lt_h_view:"hier landen letd_all.js, marks_all.js, letd.json",lt_f_page:"build_page.py",lt_h_page:"erzeugt danach Verlauf.html neu",
- lt_f_rx:"Verschreibung Gy(RBE)",lt_h_rx:"leer: Median der 1,1-Dosis im PTV",lt_f_fx:"Fraktionen",lt_f_out:"Ausgabeordner",lt_h_out:"Ergebnisse aus deinem Plan gehören in die Zone lokal des Arbeitsordners",
+ lt_f_rx:"Verschreibung Gy(RBE)",lt_h_rx:"leer: Median der 1,1-Dosis im PTV",lt_f_fx:"Fraktionen",lt_h_fx:"der plan_mc-Lauf rechnet eine Fraktion; die Dosis-Ebenen zeigen die Summe",lt_f_out:"Ausgabeordner",lt_h_out:"Ergebnisse aus deinem Plan gehören in die Zone lokal des Arbeitsordners",
  lt_f_kz:"Kennzahlen-Datei",lt_h_kz:"nur Zahlen, eine kennzahlen.json in der Zone robin",lt_f_synthseg:"Ventrikelsaum mit SynthSeg",lt_h_synthseg:"braucht etwa 10 GB Speicher in WSL und einige Minuten",
- lt_f_build:"Verlauf.html danach neu erzeugen",lt_optional:"optional",lt_check:"Prüfen",lt_start:"Starten",lt_stop:"Stoppen",lt_log:"Protokoll",lt_result:"Ergebnis",
+ lt_f_build:"Verlauf.html danach neu erzeugen",lt_h_build:"mit build_page.py, damit die Ebene gleich im Verlauf erscheint",lt_optional:"optional",lt_check:"Prüfen",lt_start:"Starten",lt_stop:"Stoppen",lt_log:"Protokoll",lt_result:"Ergebnis",
  lt_exam:"Untersuchung",lt_native:"Raster mm",lt_suitable:"geeignet",lt_check_rms:"Abweichung RMS mm",lt_check_ok:"unter 1,5 mm",lt_look:"Hinschau-Liste",lt_look_none:"Keine Region über den Schwellen.",
  lt_open:"Verlauf.html öffnen",lt_ok:"Alle Pfade passen.",lt_bad:"Bitte die markierten Felder prüfen.",lt_found:"Gefunden: {n} von 3.",lt_none_found:"Nichts gefunden, bitte selbst eintragen.",
  lt_running:"läuft",lt_done:"fertig",lt_failed:"fehlgeschlagen",lt_stopped:"gestoppt",lt_elapsed:"Laufzeit",lt_exam_n:"Untersuchung {i} von {n}",lt_out_at:"Ausgabe",
- lt_reg:"Registrierung CT auf MRT: Streuung {s} mm",lt_rx:"Verschreibung {v} Gy(RBE) ({f})",lt_regions:"{n} Regionen, zusammen {v} ml",lt_noscript:"run.sh fehlt in dieser Installation.",
+ lt_reg:"Registrierung CT auf MRT: Streuung {s} mm",lt_rx:"Verschreibung {v} Gy(RBE) ({f})",lt_regions:"{n} Regionen, zusammen {v} ml",lt_region1:"1 Region, {v} ml",lt_noscript:"run.sh fehlt in dieser Installation.",
  lt_s_check:"Prüfen",lt_s_export:"Export",lt_s_synthseg:"SynthSeg",lt_s_register:"Registrierung",lt_s_exams:"Untersuchungen",lt_s_write:"Schreiben",lt_s_page:"Verlauf.html",
  lt_m_empty:"Pflichtfeld.",lt_m_not_found:"Nicht gefunden.",lt_m_missing:"Es fehlt: {0}",lt_m_no_dicom:"Keine DICOM-Dateien im Ordner.",lt_m_number:"Eine Zahl über 0.",
  lt_m_rx_or_rs:"Ohne RT Structure Set bitte die Verschreibung angeben.",lt_m_public_zone:"Liegt in workspace/offen. Ergebnisse aus deinem Plan dürfen nicht in den öffentlichen Teil.",
@@ -1293,13 +1293,13 @@ Object.assign(I18N.en,{tab_letd:"LETd on MRI",lt_title:"LETd layer on the follow
  lt_f_run:"plan_mc run",lt_h_run:"folder with letd.npy, rbe_dose_1_1.npy and rbe_dose_1_1.dcm",lt_f_ct:"Planning CT",lt_h_ct:"DICOM folder or NIfTI",
  lt_f_rs:"RT Structure Set",lt_h_rs:"file; without it there is no PTV, and the prescription must be given",lt_f_cache:"Viewer cacheF",lt_h_cache:"with ref_t1.nii.gz and log.json",
  lt_f_view:"Verlauf-Daten",lt_h_view:"letd_all.js, marks_all.js, letd.json are written here",lt_f_page:"build_page.py",lt_h_page:"rebuilds Verlauf.html afterwards",
- lt_f_rx:"Prescription Gy(RBE)",lt_h_rx:"empty: median 1.1 dose in the PTV",lt_f_fx:"Fractions",lt_f_out:"Output folder",lt_h_out:"results from your plan belong in the workspace zone lokal",
+ lt_f_rx:"Prescription Gy(RBE)",lt_h_rx:"empty: median 1.1 dose in the PTV",lt_f_fx:"Fractions",lt_h_fx:"the plan_mc run computes one fraction; the dose layers show the total",lt_f_out:"Output folder",lt_h_out:"results from your plan belong in the workspace zone lokal",
  lt_f_kz:"Key figures file",lt_h_kz:"numbers only, a kennzahlen.json in the zone robin",lt_f_synthseg:"Ventricle margin with SynthSeg",lt_h_synthseg:"needs about 10 GB of memory in WSL and a few minutes",
- lt_f_build:"Rebuild Verlauf.html afterwards",lt_optional:"optional",lt_check:"Check",lt_start:"Start",lt_stop:"Stop",lt_log:"Log",lt_result:"Result",
+ lt_f_build:"Rebuild Verlauf.html afterwards",lt_h_build:"with build_page.py, so that the layer shows in the viewer at once",lt_optional:"optional",lt_check:"Check",lt_start:"Start",lt_stop:"Stop",lt_log:"Log",lt_result:"Result",
  lt_exam:"Exam",lt_native:"Grid mm",lt_suitable:"suitable",lt_check_rms:"Offset RMS mm",lt_check_ok:"below 1.5 mm",lt_look:"Look list",lt_look_none:"No region above the thresholds.",
  lt_open:"Open Verlauf.html",lt_ok:"All paths fit.",lt_bad:"Please check the marked fields.",lt_found:"Found: {n} of 3.",lt_none_found:"Nothing found, please enter them.",
  lt_running:"running",lt_done:"done",lt_failed:"failed",lt_stopped:"stopped",lt_elapsed:"Elapsed",lt_exam_n:"Exam {i} of {n}",lt_out_at:"Output",
- lt_reg:"Registration CT onto MRI: spread {s} mm",lt_rx:"Prescription {v} Gy(RBE) ({f})",lt_regions:"{n} regions, {v} ml in total",lt_noscript:"run.sh is missing in this installation.",
+ lt_reg:"Registration CT onto MRI: spread {s} mm",lt_rx:"Prescription {v} Gy(RBE) ({f})",lt_regions:"{n} regions, {v} ml in total",lt_region1:"1 region, {v} ml",lt_noscript:"run.sh is missing in this installation.",
  lt_s_check:"Check",lt_s_export:"Export",lt_s_synthseg:"SynthSeg",lt_s_register:"Registration",lt_s_exams:"Exams",lt_s_write:"Write",lt_s_page:"Verlauf.html",
  lt_m_empty:"Required.",lt_m_not_found:"Not found.",lt_m_missing:"Missing: {0}",lt_m_no_dicom:"No DICOM files in the folder.",lt_m_number:"A number above 0.",
  lt_m_rx_or_rs:"Without an RT Structure Set, please give the prescription.",lt_m_public_zone:"Lies in workspace/offen. Results from your plan must not go to the public part.",
@@ -1347,8 +1347,8 @@ function ltShow(j){LT.job=j;const run=!!(j&&j.running);$("ltStart").disabled=run
  $("ltLive").hidden=false;const st=j.steps||{};
  $("ltSteps").innerHTML=Object.keys(st).filter(k=>st[k]!=="skip").map(k=>`<span class="${st[k]==="now"&&run?"on":st[k]==="done"?"done":""}">${esc(t("lt_s_"+k))}</span>`).join("");
  const ex=j.exam;$("ltBar").hidden=!(run&&ex);if(run&&ex)$("ltBar").firstElementChild.style.width=(100*ex[0]/ex[1]).toFixed(0)+"%";
- const el=j.seconds!=null?j.seconds:(Date.now()/1000-j.t0),state=run?"running":j.status;
- $("ltKv").innerHTML=`<span class="st-${esc(state)}">${esc(t("lt_"+state))}</span><span>${t("lt_elapsed")}: <b>${fmtDur(el)}</b></span>`
+ const el=run?(Date.now()/1000-j.t0):j.seconds,state=run?"running":j.status;
+ $("ltKv").innerHTML=`<span class="st-${esc(state)}">${esc(t("lt_"+state))}</span><span>${t("lt_elapsed")}: <b>${el!=null?fmtDur(el):"?"}</b></span>`
   +(run&&ex?`<span>${esc(t("lt_exam_n").replace("{i}",ex[0]).replace("{n}",ex[1]))}</span>`:"")+`<span class="mute">${t("lt_out_at")}: ${esc(j.out||"")}</span>`
   +(j.note?`<span class="log-err">${esc(t("lt_m_"+j.note))}</span>`:"")+(j.error?`<span class="log-err">${esc(j.error)}</span>`:"");
  const pre=$("ltLog"),atEnd=pre.scrollTop+pre.clientHeight>=pre.scrollHeight-4;pre.textContent=j.log||"";if(atEnd)pre.scrollTop=pre.scrollHeight;
@@ -1359,11 +1359,11 @@ function ltResult(j){const r=j.result;$("ltRes").hidden=!r;if(!r)return;const nf
  if(reg.spread_rms_mm!=null)h+=`<span>${esc(t("lt_reg").replace("{s}",nf(reg.spread_rms_mm)))}</span>`;
  if(r.prescription_gy_rbe!=null)h+=`<span>${esc(t("lt_rx").replace("{v}",nf(r.prescription_gy_rbe)).replace("{f}",r.prescription_from||""))}</span>`;
  if(j.html)h+=`<button class="pri" id="ltOpen">${esc(t("lt_open"))}</button>`;
- $("ltResHead").innerHTML=h;if(j.html)$("ltOpen").onclick=()=>api("/api/letd/open",{p:j.html}).catch(e=>toast(t("error")+": "+e.message,"err"));
+ $("ltResHead").innerHTML=h;if(j.html)$("ltOpen").onclick=()=>api("/api/letd/open",{}).catch(e=>toast(t("error")+": "+e.message,"err"));
  const yes=v=>v==null?"–":v?`<span class="st-done">✓</span>`:`<span class="st-failed">✗</span>`;
  $("ltExams").innerHTML=(r.exams||[]).map(e=>`<tr><td>${esc(e.track)} ${esc(e.day)}</td><td>${esc((e.native_mm||[]).map(nf).join(" × "))}</td><td>${yes(e.suitable)}</td><td>${e.check_rms_mm!=null?nf(e.check_rms_mm):"–"}</td><td>${yes(e.check_ok)}</td></tr>`).join("");
  const look=r.look_list||[];
- $("ltLook").innerHTML=look.length?`<p>${esc(t("lt_regions").replace("{n}",look.length).replace("{v}",nf(look.reduce((a,x)=>a+(x.volume_ml||0),0))))}</p>`:`<p class="mute">${esc(t("lt_look_none"))}</p>`;
+ $("ltLook").innerHTML=look.length?`<p>${esc(t(look.length===1?"lt_region1":"lt_regions").replace("{n}",look.length).replace("{v}",nf(look.reduce((a,x)=>a+(x.volume_ml||0),0))))}</p>`:`<p class="mute">${esc(t("lt_look_none"))}</p>`;
  $("ltHint").textContent=r.hinweis||""}
 
 /* ---------- start */

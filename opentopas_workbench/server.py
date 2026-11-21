@@ -68,9 +68,18 @@ def load_cfg():
     STATE["cfg"] = cfg
 
 
+CFG_LOCK = threading.Lock()
+
+
 def save_cfg():
+    """Atomic and one at a time: the LETd run saves its record from its own thread while requests save too, and a
+    half-written config.json would load as {} and lose every setting."""
     os.makedirs(wb_dir(), exist_ok=True)
-    with open(os.path.join(wb_dir(), "config.json"), "w") as fh: json.dump(STATE["cfg"], fh, indent=1)
+    path = os.path.join(wb_dir(), "config.json")
+    with CFG_LOCK:
+        tmp = path + ".tmp"
+        with open(tmp, "w") as fh: json.dump(STATE["cfg"], fh, indent=1)
+        os.replace(tmp, path)
 
 
 def load_jobs():
@@ -1424,10 +1433,10 @@ def letd_post(what, b):
     form = b.get("form") or {}
     if what == "derive": return 200, letd.derive(b.get("mrt", ""))
     if what == "check":
-        bad, notes = letd.check(form)
+        bad, notes = letd.check(form, STATE["root"])
         return 200, {"problems": bad, "notes": notes}
     if what == "start":
-        bad, notes = letd.check(form)
+        bad, notes = letd.check(form, STATE["root"])
         letd_save(form=form)
         if bad: return 200, {"problems": bad, "notes": notes}
         try: job = letd.start(form, on_end=lambda st: letd_save(last=st))
@@ -1435,7 +1444,7 @@ def letd_post(what, b):
         letd_save(last=letd.JOB["state"])
         return 200, {"job": job, "notes": notes}
     if what == "stop": return 200, {"stopped": letd.stop()}
-    if what == "open": return 200, {"ok": letd.open_html(b.get("p", ""))}
+    if what == "open": return 200, {"ok": letd.open_html()}
     return 404, {"error": "not found"}
 
 
