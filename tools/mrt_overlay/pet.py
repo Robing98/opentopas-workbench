@@ -61,7 +61,7 @@ def read_pet(folder):
     if np.ptp(pos) > 1e-6:
         order, how = np.argsort(pos, kind="stable"), "ImagePositionPatient"
     else:
-        order, how = np.argsort([int(ds.get("InstanceNumber", 0)) for _, ds in files], kind="stable"), "InstanceNumber"
+        order, how = np.argsort([int(ds.get("InstanceNumber") or 0) for _, ds in files], kind="stable"), "InstanceNumber"
     files = [files[i] for i in order]
     gaps = np.diff(np.sort(pos))
     if np.ptp(pos) > 1e-6:
@@ -188,7 +188,11 @@ def reference_mask(kind, brain, grid, labels=None, side=None):
     raise SystemExit(f"unknown reference region {kind!r}")
 
 
-def ratio_volume(pet_on_grid, ref_mask):
+def ratio_volume(pet_on_grid, ref_mask, covered=None):
+    # grid voxels outside the PET field of view resample to 0; counted, they would lower the median and raise every ratio
+    if covered is not None:
+        ref_mask = ref_mask & covered
+        if not ref_mask.any(): raise SystemExit("the PET does not cover the reference region")
     ref = float(np.median(pet_on_grid[ref_mask]))
     if not ref > 0: raise SystemExit("the PET is zero in the reference region: registration or region is wrong")
     return pet_on_grid / ref, ref
@@ -224,15 +228,18 @@ def run(pet_dir, cache, viewer_data, out=None, day=None, ref="brain", labels=Non
         if facts["units"] != "BQML":
             raise SystemExit(f"SUV braucht Werte in Bq/ml; diese Serie hat Units {facts['units'] or 'leer'}.")
     if not day: raise SystemExit("the PET header has no date: give --day YYYY-MM-DD")
-    log = json.load(open(os.path.join(cache, "log.json")))
+    log = json.load(open(os.path.join(cache, "log.json"), encoding="utf-8"))
     grid = sitk.ReadImage(os.path.join(cache, "ref_t1.nii.gz"))
     t1_day, t1_path = nearest_t1(log, cache, day, fixed_day)
     fixed = geo.like(np.load(t1_path).astype(np.float32), grid)
     brain = np.load(os.path.join(cache, "mask.npy")).astype(bool)
     t, q = side_check(fixed, pet, geo.like(brain.astype(np.uint8), grid), margin=margin, **kw)
     on_grid = sitk.GetArrayFromImage(sitk.Resample(pet, grid, t, sitk.sitkLinear, 0.0, sitk.sitkFloat32))
+    ones = sitk.Image(pet.GetSize(), sitk.sitkUInt8) + 1
+    ones.CopyInformation(pet)
+    covered = sitk.GetArrayFromImage(sitk.Resample(ones, grid, t, sitk.sitkNearestNeighbor, 0)).astype(bool)
     region, region_name = reference_mask(ref, brain, grid, labels, side)
-    ratio, ref_value = ratio_volume(on_grid, region)
+    ratio, ref_value = ratio_volume(on_grid, region, covered)
     # SUV = C [Bq/ml] x weight [g] / activity [Bq]; per unit of ratio, C = ratio x reference value
     suv = ref_value * weight_kg * 1000.0 / (activity_mbq * 1e6) if weight_kg else None
     entry = {"day": day, "tracer": facts["tracer"], "reference": region_name, "fixed_t1": t1_day,

@@ -138,3 +138,16 @@ def test_reference_regions_and_suv_refusal(cache, pet_dir, tmp_path, monkeypatch
     monkeypatch.setattr(pe, "side_check", lambda *a, **k: (ph.pet_true_transform().GetInverse(), {}))
     with pytest.raises(SystemExit, match="Bq/ml"):
         pe.run(pet_dir[0], c, str(tmp_path / "d"), weight_kg=70, activity_mbq=200)
+
+
+def test_reference_median_ignores_grid_outside_the_pet():
+    # half the brain lies outside the PET field of view and resamples to 0; the median must come from the covered half
+    pet_on_grid = np.zeros((4, 4, 4), np.float32)
+    pet_on_grid[:2] = 2.0
+    brain = np.ones((4, 4, 4), bool)
+    covered = np.zeros((4, 4, 4), bool)
+    covered[:2] = True
+    ratio, ref = pe.ratio_volume(pet_on_grid, brain, covered)
+    assert ref == 2.0 and float(ratio[0, 0, 0]) == 1.0
+    with pytest.raises(SystemExit):
+        pe.ratio_volume(pet_on_grid, brain, np.zeros_like(covered))

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # PET layer on the viewer grid. Every path comes as an argument:
 #   run_pet.sh PETDIR CACHEF VIEWERDATA OUT [REF] [SIDE]
-# REF: brain (default), striatum (needs OUT/../viewer_grid/synthseg.nii.gz of the LETd run, or $LABELS) or
+# REF: brain (default), striatum (needs $LABELS, the SynthSeg file of the viewer's reference T1) or
 # contralateral with SIDE links or rechts (the side not to use).
 set -euo pipefail
 unset CDPATH        # a CDPATH makes cd print the folder, which would end up in HERE

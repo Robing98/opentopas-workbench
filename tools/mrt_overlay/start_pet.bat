@@ -15,7 +15,7 @@ set /p "REF=Referenzregion: brain, striatum oder contralateral [brain]: "
 set "SIDE="
 if /i "%REF%"=="contralateral" set /p "SIDE=Welche Seite NICHT als Referenz (links oder rechts): "
 if /i "%REF%"=="striatum" set /p "LABELS=SynthSeg-Datei der Referenz-T1 (synthseg.nii.gz): "
-if /i "%REF%"=="striatum" set "WSLENV=LABELS/p"
+if /i "%REF%"=="striatum" set "WSLENV=%WSLENV%:LABELS/p"
 
 wsl -e bash -c "exec bash \"$(wslpath -a \"$0\")/tools/mrt_overlay/run_pet.sh\" \"$@\"" "%REPO%" "%PET%" "%CACHE%" "%VIEW%" "%OUT%" "%REF%" "%SIDE%"
 if errorlevel 1 goto :fail
