@@ -252,3 +252,14 @@ def test_viewer_command_end_to_end(head, tmp_path):
     k = json.load(open(tmp_path / "robin" / "kennzahlen.json"))
     assert k["exams_unsuitable"] == 1 and k["exams_check_over_1_5mm"] == 1 and k["look_regions"] == len(info["look_list"])
     assert not any(isinstance(v, str) for v in k.values())         # numbers only, no names or paths
+
+
+def test_synthseg_call_is_robust_on_cpu_and_cropped(tmp_path):
+    """The call must fit the 15 GB of the WSL: robust model on the CPU, cropped to a 192 mm cube."""
+    seen = tmp_path / "argv.json"
+    fake = tmp_path / "fake_synthseg.py"
+    fake.write_text(f"import json, sys\njson.dump(sys.argv[1:], open({str(seen)!r}, 'w'))\n")
+    ve.run_synthseg("in.nii.gz", "out.nii.gz", command=f"{sys.executable} {fake}")
+    argv = json.load(open(seen))
+    assert argv[:4] == ["--i", "in.nii.gz", "--o", "out.nii.gz"]
+    assert "--robust" in argv and "--cpu" in argv and argv[argv.index("--crop") + 1] == "192"

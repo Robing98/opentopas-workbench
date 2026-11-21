@@ -13,6 +13,8 @@ from . import geometry as geo
 # FreeSurfer labels that SynthSeg writes: lateral and inferior lateral ventricles, 3rd and 4th ventricle
 VENTRICLES = (4, 5, 43, 44, 14, 15)
 CSF = 24                   # extracerebral CSF: not brain
+CROP_MM = 192              # SynthSeg works on a 1 mm grid, so this is its crop in voxels
+THREADS = 2
 MARGIN_MM = 4.0            # Bahn et al. 2020: lesion risk about threefold within 4 mm of the ventricles
 
 
@@ -21,7 +23,10 @@ def run_synthseg(t1_path, out_path, command=None):
     or `python /opt/SynthSeg/scripts/commands/SynthSeg_predict.py`; both take --i, --o and --robust."""
     cmd = command or os.environ.get("SYNTHSEG") or ("mri_synthseg" if shutil.which("mri_synthseg") else None)
     if not cmd: raise SystemExit("SynthSeg not found: set SYNTHSEG to its command or pass --synthseg")
-    args = shlex.split(cmd) + ["--i", t1_path, "--o", out_path, "--robust", "--cpu"]
+    # The robust model on a whole field of view needs about 11 GB and was killed in a 15 GB WSL; a centred
+    # 192 mm cube needs 9.5 GB and gave the same ventricles on RIRE patient 001 (Dice 0.991 against 160 mm).
+    args = shlex.split(cmd) + ["--i", t1_path, "--o", out_path, "--robust", "--cpu", "--crop", str(CROP_MM),
+                               "--threads", str(THREADS)]
     subprocess.run(args, check=True)
     return out_path
 
