@@ -96,7 +96,9 @@ def load_jobs():
         if j.get("restarts", 0) >= 1:
             j["status"] = "aborted"; j["note"] = NOTE_ABORTED
         else:
-            j["status"] = "queued"; j["restarts"] = j.get("restarts", 0) + 1; j["note"] = NOTE_REQUEUED
+            # a FLUKA run goes back on hold: only its user starts FLUKA, also after a restart
+            j["status"] = "held" if j.get("binary") == "FLUKA" else "queued"
+            j["restarts"] = j.get("restarts", 0) + 1; j["note"] = NOTE_REQUEUED
             for k in ("start", "t0"): j.pop(k, None)
     STATE["next_id"] = max([j["id"] for j in STATE["jobs"]] + [0]) + 1
     if changed: save_jobs()   # the count must be on disk before the job starts again
@@ -585,7 +587,7 @@ def release_jobs(ids=None):
 
 
 def run_job(job):
-    fluka = job["binary"] == FLUKA_BINARY
+    fluka = job["binary"] == FLUKA_BINARY and job["file"].lower().endswith(".inp")
     binary = None if fluka else next((b for b in STATE["cfg"]["binaries"] if b["name"] == job["binary"]), None)
     logdir = os.path.join(wb_dir(), "logs"); os.makedirs(logdir, exist_ok=True)
     job["log"] = relp(os.path.join(logdir, f"job{job['id']:05d}.log"))
@@ -649,6 +651,7 @@ def enqueue(files, binary, subdir, skip_existing):
     for f in files:
         p = resolve(f)
         if not os.path.isfile(p): raise ValueError(f"not a file: {f}")
+        if binary == FLUKA_BINARY and not f.lower().endswith(".inp"): raise ValueError(f"FLUKA takes .inp inputs only: {f}")
         if skip_existing:
             info = file_info(p)
             outs = info["outs"] if info else []

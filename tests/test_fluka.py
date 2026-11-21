@@ -293,3 +293,16 @@ def test_fluka_job_never_falls_back_to_path(queue, monkeypatch, tmp_path):
     job = wb.STATE["jobs"][0]
     assert job["status"] == "failed" and job["rc"] == 127 and not (ws / "cases" / "calls.txt").exists()
     assert "rfluka not found" in open(ws / job["log"]).read()
+
+
+def test_fluka_job_is_never_started_without_the_start_button(queue):
+    """Neither a TOPAS file sent to FLUKA nor a server restart during a FLUKA run lets FLUKA start on its own."""
+    wb, ws = queue
+    (ws / "cases" / "a.txt").write_text("s:Ge/World/Material = \"G4_AIR\"\n")
+    with pytest.raises(ValueError, match=".inp inputs only"): wb.enqueue(["cases/a.txt"], "FLUKA", "", False)
+    wb.enqueue(["cases/fk_p063_rifi0.inp"], "", "", False); wb.release_jobs()
+    wb.STATE["jobs"][0]["status"] = "running"; wb.save_jobs()
+    wb.load_jobs()
+    assert wb.STATE["jobs"][0]["status"] == "held"
+    wb.worker_step()
+    assert not (ws / "cases" / "calls.txt").exists()

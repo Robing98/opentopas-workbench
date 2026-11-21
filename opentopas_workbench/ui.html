@@ -1545,7 +1545,7 @@ async function gen(preview){store("genFolder",$("genFolder").value);store("genBa
  if(preview){$("genOut").textContent=j.names.join("  ")+"\n\n"+j.example;$("genMsg").textContent=`${j.names.length} ${LANG==="de"?"Dateien":"files"}`}
  else{$("genMsg").textContent=`${j.written.length} ${t("created")}, ${j.skipped.length} ${t("skipped")}`;$("genOut").textContent=j.written.join("\n");
   /* the usual next step: select the new cases in Runs (skipped ones too, they may not have run yet) */
-  const cases=j.written.concat(j.skipped).filter(n=>n.endsWith(".txt")).map(n=>join(folder,n));
+  const cases=j.written.concat(j.skipped).filter(n=>n.endsWith(".txt")&&n!=="FLUKA_not_written.txt").map(n=>join(folder,n));
   if(cases.length){const b=$("genToRuns");b.hidden=false;b.textContent=t("gen_to_runs").replace("{n}",cases.length);b.onclick=()=>goRunsWith(cases,folder)}
   /* FLUKA inputs go to the queue held: FLUKA runs only after its user presses Start there */
   const inps=j.written.concat(j.skipped).filter(n=>n.endsWith(".inp")).map(n=>join(folder,n));
