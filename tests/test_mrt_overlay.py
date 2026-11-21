@@ -224,9 +224,13 @@ def test_viewer_command_end_to_end(head, tmp_path):
     os.makedirs(cache)
     sitk.WriteImage(mri, os.path.join(cache, "ref_t1.nii.gz"))
     a = sitk.GetArrayFromImage(mri)
-    np.save(os.path.join(cache, "t1_2020-01-01.npy"), np.clip(a / a.max() * 255, 0, 255).astype(np.uint8))
+    a8 = np.clip(a / a.max() * 255, 0, 255).astype(np.uint8)
+    np.save(os.path.join(cache, "t1_2020-01-01.npy"), a8)
+    # a later exam that the viewer cache holds 3 voxels (4.8 mm) off the reference: its check must fail
+    np.save(os.path.join(cache, "t1_2020-06-01.npy"), np.roll(a8, 3, axis=2))
     json.dump({"size": list(mri.GetSize()), "spacing": 1.6,
                "t1 2020-01-01": {"series": "x", "kind": "3D", "native": [1.0, 1.0, 1.0]},
+               "t1 2020-06-01": {"series": "z", "kind": "3D", "native": [1.0, 1.0, 1.0]},
                "flair 2020-01-01": {"series": "y", "kind": "2D", "native": [0.5, 0.5, 5.0]}},
               open(os.path.join(cache, "log.json"), "w"))
     sitk.WriteImage(ct, str(tmp_path / "ct.nii.gz"))
@@ -236,10 +240,12 @@ def test_viewer_command_end_to_end(head, tmp_path):
     cli.main(["viewer", cache, str(tmp_path / "ct.nii.gz"), frame, out, "--labels", str(tmp_path / "seg.nii.gz"),
               "--prescription", "2.2", "--viewer-data", data, "--kennzahlen", str(tmp_path / "robin" / "kennzahlen.json")])
     info = json.load(open(os.path.join(out, "overlay.json")))
-    exams = {e["track"]: e for e in info["exams"]}
-    assert exams["t1"]["suitable"] and not exams["flair"]["suitable"]
-    assert exams["t1"]["check_rms_mm"] < 1.5 and exams["t1"]["check_ok"]
+    exams = {(e["track"], e["day"]): e for e in info["exams"]}
+    same, moved = exams[("t1", "2020-01-01")], exams[("t1", "2020-06-01")]
+    assert same["suitable"] and not exams[("flair", "2020-01-01")]["suitable"]
+    assert same["check_rms_mm"] < 1.5 and same["check_ok"]
+    assert 3.8 < moved["check_rms_mm"] < 5.8 and not moved["check_ok"]
     assert info["look_list"] and os.path.exists(os.path.join(data, "letd_all.js"))
     k = json.load(open(tmp_path / "robin" / "kennzahlen.json"))
-    assert k["exams_unsuitable"] == 1 and k["look_regions"] == len(info["look_list"])
+    assert k["exams_unsuitable"] == 1 and k["exams_check_over_1_5mm"] == 1 and k["look_regions"] == len(info["look_list"])
     assert not any(isinstance(v, str) for v in k.values())         # numbers only, no names or paths
