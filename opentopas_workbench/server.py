@@ -544,17 +544,20 @@ def fluka_module():
 def fluka_script(name):
     """The shell steps of one FLUKA job in its output folder: the cycles, then usbsuw merges the binary USRBIN files of
     all cycles (file names one a line, a blank line, the output name) and usbrea prints the merged file as text (input
-    name, output name). Both read their answers from stdin, as the manual's description of the programs gives them."""
-    q = shlex.quote
+    name, output name). Both read their answers from stdin, as the manual's description of the programs gives them.
+
+    Every program is called by its path in the fluka_dir setting, never through PATH: a wrong setting must fail the
+    job, not start another FLUKA found on PATH."""
+    q, d = shlex.quote, fluka_dir()
     merged, text = f"{name}_{FLUKA_UNIT}.bnn", f"{name}_{FLUKA_UNIT}.txt"
     return "\n".join([
         "set -e",
-        f"export PATH={q(fluka_dir())}:\"$PATH\"",
-        f"rfluka -N0 -M{FLUKA_CYCLES} {q(name)}",
+        f"for p in rfluka usbsuw usbrea; do [ -x {q(d)}/$p ] || {{ echo \"FLUKA program $p not found in {d} (Settings: FLUKA)\"; exit 127; }}; done",
+        f"{q(d + '/rfluka')} -N0 -M{FLUKA_CYCLES} {q(name)}",
         f"ls {q(name)}[0-9][0-9][0-9]_fort.{FLUKA_UNIT} > {q(name)}.usbsuw.in",
         f"printf '\\n%s\\n' {q(merged)} >> {q(name)}.usbsuw.in",
-        f"usbsuw < {q(name)}.usbsuw.in",
-        f"printf '%s\\n%s\\n' {q(merged)} {q(text)} | usbrea",
+        f"{q(d + '/usbsuw')} < {q(name)}.usbsuw.in",
+        f"printf '%s\\n%s\\n' {q(merged)} {q(text)} | {q(d + '/usbrea')}",
         ""])
 
 
@@ -1630,6 +1633,7 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/info":
                 return self.send(200, {"root": STATE["root"], "cfg": STATE["cfg"], "version": VERSION, "detected": detected_binaries(),
                                        "default_exclude": DEFAULT_EXCLUDE,
+                                       "fluka_dir_default": FLUKA_DIR_DEFAULT,
                                        "folders": list_folders()})
             if u.path == "/api/ls": return self.send(200, fm_ls(q.get("p", "")))
             if u.path == "/api/read":

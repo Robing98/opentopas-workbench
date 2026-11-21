@@ -264,6 +264,7 @@ def test_fluka_job_runs_merges_and_writes_the_csv(queue):
     out = ws / "cases" / "out"
     assert job["status"] == "done", open(ws / job["log"]).read()
     assert (out / "calls.txt").read_text() == "rfluka -N0 -M5 fk_p063_rifi0\n"
+    assert "PATH" not in wb.fluka_script("x")
     sw = (out / "usbsuw.stdin").read_text().splitlines()
     assert sw == [f"fk_p063_rifi0{c:03d}_fort.21" for c in range(1, 6)] + ["", "fk_p063_rifi0_21.bnn"]
     csv = (out / "IDD_fk_p063_rifi0.csv").read_text().splitlines()
@@ -281,3 +282,14 @@ def test_fluka_job_fails_when_usbrea_gives_nothing(queue, monkeypatch, tmp_path)
     wb.enqueue(["cases/fk_p063_rifi0.inp"], "", "", False); wb.release_jobs(); wb.worker_step()
     job = wb.STATE["jobs"][0]
     assert job["status"] == "failed" and "not converted" in open(ws / job["log"]).read()
+
+
+def test_fluka_job_never_falls_back_to_path(queue, monkeypatch, tmp_path):
+    """A wrong fluka_dir fails the job; a FLUKA on PATH is never started instead (licence: its user starts each run)."""
+    wb, ws = queue
+    monkeypatch.setenv("PATH", str(tmp_path / "fluka_bin") + os.pathsep + os.environ["PATH"])
+    wb.STATE["cfg"]["fluka_dir"] = str(tmp_path / "missing")
+    wb.enqueue(["cases/fk_p063_rifi0.inp"], "", "", False); wb.release_jobs(); wb.worker_step()
+    job = wb.STATE["jobs"][0]
+    assert job["status"] == "failed" and job["rc"] == 127 and not (ws / "cases" / "calls.txt").exists()
+    assert "rfluka not found" in open(ws / job["log"]).read()

@@ -226,7 +226,7 @@ kbd{font:12.5px ui-monospace,Consolas,monospace;padding:1px 6px;border:1px solid
     </div>
     <div class="card">
       <div class="row" style="margin-bottom:6px"><h2 style="margin:0" data-i18n="queue"></h2><span id="qEta" class="mute"></span></div>
-      <div class="row"><button id="qStop" data-i18n="stop_current"></button><button id="qRemove" data-i18n="remove_queued"></button><button id="qClear" data-i18n="clear_history"></button>
+      <div class="row"><button id="qStop" data-i18n="stop_current"></button><button class="pri" id="qRelease" hidden></button><button id="qRemove" data-i18n="remove_queued"></button><button id="qClear" data-i18n="clear_history"></button>
         <span class="spacer"></span><label><span data-i18n="q_show"></span> <select id="qShow"><option value="all" data-i18n="q_show_all"></option><option value="active" data-i18n="q_show_active"></option><option value="failed" data-i18n="q_show_failed"></option></select></label></div>
       <div class="scroll" style="max-height:min(420px,40vh)"><table id="qTable"><thead><tr><th>#</th><th data-i18n="col_file"></th><th data-i18n="binary"></th><th data-i18n="col_status"></th><th data-i18n="col_time"></th><th></th></tr></thead><tbody id="qRun"></tbody><tbody id="qWait"></tbody><tbody id="qBody"></tbody></table></div>
       <div id="liveBox" class="live" hidden></div>
@@ -386,12 +386,12 @@ kbd{font:12.5px ui-monospace,Consolas,monospace;padding:1px 6px;border:1px solid
 <section id="gen" class="tab">
   <div class="card">
     <h2 data-i18n="gen_title"></h2>
-    <div class="row"><label><span data-i18n="generator"></span> <select id="genSel"></select></label><span id="genDesc" class="mute"></span></div>
+    <div class="row"><label><span data-i18n="generator"></span> <select id="genSel"></select></label><span id="genDesc" class="mute"></span><label id="genBackendL" hidden><span data-i18n="gen_backend"></span> <select id="genBackend"><option value="topas">TOPAS</option><option value="fluka">FLUKA</option></select></label></div>
     <div class="grid2" id="genForm"></div>
     <div class="row" style="margin-top:12px">
       <label><span data-i18n="target_folder"></span> <input id="genFolder" size="24"></label>
       <label><input type="checkbox" id="genOver"> <span data-i18n="overwrite"></span></label>
-      <button id="genPrev" data-i18n="preview"></button><button class="pri" id="genMake" data-i18n="create"></button><span id="genMsg" class="mute" role="status"></span><button id="genToRuns" hidden></button>
+      <button id="genPrev" data-i18n="preview"></button><button class="pri" id="genMake" data-i18n="create"></button><span id="genMsg" class="mute" role="status"></span><button id="genToRuns" hidden></button><button id="genToQueue" hidden></button>
     </div>
     <pre id="genOut"></pre>
   </div>
@@ -476,6 +476,9 @@ kbd{font:12.5px ui-monospace,Consolas,monospace;padding:1px 6px;border:1px solid
     <h2 data-i18n="notes"></h2>
     <p class="row"><label><input type="checkbox" id="set_notify"> <span data-i18n="note_browser"></span></label><label><input type="checkbox" id="set_sound"> <span data-i18n="note_sound"></span></label><label><input type="checkbox" id="set_note_each"> <span data-i18n="note_each"></span></label><button id="noteTest" data-i18n="note_testbtn"></button><span id="noteMsg" class="mute"></span></p>
     <p><label><input type="checkbox" id="setToast"> <span data-i18n="note_toast"></span></label></p>
+    <h2>FLUKA</h2>
+    <p class="mute" style="font-size:13px" data-i18n="fluka_hint"></p>
+    <div class="row"><label><span data-i18n="fluka_dir"></span> <input id="setFluka" size="40"></label><button class="pri" id="flukaSave" data-i18n="save"></button><span id="flukaMsg" class="mute" role="status"></span></div>
     <h2 data-i18n="binaries"></h2>
     <p class="mute" data-i18n="bin_hint"></p>
     <div id="binList"></div>
@@ -498,7 +501,7 @@ const I18N={
   run_files:"Parameterdateien",filter_ph:"Filter",only_not_done:"nur ohne Ergebnisse",col_results:"Ergebnisse",here:"hier",eta:"noch",histories_done:"Historien",log_hints:"Auffällige Zeilen im Log:",binary:"Programm",subdir:"Ausgabe-Unterordner",subdir_ph:"leer = gleicher Ordner",skip_existing:"vorhandene Ergebnisse überspringen",
   select_all:"alle",select_none:"keine",enqueue:"In Warteschlange",queue:"Warteschlange",stop_current:"Aktuellen Lauf stoppen",remove_queued:"Wartende entfernen",clear_history:"Verlauf leeren",log:"Log",
   added:"hinzugefügt",skipped:"übersprungen",nothing_selected:"Nichts ausgewählt.",no_binary:"Kein Programm eingerichtet, siehe Einstellungen.",outputs:"Ausgaben",
-  note_requeued:"nach Neustart des Servers neu eingereiht",note_aborted:"abgebrochen: der Server endete zweimal während dieses Laufs",st_queued:"wartet",st_running:"läuft",st_done:"fertig",st_failed:"Fehler",st_stopped:"gestoppt",st_aborted:"abgebrochen",st_removed:"entfernt",st_external:"extern",ext_title:"außerhalb der Warteschlange gestartet (Terminal, Skript, Agent); hier nur angezeigt",running_badge:"läuft",
+  note_requeued:"nach Neustart des Servers neu eingereiht",note_aborted:"abgebrochen: der Server endete zweimal während dieses Laufs",st_queued:"wartet",st_running:"läuft",st_done:"fertig",st_failed:"Fehler",st_stopped:"gestoppt",st_aborted:"abgebrochen",st_removed:"entfernt",st_held:"hält an",release_job:"Starten",q_release_all:"{n} FLUKA-Läufe starten",gen_backend:"Backend",gen_to_queue:"{n} FLUKA-Inputs in die Warteschlange (angehalten)",gen_queued_held:"{n} angehalten eingereiht: in Läufe mit Starten freigeben",fluka_dir:"Ordner der FLUKA-Programme",fluka_hint:"Der Ordner mit rfluka, usbsuw und usbrea. FLUKA-Läufe warten in der Warteschlange, bis du sie dort startest.",st_external:"extern",ext_title:"außerhalb der Warteschlange gestartet (Terminal, Skript, Agent); hier nur angezeigt",running_badge:"läuft",
   res_files:"Scorer-Ausgaben und Messdaten",res_hint:"Zeile anklicken wählt aus, Umschalt+Klick wählt einen Bereich, Ziehen über mehrere Zeilen wählt alle davon. Dateien anhaken, um Kurven zu überlagern, auch aus verschiedenen Ordnern. Messdaten: PTW .mcc, IBA .asc oder Spalten (x in mm, Wert). 2D/3D-Daten erscheinen als Karte.",view:"Darstellung",mode_curves:"Kurven",mode_diff:"Differenz zur Referenz",mode_ratio:"Verhältnis zur Referenz",reference:"Referenz",zoom_peak:"Peak-Zoom",zoom_reset:"Zoom zurücksetzen",clear_sel:"Auswahl leeren",selected:"ausgewählt",plot_hint:"Bereich mit der Maus aufziehen zum Zoomen, Doppelklick setzt zurück.",peak_entr:"Peak/Eingang",xaxis:"Tiefenachse",loading:"lädt …",live_elapsed:"läuft seit",live_rate:"Rate",live_cores:"Kerne",ph_init:"Initialisierung (Geometrie, Physiktabellen)",ph_run:"Simulation",ph_output:"Ausgabe schreiben",q_rest:"Rest",q_finish:"fertig ca.",q_unknown:"ohne Schätzung",q_eta_wait:"Restzeit erscheint, sobald ein Lauf fertig ist",total:"gesamt",no_r80:"Ohne R80 (kein Bragg-Peak im Phantom), bei relativer Tiefe nicht dargestellt",x_abs:"absolut",x_shift:"Tiefe − R80",x_rel:"Tiefe / R80",tail:"Schwanz",tail_tip:"Dosis hinter dem distalen Abfall (bei R80 + max(10 mm, 4 × (D80–D20))) relativ zum Maximum: Fragmentierungsschwanz",relw_tip:"Breite relativ zur Reichweite: vergleichbar zwischen Ionen bei unterschiedlicher Reichweite",bpw_filter:"BPW80 Filter",dr80_tip:"R80 minus R80 der Referenz",quad_tip:"√(BPW80² − BPW80²Referenz): Beitrag des Filters zur Peakbreite, wenn die Referenz die Kurve ohne Filter ist",plot:"Plot",statistic:"Statistik",normalize:"Normierung",
   norm_none:"keine",norm_max:"auf Maximum",norm_first:"auf Eingang",norm_sum:"auf Fläche",normalized:"normiert",log_y:"log. y-Achse",bragg:"Bragg-Kennzahlen",collapse:"Summieren über",save_png:"Als PNG speichern",images:"Bilder im Ordner",
   peak:"Peak",gen_title:"Parameterdateien erzeugen",generator:"Generator",target_folder:"Zielordner",overwrite:"vorhandene überschreiben",create:"Anlegen",created:"angelegt",
@@ -521,7 +524,7 @@ const I18N={
   run_files:"Parameter files",filter_ph:"Filter",only_not_done:"only without results",col_results:"Results",here:"here",eta:"left",histories_done:"histories",log_hints:"Suspicious log lines:",binary:"Program",subdir:"Output subfolder",subdir_ph:"empty = same folder",skip_existing:"skip existing results",
   select_all:"all",select_none:"none",enqueue:"Add to queue",queue:"Queue",stop_current:"Stop current run",remove_queued:"Remove waiting",clear_history:"Clear history",log:"Log",
   added:"added",skipped:"skipped",nothing_selected:"Nothing selected.",no_binary:"No program configured, see Settings.",outputs:"Outputs",
-  note_requeued:"re-queued after server restart",note_aborted:"aborted: the server ended twice during this run",st_queued:"waiting",st_running:"running",st_done:"done",st_failed:"failed",st_stopped:"stopped",st_aborted:"aborted",st_removed:"removed",st_external:"external",ext_title:"started outside the queue (terminal, script, agent); shown here only",running_badge:"running",
+  note_requeued:"re-queued after server restart",note_aborted:"aborted: the server ended twice during this run",st_queued:"waiting",st_running:"running",st_done:"done",st_failed:"failed",st_stopped:"stopped",st_aborted:"aborted",st_removed:"removed",st_held:"on hold",release_job:"Start",q_release_all:"Start {n} FLUKA runs",gen_backend:"Backend",gen_to_queue:"Queue {n} FLUKA inputs (on hold)",gen_queued_held:"{n} queued on hold: start them in Runs",fluka_dir:"Folder of the FLUKA programs",fluka_hint:"The folder with rfluka, usbsuw and usbrea. FLUKA runs wait in the queue until you start them there.",st_external:"external",ext_title:"started outside the queue (terminal, script, agent); shown here only",running_badge:"running",
   res_files:"Scorer output and measurements",res_hint:"Click a row to select it, shift+click selects a range, drag across rows to select them all. Tick files to overlay curves, also across folders. Measurements: PTW .mcc, IBA .asc, or columns (x in mm, value). 2D/3D data show as a map.",view:"View",mode_curves:"Curves",mode_diff:"Difference to reference",mode_ratio:"Ratio to reference",reference:"Reference",zoom_peak:"Zoom to peak",zoom_reset:"Reset zoom",clear_sel:"Clear selection",selected:"selected",plot_hint:"Drag across the plot to zoom, double-click to reset.",peak_entr:"Peak/entrance",xaxis:"Depth axis",loading:"loading …",live_elapsed:"running for",live_rate:"Rate",live_cores:"cores",ph_init:"Initialization (geometry, physics tables)",ph_run:"Simulation",ph_output:"Writing output",q_rest:"Remaining",q_finish:"done at",q_unknown:"without estimate",q_eta_wait:"remaining time appears once a run has finished",total:"total",no_r80:"No R80 (no Bragg peak in the phantom), not shown with relative depth",x_abs:"absolute",x_shift:"depth − R80",x_rel:"depth / R80",tail:"Tail",tail_tip:"Dose beyond the distal fall-off (at R80 + max(10 mm, 4 × (D80–D20))) relative to the maximum: fragmentation tail",relw_tip:"Width relative to the range: comparable between ions with different ranges",bpw_filter:"BPW80 filter",dr80_tip:"R80 minus R80 of the reference",quad_tip:"√(BPW80² − BPW80²reference): filter contribution to the peak width when the reference is the curve without filter",plot:"Plot",statistic:"Statistic",normalize:"Normalize",
   norm_none:"none",norm_max:"to maximum",norm_first:"to entrance",norm_sum:"to area",normalized:"normalized",log_y:"log y axis",bragg:"Bragg metrics",collapse:"Sum over",save_png:"Save as PNG",images:"Images in folder",
   peak:"Peak",gen_title:"Generate parameter files",generator:"Generator",target_folder:"Target folder",overwrite:"overwrite existing",create:"Create",created:"created",
@@ -922,12 +925,13 @@ async function refreshJobs(){const hist=Q.show==="failed"?5000:Q.more+5;const j=
  const aw=j.awake||{};$("awakeBadge").hidden=!aw.active;$("awakeBadge").textContent="☕ "+t("awake_badge");$("awakeBadge").title=aw.method||"";
  $("awakeMsg").textContent=aw.active?`${t("awake_on")} (${aw.method})`:aw.error?`${t("error")}: ${aw.error}`:"";
  const run=j.jobs.find(x=>x.status==="running"),wait=j.jobs.filter(x=>x.status==="queued").length;
+ const held=j.jobs.filter(x=>x.status==="held").length;$("qRelease").hidden=!held;$("qRelease").textContent=t("q_release_all").replace("{n}",held);
  const qe=j.queue_eta;const etaTxt=qe&&(run||wait)?`${t("q_rest")} ≈ ${fmtDur(qe.seconds)}, ${t("q_finish")} ${qe.finish}${qe.unknown?` (${qe.unknown} ${t("q_unknown")})`:""}`:(run||wait)?t("q_eta_wait"):"";
  $("qEta").textContent=etaTxt?"· "+etaTxt:"";
  $("runBadge").hidden=!run&&!wait;$("runBadge").textContent=(run?`▶ ${run.file.split("/").pop()}${run.progress!=null?" "+Math.round(run.progress*100)+" %":""}`:`${t("st_queued")}: ${wait}`)+(qe&&(run||wait)?` · ${t("q_finish")} ${qe.finish}`:"");
  $("runBadge").title=(run?`${t("running_badge")}: ${run.file} (+${wait})\n`:"")+etaTxt;
  const n=(run?1:0)+wait+(j.external||[]).length;$("runCnt").hidden=!n;$("runCnt").textContent=n;
- const fin=j.finished!=null?j.finished:j.jobs.filter(x=>x.status!=="queued"&&x.status!=="running").length;
+ const fin=j.finished!=null?j.finished:j.jobs.filter(x=>x.status!=="queued"&&x.status!=="running"&&x.status!=="held").length;
  if(Q.fin!=null&&fin!==Q.fin){RS.gen++;EX.dirty=true;if(isTab("run")&&RF.loaded)loadParams(true);if(isTab("explorer"))exLoad(true,true);if(isTab("results")&&RS.pick.length)loadPlot()}  // a run finished: results and last-run columns change
  Q.fin=fin;
  if(isTab("run")){renderQueue();await showJob()}}
@@ -936,15 +940,16 @@ function jobTime(x){return x.status==="running"?(x.progress!=null?`<span class="
 /* the note of a job that a server restart re-queued or gave up; an unknown note of a newer server shows as it is */
 function jobNote(x){return x.restarts?t(x.status==="aborted"?"note_aborted":"note_requeued"):x.note||""}
 function jobRow(x){const rm=esc(t("remove_job")),rq=esc(t("requeue"));
- const acts=x.status==="queued"?`<button type="button" class="rowact" data-deq="${x.id}" title="${rm}" aria-label="${rm}">✕</button>`:x.status==="running"?"":
+ const st=esc(t("release_job"));
+ const acts=x.status==="held"?`<button type="button" class="rowact" data-release="${x.id}" title="${st}">▶ ${st}</button><button type="button" class="rowact" data-deq="${x.id}" title="${rm}" aria-label="${rm}">✕</button>`:x.status==="queued"?`<button type="button" class="rowact" data-deq="${x.id}" title="${rm}" aria-label="${rm}">✕</button>`:x.status==="running"?"":
   ((x.outputs||[]).some(o=>DATAEXT.test(o))?`<button type="button" class="rowact" data-plotjob="${x.id}">${esc(t("plot_short"))}</button>`:"")+`<button type="button" class="rowact" data-requeue="${x.id}" title="${rq}" aria-label="${rq}">↻</button>`;
  return `<tr data-id="${x.id}" class="${Q.sel===x.id?"sel":""}" style="cursor:pointer"><td>${x.id}</td><td class="f" title="${esc(x.file)}${x.subdir?" → "+esc(x.subdir):""}${jobNote(x)?" · "+esc(jobNote(x)):""}">${pathHtml(x.file)}${x.subdir?` <span class="mute">→ ${esc(x.subdir)}</span>`:""}${jobNote(x)?` <span class="mute">· ${esc(jobNote(x))}</span>`:""}</td><td>${esc(x.binary)}</td><td class="st-${x.status}">${t("st_"+x.status)}</td><td class="mute">${jobTime(x)}</td><td class="acts">${acts}</td></tr>`}
 const moreRow=(n,k)=>`<tr class="more"><td colspan="6"><button type="button" data-${k}="1">${esc(t("show_more").replace("{n}",n))}</button></td></tr>`;
 function extRow(x){return `<tr class="ext" title="${esc(t("ext_title"))} · PID ${x.pid}"><td class="mute">–</td><td class="f" title="${esc(x.file||x.cwd)}">${pathHtml(x.file||x.cwd)}</td><td>${esc(x.program)}</td><td class="st-running">${t("st_external")}</td><td class="mute">${x.elapsed!=null?fmtDur(x.elapsed):""}</td><td></td></tr>`}
 function setBody(id,html,force){if(force||Q.html[id]!==html){Q.html[id]=html;$(id).innerHTML=html}}
 function renderQueue(force){const j=JOBS;if(!j||!isTab("run"))return;
- const running=j.jobs.filter(x=>x.status==="running"),waiting=j.jobs.filter(x=>x.status==="queued");
- let fin=j.jobs.filter(x=>x.status!=="running"&&x.status!=="queued").reverse();if(Q.show==="failed")fin=fin.filter(x=>FAILED.includes(x.status));
+ const running=j.jobs.filter(x=>x.status==="running"),waiting=j.jobs.filter(x=>x.status==="queued"||x.status==="held");
+ let fin=j.jobs.filter(x=>x.status!=="running"&&x.status!=="queued"&&x.status!=="held").reverse();if(Q.show==="failed")fin=fin.filter(x=>FAILED.includes(x.status));
  const ext=j.external||[],act=running.length||waiting.length||ext.length;
  setBody("qRun",act?sec(`${t("q_active")} · ${t("q_n_active").replace("{r}",running.length+ext.length).replace("{w}",waiting.length)}`)+running.map(jobRow).join("")+ext.map(extRow).join(""):"",force);
  const ws=Math.min(Q.moreWait,waiting.length);
@@ -957,8 +962,9 @@ function renderQueue(force){const j=JOBS;if(!j||!isTab("run"))return;
 const jobById=id=>JOBS&&JOBS.jobs.find(x=>x.id===id);
 async function requeue(x){const j=await api("/api/enqueue",{files:[x.file],binary:x.binary,subdir:x.subdir||"",skip:false});if(j.added.length)toast(`${x.file.split("/").pop()}: ${t("requeued")}`,"ok");poll()}
 $("qTable").addEventListener("click",async e=>{const b=e.target.closest("button");
- if(b){e.stopPropagation();const x=jobById(+(b.dataset.deq||b.dataset.requeue||b.dataset.plotjob));
+ if(b){e.stopPropagation();const x=jobById(+(b.dataset.deq||b.dataset.requeue||b.dataset.plotjob||b.dataset.release));
   if(b.dataset.more){Q.more+=100;poll()}else if(b.dataset.morewait){Q.moreWait+=200;renderQueue()}else if(b.dataset.deq){await api("/api/dequeue",{ids:[+b.dataset.deq]});poll()}
+  else if(b.dataset.release){await api("/api/release",{ids:[+b.dataset.release]});poll()}
   else if(b.dataset.requeue&&x)await requeue(x);else if(b.dataset.plotjob&&x)plotPaths(x.outputs.filter(o=>DATAEXT.test(o)));return}
  const tr=e.target.closest("tr[data-id]");if(tr){Q.sel=+tr.dataset.id;renderQueue(true);showJob(true)}});
 /* log, hints, and actions of the selected job (or the running one); a finished job's log is fetched once */
@@ -989,6 +995,7 @@ function renderLive(run){const box=$("liveBox");if(!run||!run.live){box.hidden=t
 const ERRL=/(\berror\b|exception|quitting|exiting|segmentation|abort|unknown parameter)/i,WRNL=/\bwarning\b|WWWW/i;
 function colorLog(txt){return txt.split("\n").map(l=>ERRL.test(l)&&!/not necessarily an error/i.test(l)?`<span class="log-err">${esc(l)}</span>`:WRNL.test(l)?`<span class="log-wrn">${esc(l)}</span>`:esc(l)).join("\n")}
 armed($("qStop"),async()=>{await api("/api/stop",{});poll()});
+$("qRelease").onclick=async()=>{await api("/api/release",{all:true});poll()};
 armed($("qRemove"),async()=>{const j=await api("/api/dequeue",{all:true});toast(t("removed_n").replace("{n}",j.removed||0),"ok");poll()});
 armed($("qClear"),async()=>{await api("/api/clearhistory",{});Q.sel=null;Q.more=30;poll()});
 
@@ -1522,6 +1529,7 @@ for(const id of ["mcView","mcCmp","mcNorm"])if(recall(id)&&[...$(id).options].so
 let GENS=[];
 async function loadGens(){GENS=await api("/api/generators");const s=$("genSel"),cur=s.value;s.innerHTML="";GENS.forEach(g=>s.add(new Option(L(g.name),g.id)));if(cur)s.value=cur;renderGen()}
 function renderGen(){const g=GENS.find(x=>x.id===$("genSel").value);if(!g){$("genForm").innerHTML="";return}$("genDesc").textContent=L(g.description)||"";
+ $("genBackendL").hidden=!g.fluka;if(!g.fluka)$("genBackend").value="topas";else $("genBackend").value=recall("genBackend")||"topas";
  if(!$("genFolder").value)$("genFolder").value=recall("genFolder")||"";
  $("genForm").innerHTML=g.fields.map(f=>{const lab=esc(L(f.label)),id="gf_"+f.key;
   if(f.type==="select")return `<label>${lab}<select id="${id}">${f.options.map(([v,n])=>`<option value="${esc(v)}" ${v==f.default?"selected":""}>${esc(L(n))}</option>`).join("")}</select></label>`;
@@ -1529,21 +1537,26 @@ function renderGen(){const g=GENS.find(x=>x.id===$("genSel").value);if(!g){$("ge
   if(f.type==="bool")return `<label style="flex-direction:row;align-items:center;gap:6px"><input type="checkbox" id="${id}" ${f.default?"checked":""}> ${lab}</label>`;
   return `<label>${lab}<input id="${id}" value="${esc(f.default??"")}" ${f.type==="number"?'inputmode="decimal"':""}></label>`}).join("")}
 $("genSel").onchange=renderGen;
+$("genBackend").onchange=()=>store("genBackend",$("genBackend").value);
 function genValues(){const g=GENS.find(x=>x.id===$("genSel").value),v={};for(const f of g.fields){const id="gf_"+f.key;
  if(f.type==="multi")v[f.key]=[...document.querySelectorAll(`input[name="${id}"]:checked`)].map(e=>e.value);else if(f.type==="bool")v[f.key]=$(id).checked;else if(f.type==="number")v[f.key]=parseFloat($(id).value.replace(",","."));else v[f.key]=$(id).value}return v}
-async function gen(preview){store("genFolder",$("genFolder").value);$("genToRuns").hidden=true;const folder=$("genFolder").value.trim().replace(/^\/+|\/+$/g,"");
- try{const j=await api("/api/generate",{id:$("genSel").value,values:genValues(),folder,overwrite:$("genOver").checked,preview});
+async function gen(preview){store("genFolder",$("genFolder").value);store("genBackend",$("genBackend").value);$("genToRuns").hidden=true;$("genToQueue").hidden=true;const folder=$("genFolder").value.trim().replace(/^\/+|\/+$/g,"");
+ try{const j=await api("/api/generate",{id:$("genSel").value,values:genValues(),folder,overwrite:$("genOver").checked,preview,backend:$("genBackend").value});
  if(preview){$("genOut").textContent=j.names.join("  ")+"\n\n"+j.example;$("genMsg").textContent=`${j.names.length} ${LANG==="de"?"Dateien":"files"}`}
  else{$("genMsg").textContent=`${j.written.length} ${t("created")}, ${j.skipped.length} ${t("skipped")}`;$("genOut").textContent=j.written.join("\n");
   /* the usual next step: select the new cases in Runs (skipped ones too, they may not have run yet) */
   const cases=j.written.concat(j.skipped).filter(n=>n.endsWith(".txt")).map(n=>join(folder,n));
-  if(cases.length){const b=$("genToRuns");b.hidden=false;b.textContent=t("gen_to_runs").replace("{n}",cases.length);b.onclick=()=>goRunsWith(cases,folder)}}}catch(e){$("genMsg").textContent=t("error")+": "+e.message}}
+  if(cases.length){const b=$("genToRuns");b.hidden=false;b.textContent=t("gen_to_runs").replace("{n}",cases.length);b.onclick=()=>goRunsWith(cases,folder)}
+  /* FLUKA inputs go to the queue held: FLUKA runs only after its user presses Start there */
+  const inps=j.written.concat(j.skipped).filter(n=>n.endsWith(".inp")).map(n=>join(folder,n));
+  if(inps.length){const b=$("genToQueue");b.hidden=false;b.textContent=t("gen_to_queue").replace("{n}",inps.length);
+   b.onclick=async()=>{const r=await api("/api/enqueue",{files:inps,binary:"FLUKA",subdir:"",skip:false});toast(t("gen_queued_held").replace("{n}",r.added.length),"ok");b.hidden=true;poll()}}}}catch(e){$("genMsg").textContent=t("error")+": "+e.message}}
 $("genPrev").onclick=()=>gen(true);$("genMake").onclick=()=>gen(false);
 
 /* ---------- settings */
 async function loadSettings(){await loadInfo(true);const inc=new Set(INFO.cfg.include||[]);
  $("incBox").innerHTML=(INFO.folders||[]).map(f=>`<label><input type="checkbox" value="${esc(f)}" ${inc.has(f)?"checked":""}> ${esc(f)}</label>`).join("")||`<span class="mute">–</span>`;
- $("excBox").value=(INFO.cfg.exclude||INFO.default_exclude).join("\n");$("setToast").checked=INFO.cfg.toast!==false;$("setAwake").checked=INFO.cfg.keep_awake!==false;$("setDisplay").checked=INFO.cfg.keep_display===true;$("setRoot").textContent=INFO.root;$("ver").textContent=INFO.version;renderBins(INFO.cfg.binaries)}
+ $("excBox").value=(INFO.cfg.exclude||INFO.default_exclude).join("\n");$("setToast").checked=INFO.cfg.toast!==false;$("setAwake").checked=INFO.cfg.keep_awake!==false;$("setDisplay").checked=INFO.cfg.keep_display===true;$("setRoot").textContent=INFO.root;$("setFluka").value=INFO.cfg.fluka_dir||"";$("setFluka").placeholder=INFO.fluka_dir_default||"";$("ver").textContent=INFO.version;renderBins(INFO.cfg.binaries)}
 function renderBins(bins){$("binList").innerHTML=bins.map((b,i)=>`<div class="card" style="margin-bottom:10px" data-i="${i}"><div class="grid2">
  <label>${t("bin_name")}<input class="bn" value="${esc(b.name)}"></label><label>${t("bin_cmd")}<input class="bc" value="${esc(b.cmd)}"></label>
  <label style="grid-column:1/-1">${t("bin_env")}<textarea class="be" style="min-height:60px">${esc(Object.entries(b.env||{}).map(([k,v])=>k+"="+v).join("\n"))}</textarea></label></div>
@@ -1553,6 +1566,7 @@ function readBins(){return [...$("binList").querySelectorAll("[data-i]")].map(d=
  env:Object.fromEntries(d.querySelector(".be").value.split("\n").map(l=>l.trim()).filter(l=>l.includes("=")).map(l=>[l.slice(0,l.indexOf("=")).trim(),l.slice(l.indexOf("=")+1).trim()]))}))}
 $("scanSave").onclick=async()=>{const include=[...$("incBox").querySelectorAll("input:checked")].map(c=>c.value),exclude=$("excBox").value.split("\n").map(x=>x.trim()).filter(Boolean);
  try{await api("/api/config",{include,exclude});$("scanMsg").textContent=t("saved");RF.files=[];RF.loaded=false;NAMES.loaded=false;EX.loaded=false;EX.items=[];INFO_AT=0}catch(e){$("scanMsg").textContent=t("error")+": "+e.message}};
+$("flukaSave").onclick=async()=>{try{await api("/api/config",{fluka_dir:$("setFluka").value.trim()});$("flukaMsg").textContent=t("saved")}catch(e){$("flukaMsg").textContent=t("error")+": "+e.message}};
 $("setAwake").onchange=e=>api("/api/config",{keep_awake:e.target.checked}).then(()=>poll());
 $("setDisplay").onchange=e=>api("/api/config",{keep_display:e.target.checked}).then(()=>poll());
 $("binAdd").onclick=()=>renderBins(readBins().concat([{name:"",cmd:"",env:{}}]));
