@@ -1,0 +1,198 @@
+"""Tests for the FLUKA backend: inputs written from the case model (generators/_fluka.py), checked by reading the
+written geometry back and classifying points, against the TOPAS profile; snapshots; the usbrea to CSV converter."""
+import bisect, hashlib, importlib.util, json, math, os, random, re
+
+import pytest
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+GEN = os.path.join(ROOT, "opentopas_workbench", "generators")
+SNAP = os.path.join(ROOT, "tests", "data", "fluka")
+
+
+def load(name):
+    spec = importlib.util.spec_from_file_location("tf_" + name, os.path.join(GEN, name + ".py"))
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    return mod
+
+
+RF, FK, R = load("ripple_filter"), load("_fluka"), load("_rifi")
+CTRL = {"ions": ["p"], "energies": "63, 132", "variants": ["rifi0", "t4"], "histories": 200000, "spread": 0.2,
+        "period": 1.5, "prefix": "fk"}
+
+
+# ------------------------------------------------------------------ a small reader of the written geometry
+def geometry(text):
+    lines = text.splitlines()
+    g0 = next(i for i, l in enumerate(lines) if l.startswith("GEOBEGIN")) + 2
+    e1 = lines.index("END", g0); e2 = lines.index("END", e1 + 1)
+    bodies = {}
+    for l in lines[g0:e1]:
+        t = l.split(); bodies[t[1]] = (t[0], [float(v) for v in t[2:]])
+    regions, cur = {}, None
+    for l in lines[e1 + 1:e2]:
+        if not l.startswith(" "): cur = l.split()[0]; regions[cur] = l.split()[2:]
+        else: regions[cur] += l.split()
+    return bodies, regions
+
+
+def inside(body, p):
+    kind, v = body
+    if kind == "RPP": return v[0] < p[0] < v[1] and v[2] < p[1] < v[3] and v[4] < p[2] < v[5]
+    n, q = v[:3], v[3:]
+    return sum(n[k] * (p[k] - q[k]) for k in range(3)) < 0          # PLA: inside is opposite the normal
+
+
+def evaluate(tokens, bodies, p):
+    """Union of zones ('|'), each an intersection of signed bodies or signed parenthesised expressions."""
+    def expr(i):
+        zones, cur, ok = [], [], True
+        while i < len(tokens) and tokens[i] != ")":
+            t = tokens[i]
+            if t == "|":
+                if cur: zones.append(ok)
+                cur, ok = [], True; i += 1; continue
+            sign = t[0]
+            if t[1:] == "(" or (t[1:] == "" and tokens[i + 1] == "("):
+                j = i + (1 if t[1:] == "(" else 2)
+                val, i = expr(j); i += 1
+            else:
+                val = inside(bodies[t[1:]], p); i += 1
+            ok = ok and (val if sign == "+" else not val); cur.append(t)
+        if cur: zones.append(ok)
+        return any(zones), i
+    return expr(0)[0]
+
+
+def where(bodies, regions, p):
+    return [r for r, toks in regions.items() if evaluate(toks, bodies, p)]
+
+
+# ------------------------------------------------------------------ geometry checks
+SHAPES = ["t4", "stk4", "stk4x3", "stp4", "rifi2", "pair4"]
+
+
+@pytest.mark.parametrize("v", SHAPES)
+def test_regions_tile_the_world(v):
+    """Every point of the world lies in exactly one region: no overlap, no hole (FLUKA stops on both)."""
+    text = FK.write(RF.case_model("p", 63, v, 1000, 0.2, 1.5, "fk"))
+    bodies, regions = geometry(text)
+    rnd = random.Random(1)
+    for k in range(1500):
+        z = rnd.uniform(-80.8, -79.0) if k % 3 else rnd.uniform(-139, 139)   # mostly in the filter layers
+        p = (rnd.uniform(-7, 7) if k % 2 else rnd.uniform(-29, 29), rnd.uniform(-7, 7), z)
+        hit = where(bodies, regions, p)
+        assert len(hit) == 1 and hit[0] != "BLKHOLE", (p, hit)
+
+
+def expected_thickness(r, x, y):
+    """PMMA along the beam at (x, y) of the TOPAS frame (mm), from the TsRidgeFilter record as TOPAS reads it."""
+    th = math.radians(r["rotz"]); u = (x * math.cos(th) + y * math.sin(th)) * 10
+    if abs(-x * math.sin(th) + y * math.cos(th)) * 10 > 60: return 0.0
+    k = math.floor((u - r["x0"]) / r["pitch"])
+    if k < 0 or k > r["n"]: return 0.0
+    q = u - r["x0"] - k * r["pitch"]
+    if q > r["width"]: return 0.0
+    xs, zs = [float(a) for a in r["x"]], [float(a) for a in r["z"]]
+    if xs[0] > 0: xs, zs = [0.0] + xs, [0.0] + zs          # closed at 0, as _rifi.ridge_samples reads it
+    if xs[-1] < r["width"]: xs, zs = xs + [r["width"]], zs + [0.0]
+    return R.interp(q, xs, zs)
+
+
+@pytest.mark.parametrize("v", ["t4", "stk4", "stk4x3", "rifi1"])
+def test_thickness_along_the_beam_matches_topas(v):
+    m = RF.case_model("p", 63, v, 1000, 0.2, 1.5, "fk")
+    bodies, regions = geometry(FK.write(m))
+    rnd = random.Random(2)
+    for _ in range(25):
+        x, y = rnd.uniform(-2, 2), rnd.uniform(-2, 2)      # TOPAS frame
+        for i, r in enumerate(m["filters"], 1):
+            z0 = r["tz"] * 10 - r["height"] / 2; nz = 400
+            dz = r["height"] / nz
+            got = sum(dz for j in range(nz) if evaluate(regions[f"RIFI{i}"], bodies,
+                                                        FK.to_fluka((x, y, (z0 + (j + 0.5) * dz) / 10))))
+            assert got == pytest.approx(expected_thickness(r, x, y), abs=2 * dz), (v, i, x, y)
+
+
+# ------------------------------------------------------------------ cards
+def test_cards_keep_the_fixed_format():
+    text = FK.write(RF.case_model("p", 132, "t4", 200000, 0.2, 1.5, "fk"))
+    lines = text.splitlines()
+    g0 = next(i for i, l in enumerate(lines) if l.startswith("GEOBEGIN"))
+    g1 = next(i for i, l in enumerate(lines) if l.startswith("GEOEND"))
+    for l in lines[2:g0] + lines[g1:]:
+        if l.startswith("*"): continue
+        assert len(l) <= 78 and re.fullmatch(r"[A-Z-]{3,8}", l[:8].strip()), l
+        for k in range(6):
+            f = l[10 + 10 * k:20 + 10 * k].strip()
+            assert not f or re.fullmatch(r"-?\d+\.\d*(E-?\d+)?|[A-Z][A-Za-z0-9-]{0,9}", f), (l, f)
+    bodies, regions = geometry(text)
+    assert all(re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,7}", n) for n in list(bodies) + list(regions))
+    assert all(len(l) <= 132 for l in lines)
+
+
+def test_beam_card_turns_sigma_into_fwhm():
+    text = FK.write(RF.case_model("p", 132, "rifi0", 200000, 0.2, 1.5, "fk"))
+    beam = next(l for l in text.splitlines() if l.startswith("BEAM "))
+    w = [float(beam[10 + 10 * k:20 + 10 * k]) for k in range(5)]
+    t, m = 0.132, FK.MASS_GEV["proton"]
+    p = math.sqrt(t * t + 2 * t * m)
+    assert w[0] == -0.132 and w[1] == pytest.approx(-2.35482 * (t + m) / p * t * 0.002, rel=1e-4)
+    assert w[2] == pytest.approx(-2.35482, rel=1e-5) and w[3] == w[4] == pytest.approx(-0.706446, rel=1e-5)
+    assert beam.rstrip().endswith("PROTON")
+    pos = next(l for l in text.splitlines() if l.startswith("BEAMPOS"))
+    assert float(pos[30:40]) == -85.0                      # source upstream, beam along +z of the FLUKA frame
+
+
+def test_unsupported_cases_are_named():
+    files = dict(RF.generate_fluka(dict(CTRL, variants=["pin4", "stp4n15", "t4"], ions=["p", "c"])))
+    note = files["FLUKA_not_written.txt"]
+    assert "pin4" in note and "stp4n15" in note and "c 63" in note
+    assert set(files) == {"fk_p063_t4.inp", "fk_p132_t4.inp", "FLUKA_not_written.txt"}
+
+
+# ------------------------------------------------------------------ snapshots of the control cases
+def test_control_case_snapshots():
+    """The four control inputs (63 and 132 MeV, with t4 and without filter) as written: a change of the writer shows
+    here first. The cases without filter are kept in full, the filter cases by hash (about 1100 lines each)."""
+    files = dict(RF.generate_fluka(CTRL))
+    snap = json.load(open(os.path.join(SNAP, "snapshots.json")))
+    assert sorted(files) == sorted(snap)
+    for n, t in files.items():
+        if n.endswith("rifi0.inp"): assert t == open(os.path.join(SNAP, n)).read(), n
+        assert hashlib.sha256(t.encode()).hexdigest() == snap[n], n
+
+
+def test_topas_generate_unchanged_by_the_fluka_writer():
+    """generate() for TOPAS is byte-identical with the snapshot taken before the case model existed."""
+    snap = json.load(open(os.path.join(SNAP, "topas_before.json")))
+    files = RF.generate(dict(CTRL, variants=["rifi0", "t4", "stk4", "stp4n15", "pin4"]))
+    got = {n: hashlib.sha256(t if isinstance(t, bytes) else t.encode()).hexdigest() for n, t in files}
+    assert got == snap
+
+
+# ------------------------------------------------------------------ results
+USBREA = """ ****  Cartesian binning n.   1  "IDD       " , generalized particle n.  228
+      X coordinate: from -1.0000E+01 to  1.0000E+01 cm,     1 bins ( 2.0000E+01 cm wide)
+      Y coordinate: from -1.0000E+01 to  1.0000E+01 cm,     1 bins ( 2.0000E+01 cm wide)
+      Z coordinate: from  0.0000E+00 to  1.2000E+01 cm,     4 bins ( 3.0000E+00 cm wide)
+      Data follow in a matrix A(ix,iy,iz), format (1(5x,1p,10(1x,e11.4)))
+
+      accurate deposition along the tracks requested
+  1.0000E-03  2.0000E-03  4.0000E-03  0.0000E+00
+
+ Percentage errors follow in a matrix A(ix,iy,iz), format (1(5x,1p,10(1x,e11.4)))
+
+  1.0000E+00  2.0000E+00  5.0000E-01  0.0000E+00
+"""
+
+
+def test_usbrea_to_workbench_csv():
+    m = RF.case_model("p", 63, "rifi0", 1000, 0.2, 1.5, "fk")
+    m["phantom"]["zbins"] = 4
+    vals, errs = FK.read_usbrea(USBREA, 4)
+    assert vals == [1e-3, 2e-3, 4e-3, 0.0] and errs == [1.0, 2.0, 0.5, 0.0]
+    csv = FK.to_csv(vals, errs, m).splitlines()
+    assert "# Z in 4 bins of 3 cm" in csv and csv[5].startswith("# DoseToMedium ( Gy ) : Sum")
+    k2 = [float(v) for v in csv[8].split(",")]
+    assert k2[:3] == [0, 0, 2] and k2[3] == pytest.approx(4e-3 * 1.602176634e-7 * 1000) and k2[4] == pytest.approx(k2[3] * 0.005)
+    with pytest.raises(ValueError, match="4 bins"): FK.read_usbrea("no numbers here\n1.0 2.0\n", 4)
