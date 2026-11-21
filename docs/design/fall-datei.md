@@ -1,6 +1,7 @@
 # Falldatei: Workbench, Lieferzeit-Simulator und MRT-Viewer an einem Fall
 
-Entwurf, Stand 2026-11-21. Noch kein Code. Nur Forschung, keine Diagnose, kein Medizinprodukt.
+Entwurf, Stand 2026-11-21, nachgezogen auf Robins Entscheidungen vom selben Tag (PET, Biopsie, Umstieg des
+Viewers). Noch kein Code. Nur Forschung, keine Diagnose, kein Medizinprodukt.
 
 **Kern.** Drei Werkzeuge bleiben getrennt und lesen und schreiben eine gemeinsame Datei `fall.json` in einem
 Fallordner, den der Nutzer lokal wählt. Ein Fall hat ein Bezugssystem: das Raster des Planungs-CTs. Jede
@@ -10,8 +11,8 @@ Ein Prüfskript sagt, ob die Datei stimmt und welche Ergebnisse veraltet sind.
 - **Workbench** (dieses Repo): TOPAS-Dosis und LETd einer Strahlkonfiguration, mit oder ohne Rippelfilter (RiFi).
 - **Lieferzeit-Simulator** (Repo `synchrotron-delivery-simulation`): Bestrahlungszeit und Lagen- und
   Spill-Struktur desselben Plans, mit und ohne RiFi.
-- **MRT-Viewer** (statische HTML-Seite aus einer Vorlage und einem Python-Generator): Dosis, LETd und
-  Ventrikelsaum auf CT, MRT und PET über den Verlauf.
+- **MRT-Viewer** (heute eine statische HTML-Seite aus einer Vorlage und einem Python-Generator, künftig eine App
+  mit React und NiiVue, Abschnitt 6): Dosis, LETd und Ventrikelsaum auf CT, MRT und PET über den Verlauf.
 
 ## 1. Bestand
 
@@ -56,7 +57,7 @@ die Datei ändert, und kein Pfad eines Rechners gerät in ein Ergebnis.
   {"serie": "t1_2001-02-01", "modalitaet": "MR", "art": "t1", "datum": "2001-02-01", "ordner": "bilder/t1_2001-02-01",
    "nach_bezug": "transform/t1_2001-02-01.tfm", "guete": {"verfahren": "mattes_mi", "rms_mm": 0.9, "ok": true}}
  ],
- "zeitleiste": [{"datum": "2001-03-01", "art": "biopsie", "befund": "texte/biopsie.txt", "ort": null}],
+ "zeitleiste": [{"datum": "2000-12-01", "art": "biopsie", "ausgangszustand": true, "befund": "texte/biopsie.txt", "ort": null}],
  "ergebnisse": {
   "workbench": [{"id": "mc-ohne-rifi", "rifi": false, "ordner": "ergebnisse/mc-ohne-rifi", "version": "git:8ae74af",
                  "eingaben": {"plan": "…", "maschine": "…"}, "dateien": {"letd.npy": "…", "rbe_dose_1_1.dcm": "…"}}],
@@ -95,8 +96,9 @@ Es endet mit rc 0 nur ohne `kaputt`. Testfälle: ein synthetischer Fall mit 1 un
 
 **Datenzonen.** Ein Fall liegt ganz in einer Zone. Ein Demo-Fall aus öffentlichen Daten (TG119 und das
 synthetische MRT-Phantom aus `mrt_overlay/phantom.py`) liegt unter `workspace/offen/` und dient als Testfall. Ein
-Fall, dessen Dosis aus einem klinischen Plan, einer klinischen HLUT oder Maschinendaten einer Anlage stammt, liegt
-in der lokalen Zone, und mit ihm jedes Ergebnis daraus. Die Werkzeuge erzwingen das nicht; das Prüfskript warnt,
+Fall aus eigenen Aufnahmen, nur mit öffentlichen Werkzeugen und öffentlichen Daten gerechnet, liegt unter
+`workspace/eigen/`. Ein Fall, dessen Dosis aus einem klinischen Plan, einer klinischen HLUT oder Maschinendaten einer
+Anlage stammt, liegt in der lokalen Zone, und mit ihm jedes Ergebnis daraus. Die Werkzeuge erzwingen das nicht; das Prüfskript warnt,
 wenn ein Fallordner unter `workspace/offen/` einen RT Plan ohne Kennzeichen `"oeffentlich": true` nennt.
 
 **Simulator lokal mit einem eigenen Plan.** Der Simulator läuft auf dem Rechner des Nutzers. Ein Befehl
@@ -106,56 +108,166 @@ Für Tests nimmt er nur synthetische Zyklusdaten und Phantom-Pläne.
 
 ## 3. Viewer: CT und PET
 
-**CT.** Die Volumen des Viewers sind 8 Bit, ein Fenster wäre damit fest. Vorschlag: HU + 1024 als 16 Bit,
-verlustfrei in zwei Kanälen eines PNG-Kachelbilds (hohes und niedriges Byte), die Seite setzt den Wert beim Laden
-zusammen und fenstert live. Voreinstellungen: Hirn, Weichteil, Knochen, frei wählbar mit Mitte und Breite. Die
-verlustbehaftete WebP-Kodierung, die der Viewer für die MRTs nutzt, scheidet hier aus: sie verfälscht die Bytes. Das CT kommt mit der Umkehr von `mri_to_ct.tfm` auf
-das Viewer-Raster, die `mrt_overlay viewer` schon berechnet.
+**CT.** Das CT kommt mit der Umkehr von `mri_to_ct.tfm` auf das Viewer-Raster, die `mrt_overlay viewer` schon
+berechnet, als NIfTI mit HU in 16 Bit (int16). Fenster: Hirn, Weichteil, Knochen, frei wählbar mit Mitte und
+Breite. Die CT-Ebene wird gleich in der neuen App gebaut (Abschnitt 6), nicht mehr auf der alten Seite: NiiVue
+fenstert ein int16-Volumen von sich aus, der frühere Plan mit HU + 1024 in zwei Kanälen eines PNG-Kachelbilds
+entfällt. Die verlustbehaftete WebP-Kodierung der alten Seite schied für das CT ohnehin aus, weil sie die Werte
+verfälscht.
 
-**PET, Weg A: SUV (körpergewichtsbezogen).** SUV = C · Gewicht / Aktivität zur Aufnahmezeit. Benötigte Felder:
+**PET: Annahme des Entwurfs.** Ausgelegt ist der Viewer auf einen Aminosäure-Tracer. Das legt den Weg fest:
+zuerst das Verhältnis zu einer Referenzregion, SUV nur als zweiter Weg mit von Hand eingetragenen Werten.
 
-- `Units` (0054,1001) muss `BQML` sein; sonst ist die Serie schon umgerechnet oder nicht quantitativ.
-- `DecayCorrection` (0054,1102): `START` heißt, die Voxel sind auf den Beginn der Serie korrigiert; dann wird die
-  Aktivität von der Injektion bis dahin abgeklungen: A = A0 · 2^(−Δt / T½). `ADMIN` heißt, keine Abklingrechnung.
-- `PatientWeight` (0010,1030) in kg.
-- `RadiopharmaceuticalInformationSequence` (0054,0016) mit `RadionuclideTotalDose` (0018,1074, Bq),
-  `RadionuclideHalfLife` (0018,1075, s) und `RadiopharmaceuticalStartDateTime` (0018,1078) oder
-  `RadiopharmaceuticalStartTime` (0018,1072).
-- Startzeit der Aufnahme: `SeriesDate`/`SeriesTime` (0008,0021/0031); weil einige Geräte sie bei einer
-  Nachrekonstruktion neu setzen, die früheste `AcquisitionDateTime` oder `AcquisitionTime` der Schichten zum Abgleich.
-- `RescaleSlope` und `RescaleIntercept` je Schicht, nicht je Serie: PET-Schichten haben oft eigene Faktoren.
+**Lücken im Kopf der PET-Datei, allgemein.** Eine PET-Serie, besonders ein Summenbild aus einer dynamischen
+Aufnahme oder eine Serie eines älteren Scanners, kann folgende Lücken haben. Der Viewer und `pet.py` rechnen mit
+jeder davon:
 
-Fehlt ein Feld, zeigt der Viewer die Serie nicht als SUV, sondern sagt, welches Feld fehlt, und bietet Weg B an.
+- `Units` (0054,1001) und `DecayCorrection` (0054,1102) können `NONE` sein: dann ist offen, ob die Voxel Bq/ml
+  sind und worauf sie abklingkorrigiert sind.
+- `PatientWeight` (0010,1030) und `RadionuclideTotalDose` (0018,1074) können 0 sein.
+- `ImagePositionPatient` (0020,0032) kann bei 0,0,0 beginnen, mit Einheitsorientierung in
+  `ImageOrientationPatient`: dann gibt es keinen verlässlichen Patientenrahmen, und die `FrameOfReferenceUID`
+  verbindet die Serie mit nichts.
+- `RescaleSlope` und `RescaleIntercept` stehen je Schicht, nicht je Serie.
 
-**PET, Weg B: Tumor-zu-Hintergrund-Verhältnis (TBR).** Voxel geteilt durch den Mittelwert einer
-Hintergrundregion. Braucht weder Gewicht noch Dosis und ist zwischen Geräten robuster. Der Hintergrund hängt vom
-Tracer ab: bei einem Aminosäure-Tracer üblich gesundes Hirngewebe der Gegenseite, bei FDG ist die Hirnrinde selbst
-stark speichernd und ein TBR schwerer zu deuten. Die Region legt der Nutzer fest; sie steht mit Serie und Maske
-in der Falldatei, damit der Wert nachvollziehbar bleibt. Schwellen für Tumorvolumina übernimmt der Viewer nicht
-selbst, sondern nur aus einer genannten Leitlinie, mit Quelle in der Legende.
+Daraus folgen zwei Pflichten:
 
-**Fusion.** PET direkt starr auf das Planungs-CT ist mit Mutual Information schwach, weil PET grob aufgelöst ist
-und wenig Anatomie zeigt. Besser über das Begleitbild derselben Aufnahme: bei PET/CT liegt das Niedrigdosis-CT
-im selben Bezugssystem (gleiche `FrameOfReferenceUID`), es wird mit `register.py` auf das Planungs-CT registriert
-(CT auf CT) und die Transformation auf das PET übertragen; bei PET/MR ebenso über das MR. Die Güte kommt wie bei
-den MRTs in `bilder[].guete`. Anzeige als Farbebene über dem Grauwertbild, mit Skala in der JSON wie `let_scale`.
+1. **Registrierung von Grund auf.** Die Lage aus dem Kopf wird nicht verwendet. `pet.py` liest das Volumen mit
+   Ursprung 0 und registriert es starr (Euler3D, Mattes Mutual Information, mehrere Starts) auf die 3D-T1 des
+   Viewer-Rasters. Gibt es ein Begleitbild derselben Aufnahme (Niedrigdosis-CT bei PET/CT, MR bei PET/MR) mit
+   verlässlichem Kopf, ist der Weg darüber besser: Begleitbild auf das Planungs-CT oder die T1 registrieren und die
+   Transformation übertragen. Ohne verlässlichen Kopf ist dieser Weg zu.
+2. **Pflicht-Prüfung links-rechts.** Eine starre Transformation spiegelt nie, und ein Gehirn ist fast
+   symmetrisch: ein seitenverkehrt gelesenes PET passt mit fast derselben Güte. Deshalb läuft dieselbe Suche mit
+   dem links-rechts gespiegelten PET als Gegenprobe. Nur wenn das ungespiegelte PET deutlich besser passt, wird die
+   Ebene gezeigt; sonst bricht der Lauf mit beiden Werten ab. Das Ergebnis steht in `bilder[].guete` neben der
+   Registriergüte.
+
+**PET, Weg 1: Verhältnis zur Referenzregion (zuerst).** Voxel geteilt durch den Median einer Referenzregion.
+Braucht weder Gewicht noch Aktivität und ist zwischen Geräten robuster. Bei einem Aminosäure-Tracer ist das der
+übliche Weg; die Region (etwa gesundes Hirngewebe der Gegenseite) legt der Nutzer fest, sie steht mit Serie und
+Maske in der Falldatei, damit der Wert nachvollziehbar bleibt. Schwellen für Tumorvolumina übernimmt der Viewer
+nicht selbst, sondern nur aus einer genannten Leitlinie, mit Quelle in der Legende.
+
+**PET, Weg 2: SUV (körpergewichtsbezogen), nur mit Eingabe von Hand.** SUV = C · Gewicht / Aktivität zur
+Aufnahmezeit. Fehlen Gewicht und Aktivität im Kopf, rechnet der Viewer SUV nur, wenn der Nutzer Gewicht,
+injizierte Aktivität, Injektionszeit und Halbwertszeit selbst einträgt und `Units` Bq/ml belegt ist. Die
+eingetragenen Werte stehen in der Falldatei (`bilder[].pet.suv_eingabe`) und die Legende sagt, dass sie von Hand
+kommen. Liefert der Kopf alle Felder (`Units` = `BQML`, `DecayCorrection` `START` oder `ADMIN`, Gewicht,
+`RadiopharmaceuticalInformationSequence` mit Dosis, Halbwertszeit und Startzeit, Aufnahmezeit aus `SeriesTime` oder
+der frühesten `AcquisitionTime`), nimmt der Viewer sie.
+
+Im Fall:
+
+```json
+{"serie": "pet_2001-04-01", "modalitaet": "PT", "datum": "2001-04-01", "ordner": "bilder/pet_2001-04-01",
+ "nach_bezug": "transform/pet_2001-04-01.tfm",
+ "guete": {"verfahren": "mattes_mi", "ok": true, "seitenpruefung": {"mi": 0.0, "mi_gespiegelt": 0.0, "ok": true}},
+ "pet": {"tracer": "aminosaeure", "referenz": {"art": "gegenseite", "maske": "masken/pet_ref.nii.gz"},
+         "suv_eingabe": null}}
+```
+
+**Umsetzung.** Die PET-Ebene läuft getrennt als OTPAS-5734 (Task 3331): `tools/mrt_overlay/pet.py` liest die
+Serie, registriert sie mit Spiegelprüfung und schreibt das Verhältnis als Ebene der alten Seite. Das 8-Bit-Format
+dieser Ebene (Verhältnis bis 4 in Stufen von 0,016) ist Übergang. Registrierung und Spiegelprüfung bleiben gültig;
+in der App wird dieselbe Ebene als Fließkomma-NIfTI geschrieben.
 
 ## 4. Biopsie
 
-Nur als möglicher Eintrag in `zeitleiste`, ohne Annahme zu einem Befund: `art: "biopsie"`, Datum, optional ein
-Verweis auf einen Befundtext im Fallordner (der Viewer zeigt ihn als Text, er wertet ihn nicht aus), optional der
-Entnahmeort als Punkt oder Maske auf einer genannten MR-Serie (`ort: {"serie": …, "voxel_xyz": […]}`). Schnitt-Scans
-der Pathologie wären später eine eigene Modalität (`modalitaet: "SM"`, Whole Slide Imaging) ohne Registrierung auf
-das MRT; der Eintrag verweist dann nur auf sie.
+Annahme des Entwurfs: das Material liegt als Glas-Objektträger vor, die Probe ist vor Strahlen- und
+Chemotherapie entnommen.
+
+- **Zeitleiste jetzt.** Ein Eintrag `art: "biopsie"` mit Entnahmedatum und `ausgangszustand: true`: der Verlauf
+  zeigt ihn als Ausgangszustand vor der Therapie. Optional ein Verweis auf einen Befundtext im Fallordner (der
+  Viewer zeigt ihn als Text, er wertet ihn nicht aus) und der Entnahmeort als Punkt oder Maske auf einer genannten
+  MR-Serie (`ort: {"serie": …, "voxel_xyz": […]}`).
+- **Bild erst nach Ganzschnitt-Scan.** Im Viewer erscheinen die Schnitte erst, wenn die Objektträger als
+  Ganzschnitt gescannt sind (Whole Slide Imaging, `modalitaet: "SM"`). Sie bekommen eine eigene Ansicht ohne
+  Registrierung auf das MRT; der Zeitleisten-Eintrag verweist dann nur auf sie. NiiVue zeigt keine Ganzschnitte;
+  das braucht dann eine eigene Kachelansicht und wird erst geplant, wenn Scans da sind.
+
+**Viewer für andere Patienten:** geparkt.
 
 ## 5. Reihenfolge der Umsetzung
 
+Robins Entscheidung 2253: die Falldatei zuerst. Die PET-Ebene auf der alten Seite (Task 3331) läuft parallel.
+Der Umstieg des Viewers (Abschnitt 6) beginnt, sobald die Falldatei steht, weil die App ihre Daten aus
+`ergebnisse.viewer` findet.
+
 | # | Aufgabe | Größe | Nutzen |
 |---|---|---|---|
-| 1 | `fall/v1` als Schema, `fall_check.py`, Demo-Fall in `workspace/offen/` | S | Alle Werkzeuge haben ein Ziel, gegen das sie testen. |
-| 2 | `mrt_overlay` liest Pfade aus `fall.json` statt zehn Argumenten, schreibt `nach_bezug`, `guete`, `ergebnisse.viewer` | M | Ein Start statt zehn Pfadabfragen; Registriergüte bleibt beim Fall. |
-| 3 | plan_mc schreibt `ergebnisse.workbench` mit Version und Hashes, RiFi-Designer schreibt `rifi` | S | Jede Dosis weiß, aus welchem Plan und Filter sie stammt. |
-| 4 | Simulator: Brücke Einzelplan mit RiFi (`rifi_model` auf einen geparsten Plan statt Zyklus-Aggregate), `fall run` | M | Zeit mit und ohne RiFi für genau den Plan, den die Workbench rechnet. |
-| 5 | Viewer: CT-Ebene mit 16-Bit-Kacheln und HU-Fenstern | M | Dosis und LETd auf der Anatomie, aus der sie gerechnet sind. |
-| 6 | Viewer: PET, SUV und TBR, Fusion über das Begleit-CT oder -MR | L | Stoffwechsel neben Dosis, LETd und Saum im Verlauf. |
-| 7 | Zeitleiste: Biopsie-Eintrag mit Befundtext und Entnahmeort | S | Der Verlauf zeigt, wann und wo Gewebe entnommen wurde. |
+| 1 | Task 3320: `fall/v1` als Schema, `fall_check.py`, Demo-Fall in `workspace/offen/` | S | Alle Werkzeuge haben ein Ziel, gegen das sie testen. |
+| 1' | Task 3331 (parallel): PET-Ebene auf der alten Seite, Verhältnis, Spiegelprüfung | M | PET sofort im Verlauf; Registriercode für die App. |
+| 2 | Task 3321: `mrt_overlay` liest Pfade aus `fall.json` statt zehn Argumenten, schreibt `nach_bezug`, `guete`, `ergebnisse.viewer` | M | Ein Start statt zehn Pfadabfragen; Registriergüte bleibt beim Fall. |
+| 3 | Task 3322: plan_mc schreibt `ergebnisse.workbench` mit Version und Hashes, RiFi-Designer schreibt `rifi` | S | Jede Dosis weiß, aus welchem Plan und Filter sie stammt. |
+| 4 | Task 3323: Simulator, Brücke Einzelplan mit RiFi, `fall run` | M | Zeit mit und ohne RiFi für genau den Plan, den die Workbench rechnet. |
+| 5 | App Stufe 0 und 1: Gerüst, Einzeldatei offline, Volumen als NIfTI (Abschnitt 6) | M | Beweist den Offline-Weg, bevor eine Funktion umzieht. |
+| 6 | App Stufe 2 bis 5: Umzug Funktion für Funktion bis zur Gleichwertigkeit | L | Eine Bild-Engine statt Kachelbilder; Fließkomma für LETd und PET. |
+| 7 | Task 3324: CT-Ebene mit HU-Fenstern, gleich in der App | S | Dosis und LETd auf der Anatomie, aus der sie gerechnet sind. |
+| 8 | Task 3325: SUV mit Eingabe von Hand, in der App | S | SUV, wo Gewicht und Aktivität bekannt sind. |
+| 9 | Task 3326: Biopsie als Ausgangszustand in der Zeitleiste | S | Der Verlauf zeigt, wann und wo die Probe vor der Therapie entnommen wurde. |
+
+## 6. Umstieg des Viewers auf eine App
+
+Robins Entscheidung: der Viewer wird von der HTML-Vorlage mit Python-Generator zu einer App. Dieser Abschnitt plant
+den Umstieg; gebaut wird in den Folge-Aufgaben.
+
+**Ziel.**
+
+- React mit TypeScript, NiiVue als Bild-Engine (WebGL2; liest NIfTI, kann Ebenen mit Farbskala überlagern, Schnitte,
+  3D-Ansicht und Messen). Eine dünne eigene React-Hülle um die NiiVue-Leinwand statt eines Wrapper-Pakets: ein
+  Paket weniger, und die Hülle ist wenige Zeilen.
+- Daten als echte Volumen: NIfTI auf dem Viewer-Raster, MR als int16 oder uint8, CT als int16 (HU), LETd, Dosis und
+  PET-Verhältnis als float32. Keine 8-Bit-WEBP-Mosaiken mehr; Fenster und Schwellen rechnet die App auf den echten
+  Werten.
+- Gebaut als eine einzige HTML-Datei (Vite mit einem Einzeldatei-Plugin), damit Doppelklick offline weiter geht,
+  ohne Server und ohne Netz. Versionen und Lizenzen der Pakete werden beim Bau aus der npm-Registry festgelegt.
+
+**Wie die Daten offline in die Seite kommen.** Ein Browser lädt unter `file://` keine Nachbardatei mit `fetch`
+(wahrscheinlich in Chrome und Edge, im ersten Schritt zu prüfen). Die alte Seite umgeht das mit `.js`-Dateien, die
+sich per `<script>` selbst eintragen. Die App macht es ebenso: der Generator schreibt je Volumen eine `.js`-Datei,
+die ein gzip-NIfTI als Base64 an die App übergibt, und eine Indexdatei aus `ergebnisse.viewer` und `zeitleiste`. Die
+App gibt NiiVue das Volumen aus dem Speicher. Weg zur Reserve: der Nutzer zieht den Datenordner auf die Seite oder
+wählt ihn mit einem Ordner-Dialog. Größe im Blick: ein float32-Volumen von 256³ Voxeln ist 64 MB roh; die erste Stufe
+misst, wie groß ein echter Verlauf gepackt wird, und ob LETd und PET auf einem gröberen Raster reichen.
+
+**Eigenständige App oder Teil der Workbench-Web-UI.**
+
+| | eigenständige App (Einzeldatei) | Teil der Workbench-Web-UI |
+|---|---|---|
+| Offline per Doppelklick | ja | nein, braucht den laufenden Server |
+| Patientendaten | bleiben im Ordner des Nutzers, kein Server liest sie | gehen durch den Workbench-Server, der `lokal` und `robin` bewusst nicht ausliefert |
+| Bau | Node-Bau nur für die App; der Generator bleibt Python | die Web-UI ist heute eine Seite `ui.html` ohne Bau-Schritt auf der Standardbibliothek; React brächte einen Bau in die ganze Workbench |
+| Ein Ort für Plan, Dosis und Bild | nein, zwei Fenster | ja |
+
+Entschieden im Entwurf: **eigenständige App**. Sie hält den Doppelklick offline und die Datenzonen sauber, und die
+Workbench bleibt ohne Bau-Schritt. Die Workbench-Web-UI bekommt später nur einen Knopf, der den Viewer eines Falls
+öffnet; für den Demo-Fall in `workspace/offen/` kann der Server die gebaute Datei mit ausliefern. Leicht umzukehren,
+solange nur das Gerüst steht: die App-Komponenten hängen nicht davon ab, wer sie lädt.
+
+**Wo die App liegt.** Quellen in `tools/mrt_viewer/` (eigenes `package.json`), die gebaute Einzeldatei wird
+mit eingecheckt, damit der Python-Generator auf einem Rechner ohne Node arbeitet. Im Repo nur Code und der
+Demo-Fall aus `workspace/offen/`; keine Daten, Pfade oder Werte aus Aufnahmen. Ob die CI den Bau prüft, entscheidet
+die Aufgabe der Stufe 0 nach der CI-Regel des Projekts.
+
+**Umzug Funktion für Funktion.** Die alte `Verlauf.html` bleibt, bis die App jede ihrer Funktionen kann. Liste der
+Gleichwertigkeit:
+
+| Stufe | Funktion | auf der alten Seite |
+|---|---|---|
+| 0 | Gerüst, Einzeldatei, ein NIfTI offline per Doppelklick geladen | |
+| 1 | Generator schreibt NIfTI-Volumen und Index aus `fall.json` | Kachelbilder bleiben parallel |
+| 2 | Zeitachse, Schnittansicht, Serienwahl | Zeitachse |
+| 3 | Ebenen: LETd, Dosis, Ventrikelsaum, PET-Verhältnis, mit Farbskala und Legende | LETd-Ebene, PET-Ebene |
+| 4 | Lineal, 3D-Ansicht | Lineal, 3D |
+| 5 | Vergleich zweier Zeitpunkte, Blinken, Differenz | Vergleich, Blinken, Differenz |
+| 6 | Laborwerte, Befundtexte, Ereignisse, Biopsie | Laborwerte |
+| 7 | neu: CT mit HU-Fenstern, SUV mit Eingabe von Hand | fehlt dort |
+
+Gleichwertig ist die App, wenn jede Zeile der Spalte "auf der alten Seite" auf dem Demo-Fall und auf einem echten
+Verlauf dasselbe zeigt. Dann entscheidet Robin, ob die alte Seite geht.
+
+**Was an der alten Seite nur Übergang ist.** Die PET-Ebene aus Task 3331 (8-Bit-Verhältnis) und die LETd-Ebene mit
+`letd_all.js` bleiben bis Stufe 3 in Gebrauch; an ihrem Ausgabeformat wird nichts mehr ausgebaut. Ihr
+Rechen-Code (`pet.py`, `layer.py`, `register.py`) bleibt und schreibt zusätzlich NIfTI. Neue Ebenen (CT, SUV) kommen
+nur in die App.
