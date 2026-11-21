@@ -57,6 +57,11 @@ def _common(a, mri, ct, transform, quality, out):
     return layers, mk, info
 
 
+def _step(name):
+    """Progress line for the workbench tab; run.sh prints the first one (export)."""
+    print(f"## STEP {name}", flush=True)
+
+
 def cmd_export(a):
     print(json.dumps(ex.export(a.run, a.out, a.fractions), indent=1))
 
@@ -83,14 +88,17 @@ def cmd_viewer(a):
     ct = geo.read_image(a.ct)
     os.makedirs(a.out, exist_ok=True)
     if a.synthseg and not a.labels:
+        _step("synthseg")
         a.labels = ve.run_synthseg(os.path.join(a.cache, "ref_t1.nii.gz"), os.path.join(a.out, "synthseg.nii.gz"), a.synthseg)
     head = sitk.GetArrayFromImage(grid) > 0
     pts = geo.brain_points(geo.like(head.astype(np.uint8), grid), step=8)
+    _step("register")
     t, q = rg.rigid(grid, ct, mask_points=pts)
     layers, mk, info = _common(a, grid, ct, t, q, a.out)
     exams = []
-    for key, e in sorted(log.items()):
-        if not isinstance(e, dict) or not e.get("series") or "native" not in e: continue
+    todo = [(k, e) for k, e in sorted(log.items()) if isinstance(e, dict) and e.get("series") and "native" in e]
+    for i, (key, e) in enumerate(todo, 1):
+        print(f"## EXAM {i}/{len(todo)}", flush=True)
         track, day = key.split(" ", 1)
         row = {"track": track, "day": day, "native_mm": e["native"], "suitable": ly.exam_suitable(e["native"])}
         vol = os.path.join(a.cache, f"{track}_{day}.npy")
@@ -104,6 +112,7 @@ def cmd_viewer(a):
         exams.append(row)
         print(track, day, row)
     info["exams"] = exams
+    _step("write")
     json.dump(info, open(os.path.join(a.out, "overlay.json"), "w"), indent=1, ensure_ascii=False)
     if a.viewer_data:
         ly.write_viewer(a.viewer_data, layers, mk, {"exams": exams, "look_list": info["look_list"],

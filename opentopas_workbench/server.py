@@ -15,7 +15,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from . import __version__ as VERSION
-from . import beamprofile
+from . import beamprofile, letd
 TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
 TEXT_EXT = {".txt", ".py", ".sh", ".bat", ".json", ".csv", ".md", ".log", ".in", ".mac", ".xml", ".header", ".binheader", ".mcc", ".asc", ".dat", ".tsv"}
 TRASH = "_trash"
@@ -1398,6 +1398,47 @@ def prewarm():
         print(f"prewarm failed: {e}", file=sys.stderr)
 
 
+# ------------------------------------------------------------------ LETd on MRI (letd.py)
+LETD_KEEP = ("status", "start", "end", "seconds", "rc", "error", "out", "out_local", "build", "synthseg", "page_local", "html", "t0")
+
+
+def letd_save(form=None, last=None):
+    """The form and the record of the last run in config.json, so the next visit starts from them (also in another
+    browser). Only the paths the user typed and the run's state, nothing read from the data."""
+    c = STATE["cfg"].setdefault("letd", {})
+    if form is not None: c["form"] = {k: str(form.get(k, "") or "")[:1000] for k in letd.FIELDS}
+    if last is not None: c["last"] = {k: last[k] for k in LETD_KEEP if k in last}
+    save_cfg()
+
+
+def letd_info():
+    c = STATE["cfg"].get("letd", {})
+    letd.restore(c.get("last"))
+    form = dict(c.get("form") or {"rx": "", "fx": "30", "build": "1", "synthseg": "1"})
+    for k, v in letd.default_out(STATE["root"]).items():
+        if not form.get(k): form[k] = v
+    return {"form": form, "job": letd.status(), "script": os.path.isfile(letd.SCRIPT)}
+
+
+def letd_post(what, b):
+    form = b.get("form") or {}
+    if what == "derive": return 200, letd.derive(b.get("mrt", ""))
+    if what == "check":
+        bad, notes = letd.check(form)
+        return 200, {"problems": bad, "notes": notes}
+    if what == "start":
+        bad, notes = letd.check(form)
+        letd_save(form=form)
+        if bad: return 200, {"problems": bad, "notes": notes}
+        try: job = letd.start(form, on_end=lambda st: letd_save(last=st))
+        except RuntimeError: return 409, {"error": "running"}
+        letd_save(last=letd.JOB["state"])
+        return 200, {"job": job, "notes": notes}
+    if what == "stop": return 200, {"stopped": letd.stop()}
+    if what == "open": return 200, {"ok": letd.open_html(b.get("p", ""))}
+    return 404, {"error": "not found"}
+
+
 # ------------------------------------------------------------------ HTTP
 class Server(ThreadingHTTPServer):
     def server_bind(self):
@@ -1500,6 +1541,7 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, res)
             if u.path.startswith("/api/beam/"): return self.send(200, beam_api(u.path[len("/api/beam/"):], q))
             if u.path == "/api/generators": return self.send(200, gen_schema())
+            if u.path == "/api/letd": return self.send(200, letd_info())
             if u.path == "/file":
                 p = resolve(q.get("p", ""))
                 ext = os.path.splitext(p)[1].lower()
@@ -1618,6 +1660,7 @@ class H(BaseHTTPRequestHandler):
                                          "subdir": str(x.get("subdir", ""))})
                     cfg["binaries"] = bins
                 save_cfg(); return self.send(200, {"ok": True, "cfg": cfg})
+            if u.path.startswith("/api/letd/"): return self.send(*letd_post(u.path[len("/api/letd/"):], b))
             if u.path == "/api/generate":
                 gens = load_generators()
                 mod = gens.get(b["id"])
