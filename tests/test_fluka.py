@@ -166,8 +166,24 @@ def test_beam_card_turns_sigma_into_fwhm():
 def test_unsupported_cases_are_named():
     files = dict(RF.generate_fluka(dict(CTRL, variants=["pin4", "stp4n15", "t4"], ions=["p", "c"])))
     note = files["FLUKA_not_written.txt"]
-    assert "pin4" in note and "stp4n15" in note and "c 63" in note
-    assert set(files) == {"fk_p063_t4.inp", "fk_p132_t4.inp", "FLUKA_not_written.txt"}
+    assert "pin4" in note and "stp4n15" in note and "c 132 t4" in note and "DPMJET" in note and "c 63 t4" not in note
+    assert set(files) == {"fk_p063_t4.inp", "fk_p132_t4.inp", "fk_c063_t4.inp", "FLUKA_not_written.txt"}
+
+
+def test_carbon_beam_is_a_heavy_ion_per_nucleon():
+    """12C: BEAM HEAVYION takes kinetic energy and momentum per nucleon (manual, BEAM), HI-PROPE names Z and A."""
+    m = RF.case_model("c", 88, "t3", 100000, 0.2, 1.5, "fk")
+    assert m["beam"]["particle"] == "GenericIon(6,12)" and m["beam"]["energy_mev"] == 12 * 88
+    lines = FK.write(m).splitlines()
+    beam = next(l for l in lines if l.startswith("BEAM "))
+    w = [float(beam[10 + 10 * k:20 + 10 * k]) for k in range(2)]
+    t, mu = 0.088, 11.17486 / 12
+    p = math.sqrt(t * t + 2 * t * mu)
+    assert beam.rstrip().endswith("HEAVYION") and w[0] == pytest.approx(-0.088)
+    assert w[1] == pytest.approx(-2.35482 * (t + mu) / p * t * 0.002, rel=1e-4)
+    hi = next(l for l in lines if l.startswith("HI-PROPE"))
+    assert [float(hi[10 + 10 * k:20 + 10 * k]) for k in range(2)] == [6.0, 12.0]
+    assert not any(l.startswith("HI-PROPE") for l in FK.write(RF.case_model("p", 63, "t3", 1000, 0.2, 1.5, "fk")).splitlines())
 
 
 # ------------------------------------------------------------------ snapshots of the control cases
