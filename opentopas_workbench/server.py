@@ -1579,15 +1579,16 @@ def letd_info():
 
 def letd_post(what, b):
     form = b.get("form") or {}
+    viewer = STATE["cfg"].get("mrt_viewer_dir")
     if what == "derive": return 200, letd.derive(b.get("mrt", ""))
     if what == "check":
-        bad, notes = letd.check(form, STATE["root"])
+        bad, notes = letd.check(form, STATE["root"], viewer)
         return 200, {"problems": bad, "notes": notes}
     if what == "start":
-        bad, notes = letd.check(form, STATE["root"])
+        bad, notes = letd.check(form, STATE["root"], viewer)
         letd_save(form=form)
         if bad: return 200, {"problems": bad, "notes": notes}
-        try: job = letd.start(form, on_end=lambda st: letd_save(last=st))
+        try: job = letd.start(form, on_end=lambda st: letd_save(last=st), viewer=viewer)
         except RuntimeError: return 409, {"error": "running"}
         letd_save(last=letd.JOB["state"])
         return 200, {"job": job, "notes": notes}
@@ -1638,6 +1639,7 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, {"root": STATE["root"], "cfg": STATE["cfg"], "version": VERSION, "detected": detected_binaries(),
                                        "default_exclude": DEFAULT_EXCLUDE,
                                        "fluka_dir_default": FLUKA_DIR_DEFAULT,
+                                       "mrt_viewer_dir_default": letd.VIEWER_DIR_DEFAULT,
                                        "folders": list_folders()})
             if u.path == "/api/ls": return self.send(200, fm_ls(q.get("p", "")))
             if u.path == "/api/read":
@@ -1814,6 +1816,7 @@ class H(BaseHTTPRequestHandler):
                 if "toast" in b: cfg["toast"] = bool(b["toast"])
                 if "machines_dir" in b: cfg["machines_dir"] = str(b["machines_dir"] or "").strip()
                 if "fluka_dir" in b: cfg["fluka_dir"] = str(b["fluka_dir"] or "").strip()
+                if "mrt_viewer_dir" in b: cfg["mrt_viewer_dir"] = str(b["mrt_viewer_dir"] or "").strip()
                 for k in ("exclude", "include"):
                     if k in b: cfg[k] = [str(x).strip() for x in b[k] if str(x).strip()][:200]; invalidate_cache()
                 if "binaries" in b:
