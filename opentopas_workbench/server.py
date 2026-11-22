@@ -539,6 +539,7 @@ FLUKA_PARTS_MAX = 16
 FLUKA_SPARE_CORES = 2
 FLUKA_RUN = "run"   # every sub-run's input is run.inp in a folder of its own: short names for FLUKA and usbsuw
 FLUKA_MARK = ".workbench-subruns"   # in a sub-run folder that the workbench made, the only kind that it empties
+MARK_TEXT = "Sub-runs of one case, emptied when it runs again.\n"
 RUN_ENV = "WORKBENCH_RUN"   # inherited by each process of a run, so a stop also finds one that left the process group
 STOP_GRACE = 5      # seconds between SIGTERM and SIGKILL
 
@@ -563,8 +564,16 @@ def free_cores(seconds=1.0):
         return min(n, round((i1 - i0) / (t1 - t0) * (os.cpu_count() or n)))
     except (OSError, ValueError, IndexError, ZeroDivisionError):
         pass
-    try: return max(0, round(n - os.getloadavg()[0]))   # no /proc (macOS)
-    except (OSError, AttributeError): return n
+    # No /proc (macOS): the CPU shares of the processes alive now, as ps gives them. Not the load average, which
+    # still counts the case that just ended; ps lists only processes that still exist.
+    try:
+        r = subprocess.run(["ps", "-A", "-o", "%cpu="], capture_output=True, text=True, timeout=10)
+        if r.returncode == 0:
+            busy = sum(float(x.replace(",", ".")) for x in r.stdout.split()) / 100
+            return max(0, min(n, round(n - busy)))
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return n
 
 
 def fluka_parts():
@@ -580,21 +589,41 @@ def fluka_module():
     return mod
 
 
-def fluka_runs_dir(name): return f"{name}_fluka_runs"
+FLUKA_RUNS_SUFFIX = "_fluka_runs"
+def fluka_runs_dir(name): return name + FLUKA_RUNS_SUFFIX
+
+
+def fluka_check():
+    """The installation that a job needs, checked before anything of an earlier run is deleted. The folder must be
+    absolute: the sub-runs start from folders of their own, where a relative one would point elsewhere."""
+    d = fluka_dir()
+    if not os.path.isabs(d): raise RuntimeError(f"the FLUKA folder '{d}' is not an absolute path (Settings: FLUKA)")
+    for p in ("rfluka", "usbsuw", "usbrea"):
+        f = os.path.join(d, p)
+        if not (os.path.isfile(f) and os.access(f, os.X_OK)): raise RuntimeError(f"FLUKA program {p} not found in {d} (Settings: FLUKA)")
 
 
 def fluka_prepare(param, out, name):
     """A fresh folder per sub-run below NAME_fluka_runs, each with its input. (folder, primaries of a cycle of each,
-    cycles of each). Fresh, because rfluka goes on from a seed file that an earlier run left beside the input."""
+    cycles of each), or None when the job was stopped meanwhile. Fresh, because rfluka goes on from a seed file that
+    an earlier run left beside the input. Nothing of the earlier run is deleted before the installation was found and
+    the job was not stopped: those sub-runs are often the only result of a long run."""
+    fluka_check()
     with open(param) as fh: text = fh.read()
     inputs, starts, cycles = fluka_module().sub_runs(text, fluka_parts())
+    if STATE["stop"]: return None   # the measurement of the free cores takes a second
     top = os.path.join(out, fluka_runs_dir(name))
+    mark = os.path.join(top, FLUKA_MARK)
     if os.path.lexists(top):
-        ours = not os.path.islink(top) and os.path.isdir(top) and (not os.listdir(top) or os.path.isfile(os.path.join(top, FLUKA_MARK)))
+        ours = not os.path.islink(top) and os.path.isdir(top) and (not os.listdir(top) or os.path.isfile(mark))
         if not ours: raise RuntimeError(f"{fluka_runs_dir(name)} exists and was not made by the workbench: move it away")
-        shutil.rmtree(top)
+        try: shutil.rmtree(top)
+        except OSError:   # half emptied: the mark goes back, or every later run would refuse the folder as foreign
+            if os.path.isdir(top) and not os.path.exists(mark):
+                with open(mark, "w") as fh: fh.write(MARK_TEXT)
+            raise
     os.makedirs(top)
-    with open(os.path.join(top, FLUKA_MARK), "w") as fh: fh.write("Sub-runs of one case, emptied when it runs again.\n")
+    with open(mark, "w") as fh: fh.write(MARK_TEXT)
     for k, body in enumerate(inputs, 1):
         os.mkdir(os.path.join(top, f"{k:02d}"))
         with open(os.path.join(top, f"{k:02d}", FLUKA_RUN + ".inp"), "w") as fh: fh.write(body)
@@ -752,10 +781,15 @@ def run_job(job):
         mark = None
         if fluka:   # the case's input stays beside its results, each sub-run has its own below them
             name = os.path.splitext(os.path.basename(param))[0]
-            top, starts, cycles = fluka_prepare(param, out, name)
+            prepared = fluka_prepare(param, out, name)
+            if prepared is None:
+                with open(resolve(job["log"]), "w") as log: log.write(f"# {job['start']}  stopped before the sub-runs started\n")
+                job["status"] = "stopped"; return
+            top, starts, cycles = prepared
             if out != os.path.dirname(param): shutil.copy2(param, os.path.join(out, name + ".inp"))
             job["subruns"] = {"dir": relp(top), "starts": starts, "cycles": cycles}
             job["threads"] = len(starts)   # the cores that the job holds, for whoever watches the computer's load
+            with STATE["lock"]: save_jobs()   # so jobs.json shows the held cores as the API does
             LIVE.pop(job["id"], None)
             mark = secrets.token_hex(8); env[RUN_ENV] = mark
             cmd = ["bash", "-c", fluka_script(name, len(starts), cycles)]
@@ -1425,6 +1459,9 @@ def list_folders(depth=3, limit=300):
         for e in entries:
             if len(out) >= limit: return
             if not e.is_dir(follow_symlinks=False) or e.name.startswith(".") or e.name == TRASH: continue
+            # a FLUKA case's sub-run folders hold no results of their own, and 16 of them per case would push real
+            # folders past the limit, out of the pickers and out of a saved list of searched folders
+            if e.name.endswith(FLUKA_RUNS_SUFFIX): continue
             r = f"{rel}/{e.name}" if rel else e.name
             if any(fnmatch.fnmatch(e.name, p) or fnmatch.fnmatch(r, p) for p in pats): continue
             out.append(r)
@@ -2093,6 +2130,17 @@ def ctrl_c_ends(now):
     return False
 
 
+def shut_down():
+    """Stops the running job as the server ends. Further SIGTERM, SIGHUP and Ctrl+C are ignored meanwhile: one would
+    break off end_run between SIGTERM and SIGKILL, and sub-runs that ignore SIGTERM would outlive the server."""
+    for name in ("SIGINT", "SIGTERM", "SIGHUP"):
+        if hasattr(signal, name): signal.signal(getattr(signal, name), signal.SIG_IGN)
+    STATE["closing"] = True   # set before the job is stopped, so run_job leaves its record untouched
+    stop_current()
+    p, mark = STATE["proc"], STATE.get("mark")
+    if p is not None and mark: end_run(p.pid, mark)   # the worker thread ends with the server, so not left to it
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] in (["mcp"], ["enqueue"], ["jobs"]):
@@ -2135,10 +2183,7 @@ def main(argv=None):
                 print(f"A job is running. Press Ctrl+C again within {CTRL_C_WINDOW} s to stop it and end the workbench. "
                       "It runs again at the next start; waiting jobs stay in the queue.", flush=True)
     except KeyboardInterrupt:
-        STATE["closing"] = True   # set before the job is stopped, so run_job leaves its record untouched
-        stop_current()
-        p, mark = STATE["proc"], STATE.get("mark")
-        if p is not None and mark: end_run(p.pid, mark)   # the worker thread ends with the server, so not left to it
+        shut_down()
     finally:
         remove_server_file()
         AWAKE.stop()

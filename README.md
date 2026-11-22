@@ -219,14 +219,15 @@ A FLUKA input enters the queue **on hold**: it runs only after you press **Start
 
 FLUKA uses one core, so the workbench splits a case into independent sub-runs, runs them side by side and merges them.
 
-1. Under **Settings, FLUKA**, set **FLUKA sub-runs per case** (1 to 16), or leave it empty: the job then takes the cores that are free when it starts, minus two, at most 16 (`fluka_parts`).
+1. Under **Settings, FLUKA**, set **FLUKA sub-runs per case** (1 to 16), or leave it empty: the job then takes the cores that are free when it starts, minus two, at most 16 (`fluka_parts`). Free cores are measured over one second from `/proc/stat`; without `/proc` (macOS) from the CPU shares of the running processes in `ps`.
 2. Queue the `.inp` and press **Start**, as before. It stays one job: the Runs tab shows the primaries handled over all sub-runs, and Stop ends all their processes.
 3. The results lie where they always did: `IDD_NAME_fluka.csv`, `NAME_21.bnn` and `NAME_21.txt`.
 
 - Each sub-run has the folder `NAME_fluka_runs/01`, `02` and so on, with its `run.inp`, FLUKA's outputs and `console.log`. The folder is emptied when the case runs again.
 - The inputs differ only in `RANDOMIZ` WHAT(2) and `START` WHAT(1). The primaries add up to those of the case and are spread evenly. The seeds follow from the case's seed and the number of the sub-run, so the same case with the same number of sub-runs repeats exactly, and cases with the seeds 1 and 2 share no sequence. Set a fixed number where a result must be repeatable, since the automatic one depends on the load.
-- From 5 sub-runs on, each runs one cycle. With 2 to 4, each runs 5 cycles. With 1, the input runs unchanged (`rfluka -N0 -M5`). The error per bin comes from all cycles of all sub-runs.
+- From 5 sub-runs on, each runs one cycle. With 2 to 4, each runs 5 cycles. With 1, the input runs unchanged (`rfluka -N0 -M5`), also one without a `RANDOMIZ` or `START` card. More than 1 needs exactly one of each in the input. The error per bin comes from all cycles of all sub-runs.
 - If one sub-run fails or leaves no result, the job stops the others and merges nothing. Its last lines are in the job's log.
+- `fluka_dir` must be an absolute path. A job whose programs are missing, or that is stopped before its sub-runs start, leaves the sub-runs of the earlier run untouched.
 
 ## Ripple filter tools
 

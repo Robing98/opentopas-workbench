@@ -362,8 +362,47 @@ def test_fluka_job_never_falls_back_to_path(queue, monkeypatch, tmp_path):
     wb.STATE["cfg"]["fluka_dir"] = str(tmp_path / "missing")
     wb.enqueue(["cases/fk_p063_rifi0.inp"], "", "", False); wb.release_jobs(); wb.worker_step()
     job = wb.STATE["jobs"][0]
-    assert job["status"] == "failed" and job["rc"] == 127 and not list((ws / "cases").glob("*_fluka_runs/*/calls.txt"))
-    assert "rfluka not found" in open(ws / job["log"]).read()
+    assert job["status"] == "failed" and "rfluka not found" in job["error"]
+    assert not list((ws / "cases").glob("*_fluka_runs/*/calls.txt"))
+
+
+@pytest.mark.parametrize("why", ["missing", "relative", "stop"])
+def test_an_earlier_run_survives_a_start_that_cannot_run(queue, monkeypatch, tmp_path, why):
+    """A wrong FLUKA folder, or a stop while the job prepares, deletes nothing of the sub-runs of an earlier run."""
+    wb, ws = queue
+    wb.STATE["cfg"]["fluka_parts"] = 2
+    t, job = start_job(wb); t.join(30)
+    runs = ws / "cases" / "fk_p063_rifi0_fluka_runs"
+    assert job["status"] == "done" and (runs / "02" / "run005_fort.21").is_file()
+    if why == "missing": wb.STATE["cfg"]["fluka_dir"] = str(tmp_path / "missing")
+    if why == "relative":
+        monkeypatch.chdir(tmp_path); wb.STATE["cfg"]["fluka_dir"] = "fluka_bin"   # a working installation, but relative
+    if why == "stop":
+        wb.STATE["cfg"]["fluka_parts"] = 0
+        def measure(seconds=1.0): wb.stop_current(); return 6
+        monkeypatch.setattr(wb, "free_cores", measure)
+    t, job = start_job(wb); t.join(30)
+    want = {"missing": "rfluka not found", "relative": "not an absolute path"}
+    assert job["status"] == ("stopped" if why == "stop" else "failed") and want.get(why, "") in job.get("error", "")
+    assert (runs / "02" / "run005_fort.21").is_file() and (runs / "02" / "calls.txt").read_text().count("rfluka") == 1
+    assert wb.STATE["stop"] is False and "subruns" not in job
+
+
+def test_a_folder_that_was_emptied_half_stays_the_workbench_s(queue, monkeypatch):
+    """rmtree that fails halfway must not leave a folder without its mark, which every later run would refuse."""
+    wb, ws = queue
+    t, job = start_job(wb); t.join(30)
+    runs = ws / "cases" / "fk_p063_rifi0_fluka_runs"
+    real = wb.shutil.rmtree
+    def half(path, *a, **k):
+        (runs / wb.FLUKA_MARK).unlink(); real(runs / "01")
+        raise PermissionError("a file is open elsewhere")
+    monkeypatch.setattr(wb.shutil, "rmtree", half)
+    t, job = start_job(wb); t.join(30)
+    assert job["status"] == "failed" and "open elsewhere" in job["error"] and (runs / wb.FLUKA_MARK).is_file()
+    monkeypatch.setattr(wb.shutil, "rmtree", real)
+    t, job = start_job(wb); t.join(30)
+    assert job["status"] == "done", job.get("error")
 
 
 def test_fluka_job_is_never_started_without_the_start_button(queue):
@@ -535,7 +574,7 @@ def test_stop_during_the_preparation_starts_nothing(queue, monkeypatch):
     monkeypatch.setattr(wb, "free_cores", measure)
     t, job = start_job(wb); t.join(30)
     runs = ws / "cases" / "fk_p063_rifi0_fluka_runs"
-    assert job["status"] == "stopped" and len(job["subruns"]["starts"]) == 4 and not list(runs.glob("*/calls.txt"))
+    assert job["status"] == "stopped" and not runs.exists() and "stopped before" in open(ws / job["log"]).read()
     assert wb.STATE["stop"] is False
 
 
@@ -618,3 +657,80 @@ def test_queue_finish_time_counts_waiting_cases(queue):
     done = {"binary": "FLUKA", "status": "done", "seconds": 100, "total": 2010, "energy": None}
     est = wb.queue_estimate([done, dict(waiting)])
     assert est["seconds"] == 50 and est["unknown"] == 0
+
+
+# ------------------------------------------------------------------ review findings of the sub-runs
+def test_a_single_sub_run_runs_an_input_without_seed_or_start_card_unchanged(queue):
+    """FLUKA runs such an input with the manual's defaults; with 1 sub-run the workbench must not refuse it."""
+    wb, ws = queue
+    text = (ws / "cases" / "fk_p063_rifi0.inp").read_text()
+    bare = "".join(l for l in text.splitlines(True) if not l.startswith(("RANDOMIZ", "START")))
+    assert FK.sub_runs(bare, 1) == ([bare], [5000], 5)
+    assert FK.sub_runs(text, 1)[0] == [text]
+    with pytest.raises(ValueError, match="RANDOMIZ"): FK.sub_runs(bare, 2)
+    (ws / "cases" / "fk_p063_rifi0.inp").write_text(bare)
+    t, job = start_job(wb); t.join(30)
+    assert job["status"] == "done", job.get("error")
+    assert (ws / "cases" / "fk_p063_rifi0_fluka_runs" / "01" / "run.inp").read_text() == bare and job["total"] == 25000
+
+
+def test_sub_run_folders_stay_out_of_the_folder_pickers(queue):
+    wb, ws = queue
+    for k in range(40): (ws / "a" / f"case{k:02d}_fluka_runs" / "01").mkdir(parents=True)
+    (ws / "z_real").mkdir()
+    wb.invalidate_cache()
+    assert wb.list_folders(limit=3) == ["a", "cases", "z_real"]
+
+
+def test_the_held_cores_are_saved_with_the_job(queue, monkeypatch):
+    wb, ws = queue
+    wb.STATE["cfg"]["fluka_parts"] = 3
+    monkeypatch.setattr(wb, "STOP_GRACE", 0.5)
+    monkeypatch.setenv("FAKE_HANG", "1")
+    t, job = start_job(wb)
+    def saved():
+        try:
+            with open(os.path.join(wb.wb_dir(), "jobs.json")) as fh: return json.load(fh)[-1].get("threads")
+        except (OSError, ValueError): return None
+    wait_for(lambda: saved() == 3, "jobs.json does not name the 3 cores of the running job")
+    wb.stop_current(); t.join(30)
+    assert job["status"] == "stopped"
+
+
+def test_free_cores_without_proc_count_only_processes_alive_now(tmp_path, monkeypatch):
+    """The load average still counts the case that just ended (macOS has no /proc): ps does not."""
+    from opentopas_workbench import server as wb
+    monkeypatch.setattr(wb, "PROC_DIR", str(tmp_path / "no_proc"))
+    monkeypatch.setattr(wb, "usable_cores", lambda: 8)
+    monkeypatch.setattr(wb.os, "getloadavg", lambda: (16.0, 16.0, 16.0), raising=False)
+    bin_ = tmp_path / "bin"; bin_.mkdir()
+    (bin_ / "ps").write_text("#!/bin/sh\nprintf ' 250.0\\n  50,0\\n   0.0\\n'\n"); (bin_ / "ps").chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_))
+    assert wb.free_cores() == 5
+    (bin_ / "ps").write_text("#!/bin/sh\nexit 1\n")
+    assert wb.free_cores() == 8
+
+
+def test_shut_down_ignores_a_second_signal(queue, monkeypatch):
+    """A second SIGTERM, SIGHUP or Ctrl+C during the last end_run would skip its SIGKILL and leave sub-runs alive."""
+    import signal, subprocess
+    wb, _ = queue
+    old = {s: signal.getsignal(s) for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
+    def on_term(*_): raise KeyboardInterrupt
+    p = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    ended = []
+    def end_run(pgid, mark):
+        for s in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT): os.kill(os.getpid(), s)
+        time.sleep(0.2)
+        ended.append((pgid, mark))
+    try:
+        for s in old: signal.signal(s, on_term)
+        monkeypatch.setitem(wb.STATE, "closing", False)
+        monkeypatch.setitem(wb.STATE, "proc", p); monkeypatch.setitem(wb.STATE, "mark", "m")
+        wb.STATE["jobs"].append({"id": 1, "status": "running"})
+        monkeypatch.setattr(wb, "end_run", end_run)
+        wb.shut_down()
+        assert ended == [(p.pid, "m")]
+    finally:
+        for s, h in old.items(): signal.signal(s, h)
+        p.kill(); p.wait()

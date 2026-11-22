@@ -247,8 +247,15 @@ def sub_runs(text, n):
 
     From CYCLES sub-runs on, each is one cycle: they are the independent estimates of the statistical error, and every
     further cycle would repeat the initialisation. Fewer keep CYCLES cycles each, so usbrea still has enough of them.
-    A single sub-run is the input as it is."""
+    A single sub-run is the input as it is, also one without a RANDOMIZ or START card, which FLUKA runs with the
+    manual's defaults."""
     lines = text.splitlines(True)
+    if n <= 1:
+        at = [l for l in lines if l.startswith("START")]
+        raw = at[0].rstrip("\r\n")[10:20].strip() if len(at) == 1 else ""
+        try: start = int(float(raw)) if raw else START_DEFAULT
+        except (ValueError, OverflowError): start = START_DEFAULT   # FLUKA names a bad card itself
+        return [text], [max(start, 1)], CYCLES
     def field(name, col, default):
         at = [i for i, l in enumerate(lines) if l.startswith(name)]
         if len(at) != 1: raise ValueError(f"the input has {len(at)} {name} cards, sub-runs need exactly one")
@@ -257,7 +264,6 @@ def sub_runs(text, n):
         except (ValueError, OverflowError): raise ValueError(f"{name}: '{raw}' is not a number in fixed format")
     (seed_at, seed), (start_at, start) = field("RANDOMIZ", 20, SEED_DEFAULT), field("START", 10, START_DEFAULT)
     if start < 1: raise ValueError("START asks for no primaries")
-    if n <= 1: return [text], [start], CYCLES
     cycles = 1 if min(n, start * CYCLES) >= CYCLES else CYCLES
     total = start * CYCLES // cycles
     n = min(n, total)
