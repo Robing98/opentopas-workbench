@@ -191,13 +191,16 @@ def test_topas_generate_unchanged_by_the_fluka_writer():
 
 
 # ------------------------------------------------------------------ results
-USBREA = """ ****  Cartesian binning n.   1  "IDD       " , generalized particle n.  228
+# Layout of usbrea's ASCII output: a Fortran carriage-control "1" on the first line, then the detector header.
+USBREA = """1
+   Cartesian binning n.   1  "IDD       " , generalized particle n.  228
       X coordinate: from -1.0000E+01 to  1.0000E+01 cm,     1 bins ( 2.0000E+01 cm wide)
       Y coordinate: from -1.0000E+01 to  1.0000E+01 cm,     1 bins ( 2.0000E+01 cm wide)
       Z coordinate: from  0.0000E+00 to  1.2000E+01 cm,     4 bins ( 3.0000E+00 cm wide)
       Data follow in a matrix A(ix,iy,iz), format (1(5x,1p,10(1x,e11.4)))
 
       accurate deposition along the tracks requested
+      this is a track-length binning
   1.0000E-03  2.0000E-03  4.0000E-03  0.0000E+00
 
  Percentage errors follow in a matrix A(ix,iy,iz), format (1(5x,1p,10(1x,e11.4)))
@@ -216,6 +219,30 @@ def test_usbrea_to_workbench_csv():
     k2 = [float(v) for v in csv[8].split(",")]
     assert k2[:3] == [0, 0, 2] and k2[3] == pytest.approx(4e-3 * 1.602176634e-7 * 1000) and k2[4] == pytest.approx(k2[3] * 0.005)
     with pytest.raises(ValueError, match="4 bins"): FK.read_usbrea("no numbers here\n1.0 2.0\n", 4)
+
+
+def usbrea_text(vals, errs):
+    """A usbrea ASCII file of one 1 x 1 x len(vals) detector, ten numbers a line as usbrea prints them."""
+    def rows(xs): return "".join("     " + "".join(f" {x:11.4E}" for x in xs[i:i + 10]) + "\n" for i in range(0, len(xs), 10))
+    n = len(vals)
+    head = ("1\n   Cartesian binning n.   1  \"IDD       \" , generalized particle n.  228\n"
+            f"      Z coordinate: from  0.0000E+00 to  1.2000E+01 cm,  {n:4d} bins\n"
+            "      Data follow in a matrix A(ix,iy,iz), format (1(5x,1p,10(1x,e11.4)))\n\n"
+            "      accurate deposition along the tracks requested\n      this is a track-length binning\n")
+    tail = "\n      Percentage errors follow in a matrix A(ix,iy,iz), format (1(5x,1p,10(1x,e11.4)))\n\n" + rows(errs) if errs else ""
+    return head + rows(vals) + tail
+
+
+def test_usbrea_first_and_last_bin_kept():
+    """Task 3357: the carriage-control "1" that opens the file was read as bin 0 (Bin0/Bin1 = 4e4 in Robin's first
+    run), every bin moved one deeper and the last one fell off. Bin 0 and the last bin are the file's own now."""
+    vals = [2.65e-5 + 1e-7 * k for k in range(12)]
+    errs = [0.1 * (k + 1) for k in range(12)]
+    got, gerr = FK.read_usbrea(usbrea_text(vals, errs), 12)
+    assert got == pytest.approx(vals, rel=1e-4) and gerr == pytest.approx(errs, rel=1e-4)
+    got, gerr = FK.read_usbrea(usbrea_text(vals, None), 12)
+    assert got == pytest.approx(vals, rel=1e-4) and gerr is None
+    with pytest.raises(ValueError, match="11 values .* 12 bins"): FK.read_usbrea(usbrea_text(vals[:11], None), 12)
 
 
 # ------------------------------------------------------------------ the FLUKA job of the workbench queue
