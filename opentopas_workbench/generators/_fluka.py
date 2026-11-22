@@ -242,18 +242,27 @@ def _floats(line):
 
 
 def read_usbrea(text, nbins):
-    """(values, relative errors in %) of one USRBIN detector from the ASCII file that usbrea writes.
+    """(values, relative errors in %) of the first USRBIN detector in the ASCII file that usbrea writes.
 
-    The file holds header lines in words, the bin values, another header, the percentage errors. Only lines that are
-    numbers alone count, so the layout of the header lines does not matter; the first nbins numbers are the values,
-    the next nbins the errors (absent when usbrea read a single cycle)."""
-    nums = []
+    The file holds header lines in words, a line "Data follow in a matrix ...", the bin values, a line "Percentage
+    errors follow in a matrix ...", the errors (absent when usbrea read a single cycle). Numbers count only after one
+    of these two lines: the file opens with a Fortran carriage-control "1" on a line of its own, which once was read
+    as the value of the first bin and moved every bin one deeper (task 3357)."""
+    sec, cur = {}, None
     for line in text.splitlines():
+        low = line.lower()
+        if "follow in a matrix" in low:
+            key = "errs" if "error" in low else "vals"
+            if key in sec: break          # a second detector: only the first is read
+            cur = sec[key] = []
+            continue
+        if "binning n." in low and sec: break
         f = _floats(line)
-        if f: nums += f
-    if len(nums) < nbins: raise ValueError(f"usbrea output holds {len(nums)} numbers, the detector has {nbins} bins")
-    vals, errs = nums[:nbins], nums[nbins:2 * nbins]
-    return vals, (errs if len(errs) == nbins else None)
+        if f and cur is not None: cur += f
+    vals, errs = sec.get("vals", []), sec.get("errs")
+    if len(vals) != nbins:
+        raise ValueError(f"usbrea output holds {len(vals)} values after its data header, the detector has {nbins} bins")
+    return vals, (errs if errs is not None and len(errs) == nbins else None)
 
 
 GY_PER_GEV_G = 1.602176634e-10 / 1e-3     # J per GeV over kg per g
