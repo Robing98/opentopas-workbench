@@ -611,7 +611,7 @@ def fluka_prepare(param, out, name):
     fluka_check()
     with open(param) as fh: text = fh.read()
     inputs, starts, cycles = fluka_module().sub_runs(text, fluka_parts())
-    if STATE["stop"]: return None   # the measurement of the free cores takes a second
+    if STATE["stop"] or STATE.get("closing"): return None   # the measurement of the free cores takes a second
     top = os.path.join(out, fluka_runs_dir(name))
     mark = os.path.join(top, FLUKA_MARK)
     if os.path.lexists(top):
@@ -783,6 +783,7 @@ def run_job(job):
             name = os.path.splitext(os.path.basename(param))[0]
             prepared = fluka_prepare(param, out, name)
             if prepared is None:
+                if STATE.get("closing"): return   # the record stays "running": the next start runs it again
                 with open(resolve(job["log"]), "w") as log: log.write(f"# {job['start']}  stopped before the sub-runs started\n")
                 job["status"] = "stopped"; return
             top, starts, cycles = prepared
@@ -812,7 +813,8 @@ def run_job(job):
             log.write(f"# {job['start']}  {what}\n# cwd: {out}\n"); log.flush()
             proc, rc = None, None
             with STATE["lock"]:   # one step with stop_current, so a stop during the preparation starts nothing
-                if not STATE["stop"]:
+                # nor does the end of the server: shut_down ignores signals, and a process started now would inherit that
+                if not STATE["stop"] and not STATE.get("closing"):
                     proc = subprocess.Popen(cmd, cwd=out, stdout=log, stderr=subprocess.STDOUT, env=env, start_new_session=True)
                     STATE["proc"], STATE["mark"] = proc, mark
             while proc is not None:   # this thread is the only one that feeds the keep-awake heartbeat, so it must not block for the whole run

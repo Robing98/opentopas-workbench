@@ -714,7 +714,7 @@ def test_free_cores_without_proc_count_only_processes_alive_now(tmp_path, monkey
 def test_shut_down_ignores_a_second_signal(queue, monkeypatch):
     """A second SIGTERM, SIGHUP or Ctrl+C during the last end_run would skip its SIGKILL and leave sub-runs alive."""
     import signal, subprocess
-    wb, _ = queue
+    wb, ws = queue
     old = {s: signal.getsignal(s) for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
     def on_term(*_): raise KeyboardInterrupt
     p = subprocess.Popen(["sleep", "30"], start_new_session=True)
@@ -731,6 +731,12 @@ def test_shut_down_ignores_a_second_signal(queue, monkeypatch):
         monkeypatch.setattr(wb, "end_run", end_run)
         wb.shut_down()
         assert ended == [(p.pid, "m")]
+        # nothing starts while the server ends: a job would inherit the ignored signals and outlive it
+        wb.STATE["jobs"][-1]["status"] = "stopped"; monkeypatch.setitem(wb.STATE, "proc", None)
+        wb.enqueue(["cases/fk_p063_rifi0.inp"], "", "", False); wb.release_jobs(); wb.worker_step()
+        job = wb.STATE["jobs"][-1]
+        assert job["status"] == "running" and "end" not in job and wb.STATE["proc"] is None   # left for the next start
+        assert not list(ws.glob("cases/*_fluka_runs"))
     finally:
         for s, h in old.items(): signal.signal(s, h)
         p.kill(); p.wait()
