@@ -15,7 +15,7 @@ ends along the ridge; the air above the line is a zone of its own, so the layer'
 would copy one period instead, but needs one ROT-DEFI transformation per cell (81 cells per layer at 1.5 mm, up to
 three layers), more than the manual's index range of ROT-DEFI allows.
 """
-import json, math
+import hashlib, json, math, re
 
 GEV = 1e-3          # MeV to GeV
 FWHM = 2.0 * math.sqrt(2.0 * math.log(2.0))   # Gaussian FWHM / sigma; FLUKA's BEAM card takes FWHM
@@ -41,6 +41,8 @@ MATERIALS = {
 E_CUT_GEV, G_CUT_GEV, DELTA_GEV = 1e-4, 1e-5, 1e-4
 UNIT = 21           # USRBIN output unit, binary (negative on the card), merged by usbsuw and printed by usbrea
 CYCLES = 5          # rfluka -M: independent runs, so usbrea gives a statistical error per bin
+SEED_DEFAULT, SEED_LIMIT = 54217137, 900000000   # RANDOMIZ WHAT(2): its default, and "any number < 9.E8"
+START_DEFAULT = 5000   # START WHAT(1) when blank
 
 
 CASE_TAG = "* workbench-case "   # a comment card: FLUKA skips it, the converter reads the scorer layout from it
@@ -220,10 +222,71 @@ def write(m):
     s = m["score"]
     out += [card("USRBIN", 10.0, "DOSE", -UNIT, ph["hl_cm"][0], ph["hl_cm"][1], pz1, sdum=s["short"]),
             card("USRBIN", -ph["hl_cm"][0], -ph["hl_cm"][1], pz0, 1.0, 1.0, float(ph["zbins"]), sdum="&"),
-            card("RANDOMIZ", 1.0, float(b.get("seed", 54217137))),
+            card("RANDOMIZ", 1.0, float(b.get("seed", SEED_DEFAULT))),
             card("START", float(per_cycle)),
             card("STOP")]
     return "".join(out)
+
+
+# ------------------------------------------------------------------ sub-runs: one input on several cores
+def sub_seed(seed, k, taken=()):
+    """RANDOMIZ WHAT(2) of sub-run k: a number below 9E8, where the manual promises an independent sequence for each.
+
+    A hash and not seed + k: cases are often repeated with the seeds 1, 2, 3, and seed + k would give those repeats
+    mostly the same sequences, so their spread would no longer be a statistical error."""
+    salt = 0
+    while True:
+        s = int(hashlib.sha256(f"{seed}/{k}/{salt}".encode()).hexdigest(), 16) % (SEED_LIMIT - 1) + 1
+        if s != seed and s not in taken: return s
+        salt += 1
+
+
+def sub_runs(text, n):
+    """(inputs, primaries of one cycle of each, cycles of each) that split an input into at most n sub-runs with the
+    same total. They differ only in RANDOMIZ WHAT(2) and START WHAT(1).
+
+    From CYCLES sub-runs on, each is one cycle: they are the independent estimates of the statistical error, and every
+    further cycle would repeat the initialisation. Fewer keep CYCLES cycles each, so usbrea still has enough of them.
+    A single sub-run is the input as it is."""
+    lines = text.splitlines(True)
+    def field(name, col, default):
+        at = [i for i, l in enumerate(lines) if l.startswith(name)]
+        if len(at) != 1: raise ValueError(f"the input has {len(at)} {name} cards, sub-runs need exactly one")
+        raw = lines[at[0]].rstrip("\r\n")[col:col + 10].strip()
+        try: return at[0], int(float(raw)) if raw else default
+        except (ValueError, OverflowError): raise ValueError(f"{name}: '{raw}' is not a number in fixed format")
+    (seed_at, seed), (start_at, start) = field("RANDOMIZ", 20, SEED_DEFAULT), field("START", 10, START_DEFAULT)
+    if start < 1: raise ValueError("START asks for no primaries")
+    if n <= 1: return [text], [start], CYCLES
+    cycles = 1 if min(n, start * CYCLES) >= CYCLES else CYCLES
+    total = start * CYCLES // cycles
+    n = min(n, total)
+    starts = [total // n + (k < total % n) for k in range(n)]
+    def put(line, col, value):
+        body = line.rstrip("\r\n"); end = line[len(body):]
+        body = body.ljust(col + 10)
+        s = num(value)
+        if float(s) != value: raise ValueError(f"{value} does not fit a WHAT field exactly")
+        return body[:col] + f"{s:>10}" + body[col + 10:] + end
+    inputs, taken = [], set()
+    for k in range(n):
+        s = sub_seed(seed, k, taken); taken.add(s)
+        part = list(lines)
+        part[seed_at], part[start_at] = put(lines[seed_at], 20, s), put(lines[start_at], 10, starts[k])
+        inputs.append("".join(part))
+    return inputs, starts, cycles
+
+
+PROGRESS_RE = re.compile(r"^\s*(\d+)\s+(\d+)\s+\d+\s+[\d.]+E[+-]\d+\s+[\d.]+E[+-]\d+")
+
+
+def read_handled(text, start):
+    """Primaries handled so far, from the lines that FLUKA's standard output repeats during a run (manual, main
+    output): handled, left, can still be handled, time per primary, time left. Handled and left add up to START."""
+    for line in reversed(text.splitlines()):
+        m = PROGRESS_RE.match(line)
+        if m and int(m.group(1)) + int(m.group(2)) == start: return int(m.group(1))
+    return 0
 
 
 # ------------------------------------------------------------------ results: usbrea output to the workbench CSV
