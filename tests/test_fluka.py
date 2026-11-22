@@ -499,6 +499,16 @@ def test_a_failed_sub_run_ends_the_others_and_merges_nothing(queue, monkeypatch,
     assert wb.STATE["proc"] is None and wb.STATE["stop"] is False
 
 
+def test_sub_runs_ignore_cdpath(queue, monkeypatch, tmp_path):
+    """bash looks a plain folder name up in CDPATH first: the job must not land in a folder of the same name there."""
+    wb, ws = queue
+    other = tmp_path / "elsewhere" / "fk_p063_rifi0_fluka_runs"; (other / "01").mkdir(parents=True)
+    monkeypatch.setenv("CDPATH", str(tmp_path / "elsewhere"))
+    t, job = start_job(wb); t.join(30)
+    assert job["status"] == "done", open(ws / job["log"]).read()
+    assert (ws / "cases" / "fk_p063_rifi0_fluka_runs" / "01" / "calls.txt").is_file() and not list(other.glob("01/*"))
+
+
 def test_stop_ends_every_process(queue, monkeypatch):
     wb, ws = queue
     wb.STATE["cfg"]["fluka_parts"] = 3

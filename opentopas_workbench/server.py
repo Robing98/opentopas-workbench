@@ -616,11 +616,11 @@ def fluka_script(name, parts, cycles):
     return "\n".join([
         "set -e",
         f"for p in rfluka usbsuw usbrea; do [ -x {q(d)}/$p ] || {{ echo \"FLUKA program $p not found in {d} (Settings: FLUKA)\"; exit 127; }}; done",
-        f"cd {q(fluka_runs_dir(name))}",
+        f"cd {q('./' + fluka_runs_dir(name))}",   # with ./ bash does not search CDPATH
         f"set -- {' '.join(dirs)}",
         "pids=()",
         'for s in "$@"; do',
-        f'  ( cd "$s" && exec {q(d + "/rfluka")} -N0 -M{cycles} {FLUKA_RUN} ) > "$s/console.log" 2>&1 &',
+        f'  ( cd "./$s" && exec {q(d + "/rfluka")} -N0 -M{cycles} {FLUKA_RUN} ) > "$s/console.log" 2>&1 &',
         "  pids+=($!)",
         "done",
         f'echo "Started $# sub-runs, cycles each: {cycles}"',
