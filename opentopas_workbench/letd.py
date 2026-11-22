@@ -201,7 +201,7 @@ def page_command(page, args=()):
     """How build_page.py runs: under WSL with the Windows Python launcher when there is one and it can reach every
     path, since the viewer's scripts are run on Windows otherwise; else with this Python."""
     py = shutil.which("py.exe")
-    if py and all(a.startswith("/mnt/") for a in (page, *args) if a.startswith("/")):
+    if py and all(re.match(r"^/mnt/[a-z]/", a) for a in (page, *args) if a.startswith("/")):
         return [py, "-3", to_windows(page), *(to_windows(a) for a in args)]
     return [shutil.which("python3") or "python3", page, *args]
 

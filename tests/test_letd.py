@@ -224,6 +224,21 @@ def test_start_runs_the_script_then_build_page_and_shows_the_result(srv, ws, mon
     assert info["form"]["cache"] == f["cache"] and info["job"]["result"]["exams"]
 
 
+def test_start_runs_build_page_of_the_clone_that_the_setting_names(srv, ws, monkeypatch):
+    fake = ws / "fake_run.sh"; fake.write_text(FAKE_RUN); fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setattr(letd, "SCRIPT", str(fake))
+    monkeypatch.setattr(letd.shutil, "which", lambda n: sys.executable if n == "python3" else None)
+    f = full_form(ws)
+    for clone in ("mrt-viewer", "second clone"):
+        touch(ws / clone / "build_page.py", f"print('built by {clone}')\n")
+    assert call(srv + "/api/config", {"mrt_viewer_dir": str(ws / "second clone")})[0] == 200
+    code, r = call(srv + "/api/letd/start", {"form": f})
+    assert code == 200 and not r.get("problems"), r
+    job = wait_done(srv)
+    assert job["status"] == "done", job["log"]
+    assert "built by second clone" in job["log"] and "built by mrt-viewer" not in job["log"]
+
+
 def test_start_refuses_a_bad_form_and_runs_nothing(srv, ws):
     f = full_form(ws); f["run"] = str(ws / "missing")
     code, r = call(srv + "/api/letd/start", {"form": f})
@@ -320,6 +335,8 @@ def test_page_command_takes_windows_python_only_when_it_reaches_every_path(monke
     got = letd.page_command(page, ("--cache", "/mnt/c/w/cacheF", "--view", "/mnt/c/a b/Verlauf-Daten"))
     assert got == ["/bin/py.exe", "-3", r"C:\dev\mrt-viewer\build_page.py", "--cache", r"C:\w\cacheF", "--view", r"C:\a b\Verlauf-Daten"]
     assert letd.page_command(page, ("--cache", "/home/x/cacheF"))[0] == "/bin/python3"
+    # a mount that is no drive letter (a network share, say) is no path that Windows Python can open
+    assert letd.page_command(page, ("--cache", "/mnt/wsl/x/cacheF"))[0] == "/bin/python3"
 
 
 def test_the_setting_names_the_clone_that_the_tab_runs(srv, ws):
