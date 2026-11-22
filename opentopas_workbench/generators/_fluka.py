@@ -19,8 +19,14 @@ import json, math
 
 GEV = 1e-3          # MeV to GeV
 FWHM = 2.0 * math.sqrt(2.0 * math.log(2.0))   # Gaussian FWHM / sigma; FLUKA's BEAM card takes FWHM
-MASS_GEV = {"proton": 0.93827209, "alpha": 3.72737941}
-BEAM_NAME = {"proton": "PROTON", "alpha": "4-HELIUM"}   # 4-HELIUM: WHAT(1) is the energy of the whole ion
+MASS_GEV = {"proton": 0.93827209, "alpha": 3.72737941, "GenericIon(6,12)": 11.17486}   # nuclear masses
+BEAM_NAME = {"proton": "PROTON", "alpha": "4-HELIUM", "GenericIon(6,12)": "HEAVYION"}
+# 4-HELIUM: WHAT(1) of BEAM is the energy of the whole ion. HEAVYION: WHAT(1) is "per nuclear mass unit" (manual, BEAM),
+# and the ion is set by HI-PROPE (Z, A). Ion transport needs no IONTRANS card with an ion beam (manual, IONTRANS note
+# 2). Below 125 MeV/n the BME event generator of the standard library handles nuclear interactions; above it FLUKA has
+# to be linked with DPMJET and RQMD, which the writer cannot check, so it refuses those energies.
+HEAVY_ION = {"GenericIon(6,12)": (6, 12)}
+BME_MAX_MEV_U = 125.0
 # Geant4 NIST materials of the TOPAS cases: density (g/cm3), mean excitation energy I (eV), composition. Atom counts
 # (positive) or mass fractions (negative), as COMPOUND reads them. Elements are FLUKA's pre-defined ones.
 MATERIALS = {
@@ -41,7 +47,7 @@ CASE_TAG = "* workbench-case "   # a comment card: FLUKA skips it, the converter
 
 
 class Unsupported(ValueError):
-    """A case that the FLUKA writer cannot write 1:1 (tilted plates, STL pins, ions beyond helium)."""
+    """A case that the FLUKA writer cannot write 1:1 (tilted plates, STL pins, ions other than p, 4He, 12C)."""
 
 
 def num(v):
@@ -154,10 +160,15 @@ def write(m):
     """The FLUKA input (text) of a case model. Raises Unsupported for what has no 1:1 translation."""
     b, ph, w = m["beam"], m["phantom"], m["world"]
     part = b["particle"]
-    if part not in BEAM_NAME: raise Unsupported(f"beam particle {part}: only protons and helium-4 are written for FLUKA")
+    if part not in BEAM_NAME:
+        raise Unsupported(f"beam particle {part}: only protons, helium-4 and carbon-12 are written for FLUKA")
     if any(f.get("tilt") for f in m["filters"]): raise Unsupported("tilted filter plates have no FLUKA writer yet")
-    t_gev = b["energy_mev"] * GEV
-    mass = MASS_GEV[part]
+    t_gev, mass = b["energy_mev"] * GEV, MASS_GEV[part]
+    ion = HEAVY_ION.get(part)
+    if ion:                         # energy and momentum per nucleon; the relative energy spread stays the same
+        if b["energy_mev"] / ion[1] > BME_MAX_MEV_U:
+            raise Unsupported(f"{part} above {BME_MAX_MEV_U:g} MeV/u needs FLUKA linked with DPMJET and RQMD")
+        t_gev, mass = t_gev / ion[1], mass / ion[1]
     p_gev = math.sqrt(t_gev ** 2 + 2 * t_gev * mass)
     dp_fwhm = FWHM * (t_gev + mass) / p_gev * t_gev * b["spread_pct"] / 100     # dp = (T + m) / p dT
     per_cycle = primaries(m) // CYCLES
@@ -171,6 +182,7 @@ def write(m):
            card("DEFAULTS", sdum="HADROTHE"),
            card("BEAM", -t_gev, -dp_fwhm, -FWHM * b["div_mrad"][0], -FWHM * b["sigma_mm"][0] / 10,
                 -FWHM * b["sigma_mm"][1] / 10, None, sdum=BEAM_NAME[part]),
+           *([card("HI-PROPE", float(ion[0]), float(ion[1]), 0.0)] if ion else []),
            card("BEAMPOS", *to_fluka((0.0, 0.0, b["z_cm"]))),
            card("GEOBEGIN", sdum="COMBNAME"),
            "    0    0          " + m["title"][:60] + "\n"]

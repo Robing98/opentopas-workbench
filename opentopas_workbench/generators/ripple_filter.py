@@ -352,7 +352,7 @@ d:Ge/Foil/TransZ   = 79.0 cm
 
 # ---------------------------------------------------------------- the case as a model, for the FLUKA writer (_fluka.py)
 FK = _helper("_fluka")
-TOPAS_PARTICLE = {"p": "proton", "a": "alpha"}
+TOPAS_PARTICLE = {"p": "proton", "a": "alpha", "c": "GenericIon(6,12)"}
 
 
 def case_model(ion, e_u, v, hist, spread, lam, prefix):
@@ -360,7 +360,7 @@ def case_model(ion, e_u, v, hist, spread, lam, prefix):
 
     The filters are the same _rifi.ridges records that definition_block writes as TsRidgeFilter; variants outside
     rifi/v1 (STL pins, tilted or spaced plates, the 1D pin equivalents) raise _fluka.Unsupported."""
-    if ion not in TOPAS_PARTICLE: raise FK.Unsupported(f"ion {ion}: the FLUKA writer takes protons and helium-4")
+    if ion not in TOPAS_PARTICLE: raise FK.Unsupported(f"ion {ion}: the FLUKA writer takes protons, helium-4 and carbon-12")
     _, a, _ = ION[ion]
     name, hlz = frame(ion, e_u, v, prefix)
     filters = []
@@ -388,9 +388,9 @@ def generate_fluka(v):
     for ion in v.get("ions") or []:
         for e in energies:
             for var in v.get("variants") or []:
-                try: m = case_model(ion, e, var, v["histories"], float(v["spread"]), lam, v.get("prefix") or "mess")
+                try: text = FK.write(case_model(ion, e, var, v["histories"], float(v["spread"]), lam, v.get("prefix") or "mess"))
                 except FK.Unsupported as x: skipped.append(f"{ion} {e:g} {var}: {x}"); continue
-                files.append((frame(ion, e, var, v.get("prefix") or "mess")[0] + ".inp", FK.write(m)))
+                files.append((frame(ion, e, var, v.get("prefix") or "mess")[0] + ".inp", text))
     if skipped: files.append(("FLUKA_not_written.txt", "Cases without a FLUKA input:\n" + "\n".join(skipped) + "\n"))
     if not files: raise ValueError("select at least one ion and one variant")
     return files

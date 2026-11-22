@@ -196,7 +196,7 @@ A definition is plain JSON (schema `rifi/v1`, described in `opentopas_workbench/
 
 ## FLUKA backend
 
-The `ripple_filter` generator also writes its cases as FLUKA inputs (`.inp`): choose **Backend: FLUKA** in the Generators tab. The input comes from the same case model as the TOPAS file (`generators/_fluka.py`), with the card syntax of the public FLUKA manual (4-5); no user routine is needed. Cases without a 1:1 translation (2D pins from STL, tilted plates, ions beyond helium) are named in `FLUKA_not_written.txt` instead of being left out.
+The `ripple_filter` generator also writes its cases as FLUKA inputs (`.inp`): choose **Backend: FLUKA** in the Generators tab. The input comes from the same case model as the TOPAS file (`generators/_fluka.py`), with the card syntax of the public FLUKA manual (4-5); no user routine is needed. Cases without a 1:1 translation (2D pins from STL, tilted plates, ions other than protons, helium-4 and carbon-12, and carbon above 125 MeV/u, where FLUKA needs DPMJET and RQMD linked in) are named in `FLUKA_not_written.txt` instead of being left out.
 
 - Frame: the TOPAS frame turned by 180 degrees about y, so the beam runs along +z, as FLUKA's BEAM card expects.
 - Filters: each layer is cut into slabs between the break points of its profile (planes `PLA`, one zone of PMMA and one of air per slab). `LATTICE` would need one `ROT-DEFI` per cell, more than its index range allows.
