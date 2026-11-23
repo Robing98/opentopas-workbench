@@ -856,3 +856,104 @@ def test_fluka_inputs_are_listed_with_their_results(queue):
     assert p["results"].get("cases/fk_p063_t4.inp") == ["out"] and "cases/elsewhere.inp" not in p["results"]
     assert "cases/fk_p063_t4.txt" not in p["results"]       # the TOPAS result is another file
     assert p["last"]["cases/fk_p063_t4.txt|FLUKA"]["status"] == "held" == p["last"]["cases/fk_p063_t4.inp|FLUKA"]["status"]
+
+
+# ------------------------------------------------------------------ compute in both codes, in turns (task 3375, point 4)
+def both_cases(ws, variants=("t4", "rifi0")):
+    fixed = ws / "cases" / "fk_p063_rifi0.inp"   # the fixture's hand-made input: kept as alone.inp, out of the generator's way
+    if fixed.exists(): fixed.rename(ws / "cases" / "alone.inp")
+    for name, text in RF.generate(dict(CTRL, variants=list(variants), energies="63")): (ws / "cases" / name).write_text(text)
+    return [f"cases/fk_p063_{v}.txt" for v in variants]
+
+
+def fake_runs(wb, monkeypatch):
+    """run_job without TOPAS or FLUKA: the order of the runs, and per run the CSV that the real code would write."""
+    order = []
+    def run(job):
+        order.append((job["file"], job["binary"]))
+        out = os.path.splitext(job["file"])[0] + ("_fluka.csv" if job["binary"] == "FLUKA" else ".csv")
+        job.update(status="done", outputs=[out], end="now")
+    monkeypatch.setattr(wb, "run_job", run)
+    return order
+
+
+def test_both_codes_queue_each_case_as_a_pair_in_turns(queue):
+    wb, ws = queue
+    t4, r0 = both_cases(ws)
+    (ws / "cases" / "other.txt").write_text("s:Ge/World/Material = \"G4_AIR\"\n")
+    wb.STATE["next_id"] = 5
+    added, skipped, refused, group = wb.enqueue_both([t4, "cases/other.txt", "cases/fk_p063_rifi0.inp", r0], "OpenTOPAS", "", False)
+    assert [(j["file"], j["binary"], j["status"]) for j in wb.STATE["jobs"]] == [
+        (t4, "OpenTOPAS", "queued"), ("cases/fk_p063_t4.inp", "FLUKA", "held"),
+        (r0, "OpenTOPAS", "queued"), ("cases/fk_p063_rifi0.inp", "FLUKA", "held")]
+    assert group == 5 and {j["group"] for j in wb.STATE["jobs"]} == {5} and skipped == []
+    assert [r["file"] for r in refused] == ["cases/other.txt", "cases/fk_p063_rifi0.inp"]
+    assert "not written by a generator" in refused[0]["reason"] and "no TOPAS file" in refused[1]["reason"]
+    for bad in ("FLUKA", "", None):
+        with pytest.raises(ValueError, match="TOPAS program"): wb.enqueue_both([t4], bad, "", False)
+
+
+def test_topas_runs_past_held_fluka_and_start_comparison_keeps_the_group_order(queue, monkeypatch):
+    wb, ws = queue
+    t4, r0 = both_cases(ws)
+    order = fake_runs(wb, monkeypatch)
+    wb.enqueue(["cases/alone.inp"], "", "", False)            # a FLUKA job of no group, held before the group came
+    group = wb.enqueue_both([t4, r0], "OpenTOPAS", "", False)[3]
+    for _ in range(4): wb.worker_step()
+    assert order == [(t4, "OpenTOPAS"), (r0, "OpenTOPAS")]     # the queue does not stand in front of a held job
+    assert wb.release_jobs(group=group) == 2
+    for _ in range(4): wb.worker_step()
+    assert order[2:] == [("cases/fk_p063_t4.inp", "FLUKA"), ("cases/fk_p063_rifi0.inp", "FLUKA")]
+    assert wb.STATE["jobs"][0]["status"] == "held"             # Start comparison releases its own group only
+
+
+def test_started_right_away_the_codes_take_turns(queue, monkeypatch):
+    wb, ws = queue
+    t4, r0 = both_cases(ws)
+    order = fake_runs(wb, monkeypatch)
+    wb.release_jobs(group=wb.enqueue_both([t4, r0], "OpenTOPAS", "", False)[3])
+    for _ in range(5): wb.worker_step()
+    assert [b for _, b in order] == ["OpenTOPAS", "FLUKA", "OpenTOPAS", "FLUKA"]
+    assert [f for f, _ in order] == [t4, "cases/fk_p063_t4.inp", r0, "cases/fk_p063_rifi0.inp"]
+
+
+def test_a_pair_is_skipped_whole_never_by_half(queue):
+    wb, ws = queue
+    t4, r0 = both_cases(ws)
+    for name in ("IDD_fk_p063_t4.csv", "IDD_fk_p063_t4_fluka.csv", "IDD_fk_p063_rifi0.csv"): (ws / "cases" / name).write_text("x")
+    wb.invalidate_cache()
+    added, skipped, _, _ = wb.enqueue_both([t4, r0], "OpenTOPAS", "", True)
+    assert skipped == [t4] and added == [r0, "cases/fk_p063_rifi0.inp"]   # rifi0 has its TOPAS result only: both run
+    added, skipped, _, _ = wb.enqueue_both([r0], "OpenTOPAS", "", False)
+    assert added == [] and skipped == [r0]                    # its FLUKA half waits already
+
+
+def test_groups_in_the_api_count_finished_pairs_and_release_by_group(queue, monkeypatch):
+    wb, ws = queue
+    t4, r0 = both_cases(ws)
+    order = fake_runs(wb, monkeypatch)
+    srv = wb.Server(("127.0.0.1", 0), wb.H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    def api(path, body=None):
+        req = urllib.request.Request(f"http://127.0.0.1:{srv.server_address[1]}{path}",
+                                     None if body is None else json.dumps(body).encode(),
+                                     {"X-Token": wb.TOKEN, "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=20) as r: return json.load(r)
+    try:
+        r = api("/api/enqueue_both", {"files": [t4, r0], "binary": "OpenTOPAS", "subdir": "", "skip": False})
+        g = str(r["group"])
+        assert r["added"] == [t4, "cases/fk_p063_t4.inp", r0, "cases/fk_p063_rifi0.inp"]
+        assert api("/api/jobs")["groups"][g] == {"held": 2, "jobs": 4, "cases": 2, "pairs": 0, "active": 4, "outputs": []}
+        wb.worker_step()
+        assert api("/api/jobs")["groups"][g]["outputs"] == []    # one half of a pair compares nothing yet
+        assert api("/api/release", {"group": r["group"]})["released"] == 2
+        wb.worker_step()
+        grp = api("/api/jobs")["groups"][g]
+        assert grp["pairs"] == 1 and grp["held"] == 0 and grp["outputs"] == ["cases/fk_p063_t4.csv", "cases/fk_p063_t4_fluka.csv"]
+        wb.worker_step(); wb.worker_step()
+        grp = api("/api/jobs")["groups"][g]
+        assert grp["pairs"] == 2 and grp["active"] == 0 and len(grp["outputs"]) == 4 and len(order) == 4
+        with pytest.raises(urllib.error.HTTPError):
+            api("/api/enqueue_both", {"files": [t4], "binary": "FLUKA"})
+    finally:
+        srv.shutdown(); srv.server_close()

@@ -827,12 +827,15 @@ def fluka_input_from_topas(f):
     return inp
 
 
-def release_jobs(ids=None):
-    """Held FLUKA jobs to queued: the start by the user's hand. None releases every held job."""
+def release_jobs(ids=None, group=None):
+    """Held FLUKA jobs to queued: the start by the user's hand. None releases every held job, group only those of one
+    "compute in both codes" selection (its "Start comparison" button)."""
     n = 0
     with STATE["lock"]:
         for j in STATE["jobs"]:
-            if j["status"] == "held" and (ids is None or j["id"] in ids): j["status"] = "queued"; n += 1
+            if j["status"] != "held": continue
+            if (group is not None and j.get("group") == group) or (group is None and (ids is None or j["id"] in ids)):
+                j["status"] = "queued"; n += 1
         save_jobs()
     return n
 
@@ -919,9 +922,21 @@ def run_job(job):
             notify_job(job)
 
 
-def enqueue(files, binary, subdir, skip_existing):
+def fluka_waiting(inp):
+    return any(j.get("file") == inp and j.get("status") in ("held", "queued") for j in STATE["jobs"])
+
+
+def has_results(f, subdir):
+    """True when every result that the file writes is already in its output folder."""
+    info = file_info(resolve(f))
+    outs = info["outs"] if info else []
+    od = resolve(os.path.join(os.path.dirname(f), subdir or ""))
+    return bool(outs) and os.path.isdir(od) and all(has_output(dir_names(od), o) for o in outs)
+
+
+def enqueue(files, binary, subdir, skip_existing, extra=None):
     """(added, skipped, refused). A TOPAS file sent to FLUKA goes in as the FLUKA input of its case; one without a case
-    model is refused with the reason, and the other files of the selection still go in."""
+    model is refused with the reason, and the other files of the selection still go in. extra goes into each new record."""
     added, skipped, refused = [], [], []
     for f in files:
         p = resolve(f)
@@ -932,14 +947,10 @@ def enqueue(files, binary, subdir, skip_existing):
             try: source, f = f, fluka_input_from_topas(f)
             except (ValueError, OSError) as e: refused.append({"file": f, "reason": str(e)}); continue
             p = resolve(f)
-        if f.lower().endswith(".inp") and any(j.get("file") == f and j.get("status") in ("held", "queued") for j in STATE["jobs"]):
+        if f.lower().endswith(".inp") and fluka_waiting(f):
             skipped.append(f); continue     # a second copy would run the same case into the same IDD_NAME_fluka.csv
-        if skip_existing:
-            info = file_info(p)
-            outs = info["outs"] if info else []
-            od = resolve(os.path.join(os.path.dirname(f), subdir or ""))
-            if outs and os.path.isdir(od) and all(has_output(dir_names(od), o) for o in outs):
-                skipped.append(f); continue
+        if skip_existing and has_results(f, subdir):
+            skipped.append(f); continue
         fluka = f.lower().endswith(".inp")
         size = {}
         if fluka:   # the case record gives the queue's finish time its histories
@@ -949,11 +960,55 @@ def enqueue(files, binary, subdir, skip_existing):
         with STATE["lock"]:
             STATE["jobs"].append({"id": STATE["next_id"], "file": f, "binary": FLUKA_BINARY if fluka else binary, "subdir": subdir,
                                   "status": "held" if fluka else "queued",
-                                  "queued": time.strftime("%Y-%m-%d %H:%M:%S"), **size, **({"source": source} if source else {})})
+                                  "queued": time.strftime("%Y-%m-%d %H:%M:%S"), **size, **({"source": source} if source else {}), **(extra or {})})
             STATE["next_id"] += 1
         added.append(f)
     with STATE["lock"]: save_jobs()
     return added, skipped, refused
+
+
+def enqueue_both(files, binary, subdir, skip_existing):
+    """"Compute in both codes": per TOPAS file its TOPAS job and right behind it the FLUKA job of the same case, so that
+    the queue gives a new comparison after every second run (case 1 TOPAS, case 1 FLUKA, case 2 TOPAS, ...). The FLUKA
+    jobs enter held like every FLUKA job, the TOPAS jobs run meanwhile because the worker passes held jobs by, and
+    "Start comparison" releases the group, whose list order then is the run order. A file without a FLUKA input of its
+    case is refused whole: a pair with one half compares nothing. (added, skipped, refused, group)."""
+    if not binary or binary == FLUKA_BINARY: raise ValueError("choose a TOPAS program for the TOPAS half of each pair")
+    added, skipped, refused = [], [], []
+    with STATE["lock"]: group = STATE["next_id"]   # the id of the group's first job: unique, and stays after a restart
+    for f in files:
+        if f.lower().endswith(".inp"):
+            refused.append({"file": f, "reason": "a FLUKA input has no TOPAS file to pair it with"}); continue
+        try: inp = fluka_input_from_topas(f)
+        except (ValueError, OSError) as e: refused.append({"file": f, "reason": str(e)}); continue
+        # skipped as a pair, never by half: a half queued alone would leave its group a case without a comparison
+        if fluka_waiting(inp) or (skip_existing and has_results(f, subdir) and has_results(inp, subdir)):
+            skipped.append(f); continue
+        for b in (binary, FLUKA_BINARY):
+            a, s, r = enqueue([f], b, subdir, False, {"group": group})
+            added += a; skipped += s; refused += r
+    return added, skipped, refused, group
+
+
+def job_groups(jobs):
+    """Per group of "compute in both codes": its held FLUKA jobs, its cases and finished pairs, and the result files of
+    the finished pairs only, so the comparison view changes once per pair and never shows a case with one code."""
+    groups = {}
+    for j in jobs:
+        g = j.get("group")
+        if g is None: continue
+        d = groups.setdefault(g, {"held": 0, "jobs": 0, "cases": {}})
+        d["jobs"] += 1; d["held"] += j["status"] == "held"
+        case = j.get("source") or j["file"]   # the FLUKA job runs NAME.inp, written from the TOPAS file NAME.txt
+        d["cases"].setdefault(case, []).append(j)
+    out = {}
+    for g, d in groups.items():
+        pairs = [js for js in d["cases"].values() if len(js) == 2 and all(j["status"] == "done" for j in js)]
+        outputs = [o for js in pairs for j in js for o in j.get("outputs") or [] if o.lower().endswith(".csv")]
+        out[str(g)] = {"held": d["held"], "jobs": d["jobs"], "cases": len(d["cases"]), "pairs": len(pairs),
+                       "active": sum(j["status"] in ("queued", "running", "held") for js in d["cases"].values() for j in js),
+                       "outputs": outputs}
+    return out
 
 
 PROC_DIR = "/proc"
@@ -2170,7 +2225,8 @@ class H(BaseHTTPRequestHandler):
                             j["eta"] = round(el * (j["total"] - done) / done) if done < j["total"] else 0
                 est = [dict(j) for j in finished[-200:]] + [j for j in jobs if j["status"] in ("queued", "running")]
                 return self.send(200, {"jobs": jobs, "running": running, "awake": AWAKE.status(), "queue_eta": queue_estimate(est),
-                                       "counts": counts, "finished": len(finished), "rev": rev, "external": external_runs()})
+                                       "counts": counts, "finished": len(finished), "rev": rev, "external": external_runs(),
+                                       "groups": job_groups(alljobs)})
             if u.path == "/api/log":
                 p = resolve(q.get("p", ""))
                 with open(p, errors="replace") as fh: fh.seek(0, 2); size = fh.tell(); fh.seek(max(0, size - 12000)); return self.send(200, {"text": fh.read()})
@@ -2249,7 +2305,11 @@ class H(BaseHTTPRequestHandler):
                 a, s, r = enqueue(b["files"], b["binary"], b.get("subdir", ""), b.get("skip", False))
                 return self.send(200, {"added": a, "skipped": s, "refused": r})
             if u.path == "/api/stop": stop_current(); return self.send(200, {"ok": True})
+            if u.path == "/api/enqueue_both":
+                a, s, r, g = enqueue_both(b["files"], b.get("binary"), b.get("subdir", ""), b.get("skip", False))
+                return self.send(200, {"added": a, "skipped": s, "refused": r, "group": g})
             if u.path == "/api/release":
+                if b.get("group") is not None: return self.send(200, {"ok": True, "released": release_jobs(group=int(b["group"]))})
                 return self.send(200, {"ok": True, "released": release_jobs(None if b.get("all") else set(b.get("ids", [])))})
             if u.path == "/api/views":
                 os.makedirs(wb_dir(), exist_ok=True)
