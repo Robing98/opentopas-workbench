@@ -788,11 +788,28 @@ def test_topas_file_sent_to_fluka_queues_the_input_of_its_case_on_hold(queue):
     assert (j["binary"], j["status"], j["source"], j["total"]) == ("FLUKA", "held", "cases/fk_p063_t4.txt", 200000)
     wb.worker_step()
     assert j["status"] == "held"                            # only the Start button starts FLUKA
+    assert wb.enqueue(["cases/fk_p063_t4.txt"], "FLUKA", "", False)[:2] == ([], ["cases/fk_p063_t4.inp"])   # waits already
+    assert len(wb.STATE["jobs"]) == 1
+    j["status"] = "done"
     assert wb.enqueue(["cases/fk_p063_t4.txt"], "FLUKA", "", False)[0] == ["cases/fk_p063_t4.inp"]   # same input again
     (ws / "cases" / "fk_p063_t4.inp").write_text(inp.replace("RANDOMIZ", "RANDOMIZ ", 1))
     a, _, r = wb.enqueue(["cases/fk_p063_t4.txt"], "FLUKA", "", False)
     assert a == [] and "exists with other content" in r[0]["reason"]
     assert (ws / "cases" / "fk_p063_t4.inp").read_text() != inp   # an edited input is never overwritten
+
+
+def test_unwritable_fluka_input_is_refused_and_the_rest_still_queued(queue):
+    wb, ws = queue
+    (ws / "ro").mkdir()
+    for name, text in RF.generate(dict(CTRL, variants=["t4"], energies="63")):
+        (ws / "ro" / name).write_text(text); (ws / "cases" / name).write_text(text)
+    (ws / "ro").chmod(0o500)
+    try:
+        added, skipped, refused = wb.enqueue(["cases/fk_p063_t4.txt", "ro/fk_p063_t4.txt"], "FLUKA", "", False)
+    finally: (ws / "ro").chmod(0o700)
+    assert added == ["cases/fk_p063_t4.inp"] and skipped == [] and [r["file"] for r in refused] == ["ro/fk_p063_t4.txt"]
+    assert not (ws / "ro" / "fk_p063_t4.inp").exists()
+    assert [j["file"] for j in json.loads((ws / ".workbench" / "jobs.json").read_text())] == ["cases/fk_p063_t4.inp"]
 
 
 def test_fluka_inputs_are_listed_with_their_results(queue):

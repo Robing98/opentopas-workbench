@@ -781,12 +781,12 @@ def fluka_input_from_topas(f):
     body = mod.fluka_from_topas(text)
     inp = os.path.splitext(f)[0] + ".inp"
     q = resolve(inp)
-    if os.path.exists(q):
+    try:    # "x" and not an exists() check first: a NAME.inp that appears in between is never overwritten
+        with open(q, "x") as fh: fh.write(body)
+        invalidate_cache(soft=True)
+    except FileExistsError:
         with open(q, errors="replace") as fh:
             if fh.read() != body: raise ValueError(f"{os.path.basename(inp)} exists with other content: rename or delete it")
-    else:
-        with open(q, "w") as fh: fh.write(body)
-        invalidate_cache(soft=True)
     return inp
 
 
@@ -890,9 +890,12 @@ def enqueue(files, binary, subdir, skip_existing):
         if not os.path.isfile(p): raise ValueError(f"not a file: {f}")
         source = None
         if binary == FLUKA_BINARY and not f.lower().endswith(".inp"):
+            # OSError too: one unwritable folder must not fail the request after earlier files of it were queued
             try: source, f = f, fluka_input_from_topas(f)
-            except ValueError as e: refused.append({"file": f, "reason": str(e)}); continue
+            except (ValueError, OSError) as e: refused.append({"file": f, "reason": str(e)}); continue
             p = resolve(f)
+        if f.lower().endswith(".inp") and any(j.get("file") == f and j.get("status") in ("held", "queued") for j in STATE["jobs"]):
+            skipped.append(f); continue     # a second copy would run the same case into the same IDD_NAME_fluka.csv
         if skip_existing:
             info = file_info(p)
             outs = info["outs"] if info else []
