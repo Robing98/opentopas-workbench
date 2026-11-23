@@ -67,6 +67,12 @@ def in_public_zone(p, root=None):
     return False
 
 
+def public_ok(form):
+    """A case marked public (the demo case, plan.oeffentlich in fall.json) may write into offen: its plan and images
+    are synthetic. Set only by the case start of fall_setup, never by the form."""
+    return form.get("oeffentlich") is True
+
+
 def _walk(top, depth=SEARCH_DEPTH, limit=SEARCH_LIMIT):
     """(folder, subfolder names, file names) breadth first, shallow folders first, so the nearest match wins."""
     queue, seen = [(top, 0)], 0
@@ -153,14 +159,14 @@ def check(form, root=None, viewer=None):
         if miss: need("cache", "missing", ", ".join(miss))
     if not p["view"]: need("view", "empty")
     elif not os.path.isdir(p["view"]): need("view", "not_found")
-    elif in_public_zone(p["view"], root): need("view", "public_zone")
+    elif in_public_zone(p["view"], root) and not public_ok(form): need("view", "public_zone")
     rx, fx = _num(f["rx"], float), _num(f["fx"], int)
     if f["rx"].strip() and rx is None: need("rx", "number")
     if not f["rx"].strip() and not p["rs"]: need("rx", "rx_or_rs")
     if fx is None: need("fx", "number")
     for k in ("out", "kz"):
         if not p[k]: need(k, "empty")
-        elif in_public_zone(p[k], root): need(k, "public_zone")
+        elif in_public_zone(p[k], root) and not public_ok(form): need(k, "public_zone")
     if p["kz"] and not p["kz"].lower().endswith(".json"): need("kz", "json")
     if f["build"] in ("1", "true", "True"):
         # named here: otherwise the page fails only after the whole run, which takes up to an hour

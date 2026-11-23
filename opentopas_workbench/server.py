@@ -16,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from . import __version__ as VERSION
-from . import beamprofile, letd, machines, pet_run
+from . import beamprofile, fall, fall_setup, letd, machines, pet_run
 TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
 TEXT_EXT = {".txt", ".py", ".sh", ".bat", ".json", ".csv", ".md", ".log", ".in", ".mac", ".xml", ".header", ".binheader", ".mcc", ".asc", ".dat", ".tsv"}
 TRASH = "_trash"
@@ -1791,7 +1791,8 @@ def letd_info():
 
 
 def letd_post(what, b):
-    form = b.get("form") or {}
+    form = dict(b.get("form") or {})
+    form.pop("oeffentlich", None)   # only a case marked public may write into offen, never the form
     viewer = STATE["cfg"].get("viewer_dir")
     if what == "derive": return 200, letd.derive(b.get("mrt", ""))
     if what == "check":
@@ -1837,7 +1838,8 @@ def pet_info():
 
 
 def pet_post(what, b):
-    form = b.get("form") or {}
+    form = dict(b.get("form") or {})
+    form.pop("oeffentlich", None)   # only a case marked public may write into offen, never the form
     viewer = STATE["cfg"].get("viewer_dir")
     if what == "derive": return 200, letd.derive(b.get("mrt", ""))
     if what == "check":
@@ -1853,6 +1855,106 @@ def pet_post(what, b):
         return 200, {"job": job, "notes": notes}
     if what == "stop": return 200, {"stopped": pet_run.stop()}
     if what == "open": return 200, {"ok": pet_run.open_html()}
+    return 404, {"error": "not found"}
+
+
+# ------------------------------------------------------------------ cases (fall.json): set up once, then choose and start
+def fall_cfg():
+    return STATE["cfg"].setdefault("faelle", {"liste": [], "zuletzt": "", "cache_wurzeln": []})
+
+
+def fall_base():
+    """The folder that holds the private zones: the workspace root itself or its workspace/ folder."""
+    root = STATE["root"]
+    return root if os.path.isdir(os.path.join(root, "lokal")) else os.path.join(root, "workspace")
+
+
+def fall_info():
+    c, out = fall_cfg(), []
+    for f in c["liste"]:
+        e = {"ordner": f, "anzeige": letd.to_windows(f)}
+        try: e.update(fall.summary(fall.load(f)))
+        except fall.FallError as x: e["fehler"] = str(x)
+        out.append(e)
+    return {"faelle": out, "zuletzt": c.get("zuletzt", ""), "lokal": os.path.isdir(os.path.join(fall_base(), "lokal")),
+            "letd": letd.status(), "pet": pet_run.status()}
+
+
+def fall_register(folder):
+    c = fall_cfg()
+    if folder not in c["liste"]: c["liste"].append(folder)
+    c["zuletzt"] = folder
+    save_cfg()
+
+
+def fall_start(folder, want_letd, want_pet, pet_serie=None):
+    """Starts the layers of a case: LETd first, PET after it, so the two never build the viewer page at once."""
+    viewer = STATE["cfg"].get("viewer_dir")
+    forms = {}
+    if want_letd: forms["letd"] = fall_setup.letd_form(folder)
+    if want_pet: forms["pet"] = fall_setup.pet_form(folder, pet_serie)
+    probs = {}
+    if "letd" in forms: probs["letd"] = letd.check(forms["letd"], STATE["root"], viewer)
+    if "pet" in forms: probs["pet"] = pet_run.check(forms["pet"], STATE["root"], viewer)
+    bad = {k: v[0] for k, v in probs.items() if v[0]}
+    if bad: return 200, {"problems": bad}
+    fall_register(folder)
+
+    def start_pet(_st=None):
+        if _st is not None and _st.get("status") != "done": return
+        pet_save(form={k: v for k, v in forms["pet"].items() if k != "oeffentlich"})
+        try: pet_run.start(forms["pet"], on_end=lambda st: pet_save(last=st), viewer=viewer)
+        except (RuntimeError, ValueError): pass
+
+    try:
+        if "letd" in forms:
+            letd_save(form={k: v for k, v in forms["letd"].items() if k != "oeffentlich"})
+            def end(st):
+                letd_save(last=st)
+                if "pet" in forms: start_pet(st)
+            letd.start(forms["letd"], on_end=end, viewer=viewer)
+            letd_save(last=letd.JOB["state"])
+        elif "pet" in forms:
+            start_pet()
+    except RuntimeError:
+        return 409, {"error": "running"}
+    return 200, {"letd": letd.status(), "pet": pet_run.status(), "notes": {k: v[1] for k, v in probs.items()}}
+
+
+def fall_post(what, b):
+    root, c = STATE["root"], fall_cfg()
+    try:
+        if what == "scan":
+            r = fall_setup.scan(b.get("mrt", ""), root, c.get("cache_wurzeln", []), b.get("pet") or None)
+            return 200, r
+        if what == "browse": return 200, fall_setup.browse(b.get("pfad", ""), root)
+        if what == "plan": return 200, fall_setup.plan_rows(b.get("rtplan", ""))
+        if what == "runinputs": return 200, fall_setup.run_inputs(letd.to_local(b.get("lauf", "")))
+        if what == "save":
+            fid = str(b.get("fall_id", "")).strip()
+            if not os.path.isdir(os.path.join(fall_base(), "lokal")): return 200, {"fehler": "kein_lokal"}
+            folder = os.path.join(fall_base(), "lokal", "faelle", fid)
+            if not fall._ID.match(fid): return 200, {"fehler": "fall_id"}
+            d = fall_setup.save_case(folder, fid, b.get("werte") or {})
+            cache = (b.get("werte") or {}).get("cache")
+            if cache:   # cacheF lies outside OneDrive: its parent is where the next search looks first
+                parent = os.path.dirname(letd.to_local(cache))
+                if parent not in c["cache_wurzeln"]: c["cache_wurzeln"].append(parent)
+            fall_register(folder)
+            return 200, {"ordner": folder, "fall": fall.summary(d)}
+        if what == "demo":
+            folder = os.path.join(fall_base(), "offen", "faelle", "demo-tg119")
+            if not os.path.exists(os.path.join(folder, fall.NAME)): fall_setup.demo(folder)
+            fall_register(folder)
+            return 200, {"ordner": folder}
+        if what == "check":
+            return 200, fall.check(b.get("ordner", ""), hashes=False)
+        if what == "start":
+            folder = b.get("ordner", "")
+            if folder not in c["liste"]: return 404, {"error": "unknown case"}
+            return fall_start(folder, bool(b.get("letd")), bool(b.get("pet")), b.get("pet_serie"))
+    except fall.FallError as e:
+        return 200, {"fehler": str(e)}
     return 404, {"error": "not found"}
 
 
@@ -1963,6 +2065,7 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/machines/"): return self.send(200, machines_api(u.path[len("/api/machines/"):], q))
             if u.path == "/api/generators": return self.send(200, gen_schema())
             if u.path == "/api/letd": return self.send(200, letd_info())
+            if u.path == "/api/fall": return self.send(200, fall_info())
             if u.path == "/api/pet": return self.send(200, pet_info())
             if u.path == "/api/pet/sheet":
                 p = pet_run.sheet_path()
@@ -2098,6 +2201,7 @@ class H(BaseHTTPRequestHandler):
                     cfg["binaries"] = bins
                 save_cfg(); return self.send(200, {"ok": True, "cfg": cfg})
             if u.path.startswith("/api/letd/"): return self.send(*letd_post(u.path[len("/api/letd/"):], b))
+            if u.path.startswith("/api/fall/"): return self.send(*fall_post(u.path[len("/api/fall/"):], b))
             if u.path.startswith("/api/pet/"): return self.send(*pet_post(u.path[len("/api/pet/"):], b))
             if u.path.startswith("/api/rifi/"): return self.send(200, rifi_api(u.path[len("/api/rifi/"):], b))
             if u.path == "/api/generate":

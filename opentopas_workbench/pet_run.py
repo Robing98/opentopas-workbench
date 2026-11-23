@@ -14,7 +14,7 @@ import threading
 import time
 
 from . import letd
-from .letd import to_local, in_public_zone
+from .letd import to_local, in_public_zone, public_ok
 
 SCRIPT = os.path.join(os.path.dirname(letd.TOOL_DIR), "tools", "mrt_overlay", "run_pet.sh")
 LOG_NAME = "pet_lauf.log"
@@ -59,7 +59,7 @@ def check(form, root=None, viewer=None):
         elif not glob.glob(os.path.join(glob.escape(p["cache"]), "t1_*.npy")): need("cache", "no_t1")
     if not p["view"]: need("view", "empty")
     elif not os.path.isdir(p["view"]): need("view", "not_found")
-    elif in_public_zone(p["view"], root): need("view", "public_zone")
+    elif in_public_zone(p["view"], root) and not public_ok(form): need("view", "public_zone")
     ref = f["ref"] or "brain"
     if ref not in REFS: need("ref", "choice")
     if ref == "striatum":
@@ -67,7 +67,7 @@ def check(form, root=None, viewer=None):
         elif not os.path.isfile(p["labels"]): need("labels", "not_found")
     if ref == "contralateral" and f["side"] not in SIDES: need("side", "choice")
     if not p["out"]: need("out", "empty")
-    elif in_public_zone(p["out"], root): need("out", "public_zone")
+    elif in_public_zone(p["out"], root) and not public_ok(form): need("out", "public_zone")
     if f["build"] in ("1", "true", "True"):
         # named before the run, as in letd.check: the page needs the case files beside the form's folders
         script = letd.page_script(viewer)

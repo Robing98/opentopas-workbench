@@ -399,14 +399,44 @@ kbd{font:12.5px ui-monospace,Consolas,monospace;padding:1px 6px;border:1px solid
 
 <!-- LETD ON MRI: tools/mrt_overlay/run.sh from one form (letd.py) -->
 <section id="letd" class="tab">
+  <!-- a case set up once (fall.json): choose it, tick the layers, start (fall_setup.py) -->
+  <div class="card" id="fcCard">
+    <h2 data-i18n="fc_title"></h2>
+    <p class="mute" style="font-size:13px;margin-top:0" data-i18n="fc_intro"></p>
+    <div class="row">
+      <label for="fcSel" data-i18n="fc_case"></label><select id="fcSel"></select>
+      <label><input type="checkbox" id="fcL" checked> <span data-i18n="fc_letd"></span></label>
+      <label><input type="checkbox" id="fcP"> <span data-i18n="fc_pet"></span></label>
+      <button class="pri" id="fcStart" data-i18n="lt_start"></button>
+      <button id="fcNew" data-i18n="fc_new"></button><button id="fcDemo" data-i18n="fc_demo"></button>
+      <span id="fcMsg" class="mute" role="status"></span>
+    </div>
+    <div id="fcProb" class="log-err" style="font-size:13px"></div>
+    <div id="fcWiz" hidden style="margin-top:10px">
+      <h2 data-i18n="fc_wiz"></h2>
+      <div class="row"><label for="fcMrt" data-i18n="fc_mrt"></label><span id="fcMrt" class="mute"></span>
+        <button id="fcMrtPick" data-i18n="fc_pick"></button><button class="pri" id="fcScan" data-i18n="fc_scan"></button></div>
+      <div class="scroll"><table><thead><tr><th data-i18n="fc_row"></th><th data-i18n="fc_value"></th><th data-i18n="fc_src"></th><th></th></tr></thead><tbody id="fcRows"></tbody></table></div>
+      <details id="fcMore"><summary data-i18n="fc_more"></summary><table><tbody id="fcRowsMore"></tbody></table></details>
+      <div class="row"><label for="fcId" data-i18n="fc_id"></label><input type="text" id="fcId" spellcheck="false" autocomplete="off" style="width:16em">
+        <button class="pri" id="fcSave" data-i18n="fc_save"></button><button id="fcCancel" data-i18n="fc_cancel"></button><span id="fcWizMsg" class="mute" role="status"></span></div>
+    </div>
+    <div id="fcBrowse" hidden class="card" style="margin-top:10px">
+      <div class="row"><button id="fcUp" data-i18n="fc_up"></button><b id="fcPath"></b></div>
+      <div class="scroll" style="max-height:300px"><ul id="fcDirs" style="list-style:none;padding-left:0;margin:4px 0"></ul></div>
+      <div class="row"><button class="pri" id="fcTake" data-i18n="fc_take"></button><button id="fcBrClose" data-i18n="fc_cancel"></button></div>
+    </div>
+  </div>
   <div class="card">
     <h2 data-i18n="lt_title"></h2>
+    <details class="expert"><summary data-i18n="fc_expert"></summary>
     <p class="mute" style="font-size:13px;margin-top:0" data-i18n="lt_intro"></p>
     <div class="lf" id="ltForm"></div>
     <div class="row">
       <button id="ltCheck" data-i18n="lt_check"></button><button class="pri" id="ltStart" data-i18n="lt_start"></button>
-      <button id="ltStop" data-i18n="lt_stop" hidden></button><span id="ltMsg" class="mute" role="status"></span>
     </div>
+    </details>
+    <div class="row"><button id="ltStop" data-i18n="lt_stop" hidden></button><span id="ltMsg" class="mute" role="status"></span></div>
     <div id="ltLive" class="live" hidden>
       <div class="ph" id="ltSteps"></div>
       <div class="big" id="ltBar" hidden><i></i></div>
@@ -425,12 +455,14 @@ kbd{font:12.5px ui-monospace,Consolas,monospace;padding:1px 6px;border:1px solid
   <!-- PET on the same MRIs: tools/mrt_overlay/run_pet.sh from one form (pet_run.py) -->
   <div class="card" id="ptCard">
     <h2 data-i18n="pt_title"></h2>
+    <details class="expert"><summary data-i18n="fc_expert"></summary>
     <p class="mute" style="font-size:13px;margin-top:0" data-i18n="pt_intro"></p>
     <div class="lf" id="ptForm"></div>
     <div class="row">
       <button id="ptCheck" data-i18n="lt_check"></button><button class="pri" id="ptStart" data-i18n="lt_start"></button>
-      <button id="ptStop" data-i18n="lt_stop" hidden></button><span id="ptMsg" class="mute" role="status"></span>
     </div>
+    </details>
+    <div class="row"><button id="ptStop" data-i18n="lt_stop" hidden></button><span id="ptMsg" class="mute" role="status"></span></div>
     <div id="ptLive" class="live" hidden>
       <div class="ph" id="ptSteps"></div>
       <div class="big" id="ptBar" hidden><i></i></div>
@@ -768,7 +800,7 @@ function syncHash(push){if(!CUR)return;const h=tabHash(CUR);if(location.hash===h
 function showTab(id,opt){opt=opt||{};if(!TABS.includes(id))id="files";const changed=CUR!==id;CUR=id;
  document.querySelectorAll(".tab").forEach(s=>s.classList.toggle("on",s.id===id));document.querySelectorAll("nav [role=tab]").forEach(b=>b.setAttribute("aria-selected",b.dataset.tab===id));store("tab",id);
  if(!opt.fromHash)syncHash(changed&&!opt.replace);
- if(id==="files"&&!opt.noload)fmLoad(FM.path);if(id==="run"){loadParams();renderQueue(true);showJob(true)}if(id==="results"){resLoad(RS.path);loadViews()}if(id==="explorer")exLoad(false);if(id==="gen")loadGens();if(id==="beam")bpLoad(false);if(id==="machines"&&!MC.loaded)mcLoad(null);if(id==="settings")loadSettings();if(id==="letd"){ltLoad();ptLoad()}if(id==="rifi")rdLoad();
+ if(id==="files"&&!opt.noload)fmLoad(FM.path);if(id==="run"){loadParams();renderQueue(true);showJob(true)}if(id==="results"){resLoad(RS.path);loadViews()}if(id==="explorer")exLoad(false);if(id==="gen")loadGens();if(id==="beam")bpLoad(false);if(id==="machines"&&!MC.loaded)mcLoad(null);if(id==="settings")loadSettings();if(id==="letd"){fcLoad();ltLoad();ptLoad()}if(id==="rifi")rdLoad();
  if(changed&&id==="run")poll();}
 /* #run, #results?f=a.csv&f=b.csv, #files?p=dir/case.txt */
 function routeFromHash(){const h=location.hash;if(!h||h===ROUTED)return !!h&&TABS.includes(h.slice(1).split("?")[0]);ROUTED=h;
@@ -1782,6 +1814,93 @@ function ptResult(j){const r=j.result;$("ptRes").hidden=!r;if(!r)return;const nf
  const src="/api/pet/sheet?token="+encodeURIComponent(TOKEN)+"&t="+encodeURIComponent(j.end||"");
  if(r.sheet){if(img.getAttribute("src")!==src)img.src=src;img.hidden=false}else img.hidden=true;
  $("ptHint").textContent=r.hinweis||""}
+
+/* ---------- cases: set up once, then choose and start (fall_setup.py, /api/fall) */
+Object.assign(I18N.de,{fc_title:"Fall",fc_intro:"Fall wählen, Ebenen ankreuzen, Start. Einen neuen Fall richtest du einmal ein: die Workbench sucht die Ordner auf diesem Rechner selbst.",
+ fc_case:"Fall",fc_letd:"LETd",fc_pet:"PET",fc_new:"Fall einrichten",fc_demo:"Demo-Fall",fc_none:"noch kein Fall",fc_expert:"Fachansicht: alle Pfade einzeln",
+ fc_wiz:"Fall einrichten",fc_mrt:"MRT-Bilder-Ordner",fc_pick:"Ordner wählen",fc_scan:"Suchen",fc_row:"Was",fc_value:"Gefunden",fc_src:"Quelle",fc_change:"Ändern",
+ fc_more:"Mehr: Ausgabe, Kennzahlen, SynthSeg, Seite neu bauen",fc_id:"Name des Falls",fc_save:"Fall speichern",fc_cancel:"Abbrechen",fc_up:"Ordner höher",fc_take:"Diesen wählen",
+ fc_r_seite:"Verlauf.html",fc_r_daten:"Verlauf-Daten",fc_r_skripte:"Skripte",fc_r_cache:"Arbeitsordner cacheF",fc_r_lauf:"plan_mc-Lauf",fc_r_ct:"Planungs-CT",fc_r_rtstruct:"RTSTRUCT",
+ fc_r_rtplan:"RTPLAN",fc_r_fraktionen:"Fraktionen",fc_r_verschreibung:"Verordnung Gy(RBE)",fc_r_pet:"PET-Serien",fc_r_ausgabe:"Ausgabe LETd",fc_r_pet_ausgabe:"Ausgabe PET",fc_r_kennzahlen:"Kennzahlen",
+ fc_r_synthseg:"SynthSeg (Ventrikelsaum)",fc_r_seite_neu:"Verlauf.html neu bauen",fc_q_gefunden:"gefunden",fc_q_gemerkt:"gemerkt",fc_q_lauf:"aus dem Lauf",fc_q_plan:"aus dem RTPLAN",
+ fc_q_fehlt:"fehlt, bitte wählen",fc_q_zone:"fest nach Zone",fc_q_standard:"Standard",fc_q_keins:"keins gefunden (optional)",fc_q_gewaehlt:"gewählt",fc_q_eingegeben:"gewählt",
+ fc_searching:"Suche läuft …",fc_found:"Übersicht prüfen, dann speichern.",fc_saved:"Fall gespeichert.",fc_started:"Gestartet.",fc_nothing:"Mindestens eine Ebene ankreuzen.",
+ fc_nolokal:"Kein Ordner workspace/lokal: ein Fall mit Behandlungsplan gehört dorthin.",fc_badid:"Name: Buchstaben, Ziffern, . _ -",fc_need:"Es fehlt noch: {v}",fc_nopet:"Im Fall ist keine PET-Serie.",fc_np:"Keine Ebene"});
+Object.assign(I18N.en,{fc_title:"Case",fc_intro:"Choose a case, tick the layers, start. A new case is set up once: the workbench finds the folders on this computer itself.",
+ fc_case:"Case",fc_letd:"LETd",fc_pet:"PET",fc_new:"Set up a case",fc_demo:"Demo case",fc_none:"no case yet",fc_expert:"Expert view: every path on its own",
+ fc_wiz:"Set up a case",fc_mrt:"MRI image folder",fc_pick:"Choose folder",fc_scan:"Search",fc_row:"What",fc_value:"Found",fc_src:"Source",fc_change:"Change",
+ fc_more:"More: output, key figures, SynthSeg, rebuild page",fc_id:"Case name",fc_save:"Save case",fc_cancel:"Cancel",fc_up:"Up",fc_take:"Choose this",
+ fc_r_seite:"Verlauf.html",fc_r_daten:"Verlauf-Daten",fc_r_skripte:"Skripte",fc_r_cache:"cacheF work folder",fc_r_lauf:"plan_mc run",fc_r_ct:"Planning CT",fc_r_rtstruct:"RTSTRUCT",
+ fc_r_rtplan:"RTPLAN",fc_r_fraktionen:"Fractions",fc_r_verschreibung:"Prescription Gy(RBE)",fc_r_pet:"PET series",fc_r_ausgabe:"LETd output",fc_r_pet_ausgabe:"PET output",fc_r_kennzahlen:"Key figures",
+ fc_r_synthseg:"SynthSeg (ventricle margin)",fc_r_seite_neu:"Rebuild Verlauf.html",fc_q_gefunden:"found",fc_q_gemerkt:"remembered",fc_q_lauf:"from the run",fc_q_plan:"from the RTPLAN",
+ fc_q_fehlt:"missing, please choose",fc_q_zone:"fixed by zone",fc_q_standard:"default",fc_q_keins:"none found (optional)",fc_q_gewaehlt:"chosen",fc_q_eingegeben:"chosen",
+ fc_searching:"Searching …",fc_found:"Check the overview, then save.",fc_saved:"Case saved.",fc_started:"Started.",fc_nothing:"Tick at least one layer.",
+ fc_nolokal:"No folder workspace/lokal: a case with a treatment plan belongs there.",fc_badid:"Name: letters, digits, . _ -",fc_need:"Still missing: {v}",fc_nopet:"The case has no PET series.",fc_np:"No layer"});
+const FC={rows:null,mrt:"",br:null,brKey:null,brFile:false,cases:[]};
+const FC_MAIN=["seite","daten","skripte","cache","lauf","ct","rtstruct","rtplan","fraktionen","verschreibung","pet"],FC_MORE=["ausgabe","pet_ausgabe","kennzahlen","synthseg","seite_neu"];
+const FC_FILE={seite:1,rtstruct:1,rtplan:1,kennzahlen:1},FC_NUM={fraktionen:1,verschreibung:1},FC_BOOL={synthseg:1,seite_neu:1};
+async function fcLoad(){try{const r=await api("/api/fall");FC.cases=r.faelle||[];const sel=$("fcSel");
+  sel.innerHTML=FC.cases.length?FC.cases.map(c=>`<option value="${esc(c.ordner)}">${esc(c.fall_id||c.anzeige)}${c.fehler?" ⚠":""}</option>`).join(""):`<option value="">${esc(t("fc_none"))}</option>`;
+  if(r.zuletzt&&FC.cases.some(c=>c.ordner===r.zuletzt))sel.value=r.zuletzt;fcPick()}catch(e){$("fcMsg").textContent=t("error")+": "+e.message}}
+function fcPick(){const c=FC.cases.find(x=>x.ordner===$("fcSel").value);$("fcStart").disabled=!c;$("fcProb").textContent=c&&c.fehler?c.fehler:"";
+ const nf=v=>Number(v).toLocaleString(loc(),{maximumFractionDigits:2});
+ $("fcMsg").textContent=c&&!c.fehler?[c.fraktionen?c.fraktionen+" fx":"",c.verschreibung_gy_rbe?nf(c.verschreibung_gy_rbe)+" Gy(RBE)":"",(c.pet||[]).length?"PET: "+c.pet.join(", "):""].filter(Boolean).join(" · "):"";
+ $("fcP").disabled=!(c&&(c.pet||[]).length);if($("fcP").disabled)$("fcP").checked=false}
+$("fcSel").onchange=fcPick;
+function fcProblems(p){const out=[];for(const k of Object.keys(p||{}))for(const m of p[k])out.push(`${t("fc_"+k)}: ${m.field?m.field+": ":""}${ltText(m)}`);return out.join(" · ")}
+$("fcStart").onclick=async()=>{const ordner=$("fcSel").value,L=$("fcL").checked,P=$("fcP").checked;$("fcProb").textContent="";
+ if(!L&&!P){$("fcMsg").textContent=t("fc_nothing");return}$("fcStart").disabled=true;
+ try{const r=await api("/api/fall/start",{ordner,letd:L,pet:P});
+  if(r.fehler){$("fcProb").textContent=r.fehler}else if(r.problems){$("fcProb").textContent=fcProblems(r.problems)}
+  else{$("fcMsg").textContent=t("fc_started");ltShow(r.letd);ptShow(r.pet);if(P&&!L)ptPoll()}}
+ catch(e){$("fcProb").textContent=t("error")+": "+e.message}finally{$("fcStart").disabled=false}};
+$("fcDemo").onclick=async()=>{try{await api("/api/fall/demo",{});await fcLoad()}catch(e){$("fcMsg").textContent=t("error")+": "+e.message}};
+$("fcNew").onclick=()=>{$("fcWiz").hidden=false;FC.rows=null;$("fcRows").innerHTML="";$("fcRowsMore").innerHTML="";$("fcWizMsg").textContent="";$("fcMrt").textContent=FC.mrt||"–"};
+$("fcCancel").onclick=()=>{$("fcWiz").hidden=true;$("fcBrowse").hidden=true};
+$("fcMrtPick").onclick=()=>fcBrowse("mrt",FC.mrt,false);
+$("fcScan").onclick=async()=>{if(!FC.mrt){fcBrowse("mrt","",false);return}$("fcWizMsg").textContent=t("fc_searching");
+ try{const r=await api("/api/fall/scan",{mrt:FC.mrt},{timeout:180000});if(r.fehler){$("fcWizMsg").textContent=r.fehler;return}
+  FC.rows=r.zeilen;fcRows();$("fcWizMsg").textContent=t("fc_found")}catch(e){$("fcWizMsg").textContent=t("error")+": "+e.message}};
+function fcShow(k,v){if(FC_BOOL[k])return"";if(Array.isArray(v))return v.length?v.map(esc).join("<br>"):"–";return v==null||v===""?"–":esc(String(v))}
+function fcRow(k){const r=FC.rows[k]||{wert:null,quelle:"fehlt"};let val;
+ if(FC_BOOL[k])val=`<label><input type="checkbox" data-fcb="${k}"${r.wert?" checked":""}></label>`;
+ else if(FC_NUM[k])val=`<input type="text" data-fcn="${k}" value="${esc(r.wert==null?"":String(r.wert))}" style="width:7em">`;
+ else if(k==="lauf"&&(r.kandidaten||[]).length>1)val=`<select data-fcs="lauf">${r.kandidaten.map(c=>`<option value="${esc(c.wert)}"${c.wert===r.wert?" selected":""}>${esc(c.info)} · ${esc(c.wert)}</option>`).join("")}</select>`;
+ else if(k==="pet"&&(r.kandidaten||[]).length)val=r.kandidaten.map(c=>`<label style="display:block"><input type="checkbox" data-fcp="${esc(c.wert)}"${(r.wert||[]).includes(c.wert)?" checked":""}> ${esc(c.info)} · ${esc(c.wert)}</label>`).join("");
+ else val=fcShow(k,r.wert);
+ const btn=FC_BOOL[k]||FC_NUM[k]?"":`<button data-fcc="${k}">${esc(t("fc_change"))}</button>`;
+ return `<tr><td>${esc(t("fc_r_"+k))}</td><td style="word-break:break-all">${val}</td><td class="${r.quelle==="fehlt"?"log-err":"mute"}">${esc(t("fc_q_"+r.quelle))}</td><td>${btn}</td></tr>`}
+function fcRows(){$("fcRows").innerHTML=FC_MAIN.map(fcRow).join("");$("fcRowsMore").innerHTML=FC_MORE.map(fcRow).join("");
+ document.querySelectorAll("[data-fcc]").forEach(b=>b.onclick=()=>{const k=b.dataset.fcc,v=FC.rows[k]&&FC.rows[k].wert;fcBrowse(k,Array.isArray(v)?v[0]||FC.mrt:v||FC.mrt,!!FC_FILE[k])});
+ document.querySelectorAll("[data-fcb]").forEach(i=>i.onchange=()=>{FC.rows[i.dataset.fcb]={wert:i.checked,quelle:"gewaehlt"}});
+ document.querySelectorAll("[data-fcn]").forEach(i=>i.onchange=()=>{FC.rows[i.dataset.fcn]={wert:i.value.trim(),quelle:"gewaehlt"}});
+ document.querySelectorAll("[data-fcp]").forEach(i=>i.onchange=()=>{const r=FC.rows.pet;r.wert=[...document.querySelectorAll("[data-fcp]")].filter(x=>x.checked).map(x=>x.dataset.fcp)});
+ const s=document.querySelector("[data-fcs=lauf]");if(s)s.onchange=()=>fcSetRun(s.value)}
+async function fcSetRun(run){FC.rows.lauf.wert=run;FC.rows.lauf.quelle="gewaehlt";
+ try{const inp=await api("/api/fall/runinputs",{lauf:run});for(const k of ["ct","rtstruct","rtplan"])FC.rows[k]=inp[k]?{wert:inp[k],quelle:"lauf"}:{wert:null,quelle:"fehlt"};
+  if(inp.rtplan)Object.assign(FC.rows,await api("/api/fall/plan",{rtplan:inp.rtplan}))}catch(e){}fcRows()}
+/* the server's folder chooser: click through folders, no typing; a file row lists files too */
+async function fcBrowse(key,start,file){FC.brKey=key;FC.brFile=file;$("fcBrowse").hidden=false;await fcGo(start||"")}
+async function fcGo(p){try{const r=await api("/api/fall/browse",{pfad:p});FC.br=r;$("fcPath").textContent=r.anzeige;$("fcUp").disabled=!r.oben;
+  const sep=r.pfad.endsWith("/")?"":"/";
+  $("fcDirs").innerHTML=r.ordner.map(n=>`<li><a href="#" data-d="${esc(r.pfad+sep+n)}">📁 ${esc(n)}</a></li>`).join("")
+   +(FC.brFile?r.dateien.map(n=>`<li><a href="#" data-f="${esc(r.pfad+sep+n)}">📄 ${esc(n)}</a></li>`).join(""):"");
+  $("fcDirs").querySelectorAll("[data-d]").forEach(a=>a.onclick=e=>{e.preventDefault();fcGo(a.dataset.d)});
+  $("fcDirs").querySelectorAll("[data-f]").forEach(a=>a.onclick=e=>{e.preventDefault();fcChosen(a.dataset.f)})}catch(e){toast(t("error")+": "+e.message,"err")}}
+$("fcUp").onclick=()=>FC.br&&FC.br.oben&&fcGo(FC.br.oben);$("fcBrClose").onclick=()=>{$("fcBrowse").hidden=true};
+$("fcTake").onclick=()=>FC.br&&fcChosen(FC.br.pfad);
+async function fcChosen(p){$("fcBrowse").hidden=true;const k=FC.brKey;
+ if(k==="mrt"){FC.mrt=p;$("fcMrt").textContent=p;$("fcScan").click();return}
+ if(!FC.rows)return;
+ if(k==="pet"){const r=FC.rows.pet;r.kandidaten=(r.kandidaten||[]);if(!r.kandidaten.some(c=>c.wert===p))r.kandidaten.push({wert:p,info:""});r.wert=[...new Set([...(r.wert||[]),p])];r.quelle="gewaehlt"}
+ else if(k==="lauf"){FC.rows.lauf.kandidaten=FC.rows.lauf.kandidaten||[];if(!FC.rows.lauf.kandidaten.some(c=>c.wert===p))FC.rows.lauf.kandidaten.unshift({wert:p,info:""});await fcSetRun(p);return}
+ else{FC.rows[k]={wert:p,quelle:"gewaehlt"};if(k==="rtplan")try{Object.assign(FC.rows,await api("/api/fall/plan",{rtplan:p}))}catch(e){}}
+ fcRows()}
+$("fcSave").onclick=async()=>{if(!FC.rows)return;const w={};for(const k of FC_MAIN.concat(FC_MORE))w[k]=(FC.rows[k]||{}).wert;w.bilder=FC.mrt;
+ const id=$("fcId").value.trim();if(!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(id)){$("fcWizMsg").textContent=t("fc_badid");return}
+ try{const r=await api("/api/fall/save",{fall_id:id,werte:w});
+  if(r.fehler){$("fcWizMsg").textContent=r.fehler==="kein_lokal"?t("fc_nolokal"):r.fehler==="fall_id"?t("fc_badid"):r.fehler.startsWith("fehlt: ")?t("fc_need").replace("{v}",r.fehler.slice(7).split(", ").map(x=>t("fc_r_"+x)).join(", ")):r.fehler;return}
+  $("fcWiz").hidden=true;$("fcMsg").textContent=t("fc_saved");await fcLoad();$("fcSel").value=r.ordner;fcPick()}catch(e){$("fcWizMsg").textContent=t("error")+": "+e.message}};
 
 /* ---------- start */
 applyI18n();if(!routeFromHash())showTab(recall("tab")||"files",{replace:true});poll();
