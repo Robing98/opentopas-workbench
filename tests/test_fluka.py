@@ -49,6 +49,10 @@ class Points:
             if kind == "RPP":
                 r = np.ones(len(p), bool)
                 for k in range(3): r &= (v[2 * k] < p[:, k]) & (p[:, k] < v[2 * k + 1])
+            elif kind == "RCC":                                          # base V, height H, radius R
+                d, h = p - np.array(v[:3]), np.array(v[3:6])
+                t = d @ h / (h @ h)
+                r = (0 < t) & (t < 1) & (np.linalg.norm(d - np.outer(t, h), axis=1) < v[6])
             else:
                 r = (p - np.array(v[3:])) @ np.array(v[:3]) < 0      # PLA: inside is opposite the normal
             self.memo[name] = r
@@ -813,7 +817,7 @@ def test_topas_file_sent_to_fluka_queues_the_input_of_its_case_on_hold(queue):
     added, skipped, refused = wb.enqueue(["cases/other.txt", "cases/fk_p063_t4.txt", "cases/pb.txt"], "FLUKA", "", False)
     assert added == ["cases/fk_p063_t4.inp"] and skipped == []
     assert [r["file"] for r in refused] == ["cases/other.txt", "cases/pb.txt"]
-    assert "not written by a generator" in refused[0]["reason"] and "pencil_beam writes no FLUKA input" in refused[1]["reason"]
+    assert all("no FLUKA translation" in r["reason"] and "Ge/World/HLX is missing" in r["reason"] for r in refused)
     inp = (ws / "cases" / "fk_p063_t4.inp").read_text()
     assert inp == dict(RF.generate_fluka(dict(CTRL, variants=["t4"], energies="63")))["fk_p063_t4.inp"]
     j = wb.STATE["jobs"][0]
@@ -888,7 +892,7 @@ def test_both_codes_queue_each_case_as_a_pair_in_turns(queue):
         (r0, "OpenTOPAS", "queued"), ("cases/fk_p063_rifi0.inp", "FLUKA", "held")]
     assert group == 5 and {j["group"] for j in wb.STATE["jobs"]} == {5} and skipped == []
     assert [r["file"] for r in refused] == ["cases/other.txt", "cases/fk_p063_rifi0.inp"]
-    assert "not written by a generator" in refused[0]["reason"] and "no TOPAS file" in refused[1]["reason"]
+    assert "no FLUKA translation" in refused[0]["reason"] and "no TOPAS file" in refused[1]["reason"]
     for bad in ("FLUKA", "", None):
         with pytest.raises(ValueError, match="TOPAS program"): wb.enqueue_both([t4], bad, "", False)
 
@@ -972,3 +976,181 @@ def test_two_requests_at_once_put_each_case_into_one_group_once(queue, monkeypat
     for t in ts: t.join()
     assert len(wb.STATE["jobs"]) == 4 and sorted(len(r[0]) for r in res) == [0, 4]
     assert wb.job_groups(wb.STATE["jobs"])[str(wb.STATE["jobs"][0]["group"])]["cases"] == 2
+
+
+# ------------------------------------------------------------------ plain TOPAS files (generators/_topas_fluka.py)
+TF = load("_topas_fluka")
+
+
+def body_cards(text):
+    """The cards and geometry of an input without its title and comment lines."""
+    return [l for k, l in enumerate(text.splitlines()) if k > 1 and not l.startswith("*") and not l.startswith("    0    0")]
+
+
+def test_generator_cases_convert_to_the_generators_own_input():
+    """A file of the ripple filter generator gives, read as a plain TOPAS file, the input the generator writes for its
+    case. Left out: the tilted variants, which neither writes, and helium without a filter, whose TOPAS file has a
+    1 um foil for TOPAS 3.9 that the generator's FLUKA writer leaves out and the converter keeps."""
+    ctrl = dict(CTRL, ions=["p", "a", "c"], energies="63", variants=list(RF.VARIANTS), histories=1000, mon_pos="80")
+    txt, inp = dict(RF.generate(ctrl)), dict(RF.generate_fluka(ctrl))
+    same = 0
+    for name, text in txt.items():
+        if not name.endswith(".txt") or name[:-4] + ".inp" not in inp: continue
+        conv = TF.convert(text, name[:-4])
+        if name == "fk_a063_rifi0.txt":
+            assert "RPP SB001 -6 6 -6 6 -79.00005 -78.99995" in conv; continue
+        assert body_cards(conv) == body_cards(inp[name[:-4] + ".inp"]), name
+        same += 1
+    assert same >= 30
+    tilted = dict(RF.generate(dict(ctrl, ions=["p"], variants=["stp4s10n15"])))["fk_p063_stp4s10n15.txt"]
+    with pytest.raises(TF.Refused) as e: TF.convert(tilted, "x")
+    assert [n for n, _ in e.value.reasons] == [38, 51, 64] and "tilted" in str(e.value)
+
+
+PLAIN = """# A range shifter, an aperture and a shifted ridge plate before a water phantom, written by hand.
+i:Ts/NumberOfThreads = 4
+i:Ts/Seed = 4711
+s:Gr/View/Type = "OpenGL"
+d:Ge/World/HLX = 200 mm
+d:Ge/World/HLY = 0.2 m
+d:Ge/World/HLZ = 60 cm
+s:Ge/World/Material = "G4_AIR"
+s:Ge/Water/Type = "TsBox"
+s:Ge/Water/Parent = "World"
+s:Ge/Water/Material = "G4_WATER"
+d:Ge/Water/HLX = 5 cm
+d:Ge/Water/HLY = 5 cm
+d:Ge/Water/HLZ = 10 cm
+d:Ge/Water/TransZ = -10 cm
+d:Ge/Water/RotX = 180 deg
+i:Ge/Water/ZBins = 200
+s:Ge/Shifter/Type = "TsBox"
+s:Ge/Shifter/Parent = "World"
+s:Ge/Shifter/Material = "G4_PLEXIGLASS"
+d:Ge/Shifter/HLX = 4 cm
+d:Ge/Shifter/HLY = 3 cm
+d:Ge/Shifter/HLZ = 1 cm
+d:Ge/Shifter/TransX = 1 cm
+d:Ge/Shifter/TransZ = 10 cm
+s:Ge/Shifter/Color = "blue"
+s:Ge/Hole/Type = "TsCylinder"
+s:Ge/Hole/Parent = "World"
+s:Ge/Hole/Material = "G4_PLEXIGLASS"
+d:Ge/Hole/RMin = 1 cm
+d:Ge/Hole/RMax = 6 cm
+d:Ge/Hole/HL = 0.5 cm
+d:Ge/Hole/TransZ = 20 cm
+s:Ge/Plate/Type = "TsRidgeFilter"
+s:Ge/Plate/Parent = "World"
+s:Ge/Plate/Material = "G4_PLEXIGLASS"
+d:Ge/Plate/TransZ = 30 cm
+d:Ge/Plate/TransY = 0.3 mm
+d:Ge/Plate/RotZ = 90 deg
+dv:Ge/Plate/XPoints = 4 0 0.5 1.5 2 mm
+dv:Ge/Plate/ZPoints = 4 1 3 3 1 mm
+d:Ge/Plate/Width = 2 mm
+d:Ge/Plate/Length = 8 cm
+dv:Ge/Plate/Displacement = 5 -5 -2 1 4 7 mm
+s:Ge/Mon/Type = "TsBox"
+s:Ge/Mon/Parent = "World"
+b:Ge/Mon/IsParallel = "True"
+d:Ge/Mon/HLX = 5 cm
+d:Ge/Mon/HLY = 5 cm
+d:Ge/Mon/HLZ = 0.1 mm
+d:Ge/Mon/TransZ = 30 cm
+s:Sc/Fluence/Quantity = "Fluence"
+s:Sc/Fluence/Component = "Mon"
+s:Sc/Fluence/OutputType = "binary"
+d:Ge/BeamPosition/TransZ = 50 cm
+s:So/Demo/BeamParticle = "proton"
+d:So/Demo/BeamEnergy = 0.12 GeV
+u:So/Demo/BeamEnergySpread = 0.5
+d:So/Demo/BeamPositionSpreadX = 4 mm
+d:So/Demo/BeamPositionSpreadY = 2 mm
+d:So/Demo/BeamAngularSpreadX = 2 mrad
+d:So/Demo/BeamAngularSpreadY = 2 mrad
+i:So/Demo/NumberOfHistoriesInRun = 30000
+s:Sc/Dose/Quantity = "DoseToMedium"
+s:Sc/Dose/Component = "Water"
+s:Sc/Dose/OutputType = "csv"
+s:Sc/Dose/OutputFile = "IDD_plain"
+"""
+
+
+def card_fields(text, name):
+    line = next(l for l in text.splitlines() if l.startswith(name))
+    return [line[10 + 10 * k:20 + 10 * k].strip() for k in range(6)] + [line[70:].strip()]
+
+
+def test_plain_topas_file_with_box_cylinder_and_ridge_plate():
+    text = TF.convert(PLAIN, "plain")
+    rec = FK.read_case(text)
+    assert rec["score"]["name"] == "IDD_plain" and rec["beam"]["histories"] == 30000 and rec["phantom"]["zbins"] == 200
+    assert "Left out, in a parallel world without matter: Mon." in text
+    b = card_fields(text, "BEAM")
+    assert float(b[0]) == pytest.approx(-0.12) and b[6] == "PROTON"
+    assert float(b[2]) == pytest.approx(-FK.FWHM * 2) and float(b[3]) == pytest.approx(-FK.FWHM * 0.4)
+    assert float(b[4]) == pytest.approx(-FK.FWHM * 0.2)
+    assert float(card_fields(text, "BEAMPOS")[2]) == -50.0 and float(card_fields(text, "RANDOMIZ")[1]) == 4711
+    bodies, regions = geometry(text)
+    rnd = random.Random(3)
+    pts = [(rnd.uniform(-19.9, 19.9), rnd.uniform(-19.9, 19.9), rnd.uniform(-59.9, 59.9)) for _ in range(3000)]
+    pts += [(rnd.uniform(-6, 6), rnd.uniform(-6, 6), rnd.uniform(-30.4, -29.6)) for _ in range(3000)]   # the plate
+    count, last = where(bodies, regions, pts)
+    assert all(count == 1) and "BLKHOLE" not in set(last)
+    # FLUKA frame: x and z turned. Shifter at TOPAS x = 1 cm, z = 10 cm; the aperture ring between 1 and 6 cm.
+    probe = [(-1.0 - 3.9, 0, -10), (-1.0 + 3.9, 0, -10), (0, 0, -20), (3.5, 0, -20), (0, 6.5, -20), (0, 0, 5)]
+    _, at = where(bodies, regions, probe)
+    assert list(at) == ["SOL001", "SOL001", "AIR", "SOL002", "AIR", "PHANTOM"]
+    # Ridge plate turned by 90 deg: its profile runs along TOPAS y. Ridge k stands centred on -5 + 3 k mm plus the
+    # 0.3 mm TransY; it rises from 1 to 3 mm over 0.5 mm and has 1 mm gaps of air between the ridges.
+    for y_mm, want in [(-5.3 + 0.3, 3.0), (-5.0 + 0.3 + 0.75, 1.0 + 2 * 0.25 / 0.5), (-3.5 + 0.3, 0.0), (7.0 + 0.3, 3.0),
+                       (8.5 + 0.3, 0.0)]:
+        zs = np.linspace(-30.0 - 0.15 + 1e-5, -30.0 + 0.15 - 1e-5, 3001)
+        _, at = where(bodies, regions, [(0.7, y_mm / 10, z) for z in zs])
+        assert (at == "RIFI1").sum() * (0.3 / 3000) * 10 == pytest.approx(want, abs=0.002), y_mm
+
+
+@pytest.mark.parametrize("edit,marker,why", [
+    (("d:Ge/Plate/RotZ = 90 deg", "d:Ge/Plate/RotY = 10 mrad"), "Ge/Plate/RotY", "tilted plates"),
+    (("i:Ts/Seed = 4711", "i:Ts/Seed = 4711\ns:Ph/ListName = \"Mine\""), "Ph/ListName", "not translated"),
+    (("d:Ge/Shifter/HLZ = 1 cm", "d:Ge/Shifter/HLZ = Ge/Hole/HL cm"), "Ge/Shifter/HLZ", "expressions"),
+    (("i:Ts/Seed = 4711", "includeFile = more.txt"), "includeFile", "includeFile"),
+    (('s:So/Demo/BeamParticle = "proton"', 's:So/Demo/BeamParticle = "e-"'), "BeamParticle", "only proton"),
+    (("d:So/Demo/BeamAngularSpreadY = 2 mrad", "d:So/Demo/BeamAngularSpreadY = 3 mrad"), "BeamAngularSpreadY", "one divergence"),
+    (("i:Ge/Water/ZBins = 200", "i:Ge/Water/ZBins = 200\ni:Ge/Water/XBins = 10"), "Ge/Water/XBins", "depth grid"),
+    (('s:Ge/Hole/Material = "G4_PLEXIGLASS"', 's:Ge/Hole/Material = "G4_Pb"'), "Ge/Hole/Material", "no FLUKA definition"),
+    (("d:Ge/Shifter/TransZ = 10 cm", "d:Ge/Shifter/TransZ = 0.5 cm"), "Ge/Shifter/Type", "overlaps Water"),
+    (('s:Sc/Dose/Quantity = "DoseToMedium"', 's:Sc/Dose/Quantity = "DoseToWater"'), "Sc/Dose/Quantity", "only DoseToMedium"),
+    (("d:Ge/Shifter/HLY = 3 cm", "d:Ge/Shifter/HLY = 3 cm\nd:Ge/Shifter/HLY = 4 cm"), "HLY = 4 cm", "set again"),
+    (("5 -5 -2 1 4 7 mm", "5 -5 -2 1 4 8 mm"), "Displacement", "evenly spaced"),
+    (('s:Sc/Dose/OutputType = "csv"', 's:Sc/Dose/OutputType = "root"'), "Sc/Dose/OutputType", "must be csv"),
+    (("d:Ge/Water/RotX = 180 deg", "d:Ge/Water/RotX = 0 deg"), "Ge/Water/RotX", "bin 0 is the entrance"),
+    (("d:Ge/Hole/RMax = 6 cm", "d:Ge/Hole/RMax = 6 cm\ns:So/Demo/BeamPositionDistribution = \"Flat\""), "BeamPositionDistribution", "Gaussian"),
+])
+def test_plain_topas_file_refused_with_its_line(edit, marker, why):
+    text = PLAIN.replace(*edit)
+    assert text != PLAIN
+    line = next(n for n, l in enumerate(text.splitlines(), 1) if marker in l)
+    with pytest.raises(TF.Refused) as e: TF.convert(text, "plain")
+    assert any(n == line and why in r for n, r in e.value.reasons), e.value.reasons
+    assert f"line {line}: " in str(e.value)
+
+
+def test_plain_topas_file_queues_for_fluka_and_its_result_pairs_with_topas(queue):
+    wb, ws = queue
+    (ws / "cases" / "plain.txt").write_text(PLAIN)
+    (ws / "cases" / "tilted.txt").write_text(PLAIN.replace("d:Ge/Plate/RotZ = 90 deg", "d:Ge/Plate/RotY = 10 mrad"))
+    added, skipped, refused = wb.enqueue(["cases/plain.txt", "cases/tilted.txt"], "FLUKA", "", False)
+    assert added == ["cases/plain.inp"] and [r["file"] for r in refused] == ["cases/tilted.txt"]
+    assert "line 39: Ge/Plate/RotY: tilted plates" in refused[0]["reason"]
+    assert (ws / "cases" / "plain.inp").read_text() == TF.convert(PLAIN, "plain")
+    assert wb.STATE["jobs"][0]["status"] == "held" and wb.STATE["jobs"][0]["total"] == 30000
+    assert wb.file_info(str(ws / "cases" / "plain.inp"))["outs"] == ["IDD_plain_fluka"]
+    pb = "# Proton 100 MeV/u. Generated by OpenTOPAS Workbench (pencil_beam).\n" + PLAIN.split("\n", 1)[1]
+    (ws / "cases" / "pb.txt").write_text(pb)
+    assert wb.enqueue(["cases/pb.txt"], "FLUKA", "", False)[0] == ["cases/pb.inp"]   # no writer of its own: converted
+    bad = dict(RF.generate(dict(CTRL, variants=["t4"], energies="63")))["fk_p063_t4.txt"]
+    (ws / "cases" / "edited.txt").write_text(bad.replace("d:Ge/RiFi1/RotZ     = 0 deg", "d:Ge/RiFi1/RotZ     = 0 deg\nd:Ge/RiFi1/RotY = 1 mrad"))
+    _, _, refused = wb.enqueue(["cases/edited.txt"], "FLUKA", "", False)
+    assert refused[0]["reason"].startswith("the generator ripple_filter: ") and "as a plain TOPAS file, " in refused[0]["reason"]
