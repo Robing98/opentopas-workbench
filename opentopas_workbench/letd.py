@@ -1,9 +1,9 @@
 """The tab "LETd on MRI": start tools/mrt_overlay/run.sh from one form instead of a start file that asks for ten paths.
 
-The page itself is built by the MRI viewer, a repository of its own: the tab runs build_page.py from its clone
-(setting mrt_viewer_dir).
+The page itself is built by the Timeline Viewer, a repository of its own: the tab runs build_page.py from its clone
+(setting viewer_dir).
 
-The paths point outside the workspace (the plan_mc run, the planning CT, the MRI viewer's folders), because the data
+The paths point outside the workspace (the plan_mc run, the planning CT, the Timeline Viewer's folders), because the data
 they hold must not lie in the workspace's public part. So this module takes absolute paths, never serves a file
 from them, and only runs the one script. The run's log and results go to the output folder the user names, not to
 the workspace's .workbench folder: the log lists exams and numbers derived from the patient's data.
@@ -22,7 +22,7 @@ import time
 
 TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(os.path.dirname(TOOL_DIR), "tools", "mrt_overlay", "run.sh")
-VIEWER_DIR_DEFAULT = os.path.join(os.path.dirname(os.path.dirname(TOOL_DIR)), "mrt-viewer")   # a clone next to this one
+VIEWER_DIR_DEFAULT = os.path.join(os.path.dirname(os.path.dirname(TOOL_DIR)), "timeline-viewer")   # a clone next to this one
 LOG_NAME = "letd_lauf.log"
 STEPS = ("check", "export", "synthseg", "register", "exams", "write", "page")
 FIELDS = ("mrt", "run", "ct", "rs", "cache", "view", "rx", "fx", "out", "kz", "build", "synthseg")

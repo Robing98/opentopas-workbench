@@ -23,7 +23,7 @@ REPO_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 
 @pytest.fixture(autouse=True)
 def script_of_the_checkout(monkeypatch, tmp_path):
-    monkeypatch.setattr(letd, "VIEWER_DIR_DEFAULT", str(tmp_path / "mrt-viewer"))
+    monkeypatch.setattr(letd, "VIEWER_DIR_DEFAULT", str(tmp_path / "timeline-viewer"))
     # CI installs the package into site-packages, where tools/ does not come along; the tab runs from a checkout
     monkeypatch.setattr(letd, "SCRIPT", REPO_SCRIPT)
 
@@ -80,7 +80,7 @@ def full_form(tmp):
     for n in ("letd.npy", "rbe_dose_1_1.npy", "rbe_dose_1_1.dcm"): touch(run / n)
     touch(tmp / "ct" / "CT1.dcm")
     top = viewer_tree(tmp / "MRT")
-    touch(tmp / "mrt-viewer" / "build_page.py")
+    touch(tmp / "timeline-viewer" / "build_page.py")
     return {"mrt": str(top), "run": str(run), "ct": str(tmp / "ct"), "rs": "", "cache": str(top / "Analyse" / "cacheF"),
             "view": str(top / "Analyse" / "Verlauf-Daten"), "rx": "54", "fx": "30", "out": str(tmp / "out"), "kz": str(tmp / "kz" / "kennzahlen.json"),
             "build": "1", "synthseg": "0"}
@@ -201,7 +201,7 @@ def test_start_runs_the_script_then_build_page_and_shows_the_result(srv, ws, mon
     monkeypatch.setattr(letd.shutil, "which", lambda n: sys.executable if n == "python3" else None)
     f = full_form(ws)
     # build_page.py of the viewer's clone writes Verlauf.html next to the data folder it is given
-    touch(ws / "mrt-viewer" / "build_page.py", "import os, sys\na = sys.argv\nassert os.path.isdir(a[a.index('--cache') + 1])\n"
+    touch(ws / "timeline-viewer" / "build_page.py", "import os, sys\na = sys.argv\nassert os.path.isdir(a[a.index('--cache') + 1])\n"
           "open(os.path.join(os.path.dirname(a[a.index('--view') + 1]), 'Verlauf.html'), 'w').write('<html>')\nprint('built')\n")
     code, r = call(srv + "/api/letd/start", {"form": f})
     assert code == 200 and not r.get("problems"), r
@@ -229,14 +229,14 @@ def test_start_runs_build_page_of_the_clone_that_the_setting_names(srv, ws, monk
     monkeypatch.setattr(letd, "SCRIPT", str(fake))
     monkeypatch.setattr(letd.shutil, "which", lambda n: sys.executable if n == "python3" else None)
     f = full_form(ws)
-    for clone in ("mrt-viewer", "second clone"):
+    for clone in ("timeline-viewer", "second clone"):
         touch(ws / clone / "build_page.py", f"print('built by {clone}')\n")
-    assert call(srv + "/api/config", {"mrt_viewer_dir": str(ws / "second clone")})[0] == 200
+    assert call(srv + "/api/config", {"viewer_dir": str(ws / "second clone")})[0] == 200
     code, r = call(srv + "/api/letd/start", {"form": f})
     assert code == 200 and not r.get("problems"), r
     job = wait_done(srv)
     assert job["status"] == "done", job["log"]
-    assert "built by second clone" in job["log"] and "built by mrt-viewer" not in job["log"]
+    assert "built by second clone" in job["log"] and "built by timeline-viewer" not in job["log"]
 
 
 def test_start_refuses_a_bad_form_and_runs_nothing(srv, ws):
@@ -326,14 +326,14 @@ def test_derive_and_check_over_http(srv, ws):
 def test_default_viewer_is_a_clone_next_to_the_workbench(monkeypatch):
     monkeypatch.undo()
     repo = os.path.dirname(os.path.dirname(os.path.abspath(letd.__file__)))
-    assert letd.VIEWER_DIR_DEFAULT == os.path.join(os.path.dirname(repo), "mrt-viewer")
+    assert letd.VIEWER_DIR_DEFAULT == os.path.join(os.path.dirname(repo), "timeline-viewer")
 
 
 def test_page_command_takes_windows_python_only_when_it_reaches_every_path(monkeypatch):
     monkeypatch.setattr(letd.shutil, "which", lambda n: "/bin/" + n)
-    page = "/mnt/c/dev/mrt-viewer/build_page.py"
+    page = "/mnt/c/dev/timeline-viewer/build_page.py"
     got = letd.page_command(page, ("--cache", "/mnt/c/w/cacheF", "--view", "/mnt/c/a b/Verlauf-Daten"))
-    assert got == ["/bin/py.exe", "-3", r"C:\dev\mrt-viewer\build_page.py", "--cache", r"C:\w\cacheF", "--view", r"C:\a b\Verlauf-Daten"]
+    assert got == ["/bin/py.exe", "-3", r"C:\dev\timeline-viewer\build_page.py", "--cache", r"C:\w\cacheF", "--view", r"C:\a b\Verlauf-Daten"]
     assert letd.page_command(page, ("--cache", "/home/x/cacheF"))[0] == "/bin/python3"
     # a mount that is no drive letter (a network share, say) is no path that Windows Python can open
     assert letd.page_command(page, ("--cache", "/mnt/wsl/x/cacheF"))[0] == "/bin/python3"
@@ -342,13 +342,13 @@ def test_page_command_takes_windows_python_only_when_it_reaches_every_path(monke
 def test_the_setting_names_the_clone_that_the_tab_runs(srv, ws):
     f = full_form(ws)
     other = ws / "elsewhere"
-    assert call(srv + "/api/config", {"mrt_viewer_dir": f" {other} "})[0] == 200
-    assert wb.STATE["cfg"]["mrt_viewer_dir"] == str(other)
+    assert call(srv + "/api/config", {"viewer_dir": f" {other} "})[0] == 200
+    assert wb.STATE["cfg"]["viewer_dir"] == str(other)
     r = call(srv + "/api/letd/check", {"form": f})[1]
     assert [(m["field"], m["args"]) for m in r["problems"]] == [("build", [str(other / "build_page.py")])]
     touch(other / "build_page.py")
     assert call(srv + "/api/letd/check", {"form": f})[1]["problems"] == []
-    assert call(srv + "/api/info")[1]["mrt_viewer_dir_default"] == letd.VIEWER_DIR_DEFAULT
+    assert call(srv + "/api/info")[1]["viewer_dir_default"] == letd.VIEWER_DIR_DEFAULT
 
 
 # ------------------------------------------------------------------ the real run.sh on phantom data

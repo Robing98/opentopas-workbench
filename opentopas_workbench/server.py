@@ -1792,7 +1792,7 @@ def letd_info():
 
 def letd_post(what, b):
     form = b.get("form") or {}
-    viewer = STATE["cfg"].get("mrt_viewer_dir")
+    viewer = STATE["cfg"].get("viewer_dir")
     if what == "derive": return 200, letd.derive(b.get("mrt", ""))
     if what == "check":
         bad, notes = letd.check(form, STATE["root"], viewer)
@@ -1852,7 +1852,7 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, {"root": STATE["root"], "cfg": STATE["cfg"], "version": VERSION, "detected": detected_binaries(),
                                        "default_exclude": DEFAULT_EXCLUDE,
                                        "fluka_dir_default": FLUKA_DIR_DEFAULT,
-                                       "mrt_viewer_dir_default": letd.VIEWER_DIR_DEFAULT,
+                                       "viewer_dir_default": letd.VIEWER_DIR_DEFAULT,
                                        "fluka_parts_auto_max": max(1, min(FLUKA_PARTS_MAX, usable_cores() - FLUKA_SPARE_CORES)),
                                        "folders": list_folders()})
             if u.path == "/api/ls": return self.send(200, fm_ls(q.get("p", "")))
@@ -2035,7 +2035,7 @@ class H(BaseHTTPRequestHandler):
                         raise ValueError(f"fluka_parts: a whole number from 1 to {FLUKA_PARTS_MAX}, or empty for automatic")
                     cfg["fluka_parts"] = int(v)
                 if "fluka_dir" in b: cfg["fluka_dir"] = str(b["fluka_dir"] or "").strip()
-                if "mrt_viewer_dir" in b: cfg["mrt_viewer_dir"] = str(b["mrt_viewer_dir"] or "").strip()
+                if "viewer_dir" in b: cfg["viewer_dir"] = str(b["viewer_dir"] or "").strip()
                 for k in ("exclude", "include"):
                     if k in b: cfg[k] = [str(x).strip() for x in b[k] if str(x).strip()][:200]; invalidate_cache()
                 if "binaries" in b:
