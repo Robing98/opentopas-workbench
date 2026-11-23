@@ -99,7 +99,7 @@ def load_jobs():
             # a FLUKA run goes back on hold: only its user starts FLUKA, also after a restart
             j["status"] = "held" if j.get("binary") == "FLUKA" else "queued"
             j["restarts"] = j.get("restarts", 0) + 1; j["note"] = NOTE_REQUEUED
-            for k in ("start", "t0"): j.pop(k, None)
+            for k in ("start", "t0", "threads", "subruns"): j.pop(k, None)
     STATE["next_id"] = max([j["id"] for j in STATE["jobs"]] + [0]) + 1
     if changed: save_jobs()   # the count must be on disk before the job starts again
 
@@ -278,6 +278,9 @@ def live_info(job):
     phase, last = log_state(ws_path(job["log"])) if job.get("log") else ("init", "")
     info = {"phase": phase, "last": last, "elapsed": round(now - job.get("t0", now))}
     done = job.get("done")
+    if job.get("subruns"):   # the job's log has no histories: they come from the outputs of the sub-runs
+        if L["samples"]: done = job["done"] = max(done or 0, L["samples"][-1][1])   # files move when a cycle ends
+        info["phase"] = "init" if not done else "output" if job.get("total") and done >= job["total"] else "run"
     if done is not None and (not L["samples"] or L["samples"][-1][1] != done): L["samples"].append((now, done))
     S = [x for x in L["samples"] if x[1] > 0] or L["samples"]
     if len(S) >= 2 and S[-1][1] > S[0][1]:
@@ -319,7 +322,7 @@ def queue_estimate(jobs):
             continue
         if j["status"] == "running" and j.get("eta") is not None:
             total += j["eta"]; continue
-        try: n, e = job_size(ws_path(j["file"]))
+        try: n, e = (j.get("total"), None) if j["binary"] == FLUKA_BINARY else job_size(ws_path(j["file"]))
         except ValueError: n, e = None, None
         if not n: unknown += 1; continue
         rate_e, rate_h = est[j["binary"]]
@@ -530,11 +533,54 @@ def job_worker():
 # held, and only the Start button of the queue (/api/release) lets it run.
 FLUKA_BINARY = "FLUKA"
 FLUKA_DIR_DEFAULT = "/home/robin/fluka/fluka4-5.2/bin"
-FLUKA_CYCLES = 5    # rfluka -M, the CYCLES of generators/_fluka.py: START there is the count of one cycle
 FLUKA_UNIT = 21     # the USRBIN unit of generators/_fluka.py: rfluka names the cycle files NAME001_fort.21 and so on
+# FLUKA runs on one core, so a case is split into sub-runs (sub_runs of generators/_fluka.py), one process each.
+FLUKA_PARTS_MAX = 16
+FLUKA_SPARE_CORES = 2
+FLUKA_RUN = "run"   # every sub-run's input is run.inp in a folder of its own: short names for FLUKA and usbsuw
+FLUKA_MARK = ".workbench-subruns"   # in a sub-run folder that the workbench made, the only kind that it empties
+MARK_TEXT = "Sub-runs of one case, emptied when it runs again.\n"
+RUN_ENV = "WORKBENCH_RUN"   # inherited by each process of a run, so a stop also finds one that left the process group
+STOP_GRACE = 5      # seconds between SIGTERM and SIGKILL
 
 
 def fluka_dir(): return os.path.expanduser(STATE["cfg"].get("fluka_dir") or FLUKA_DIR_DEFAULT)
+
+
+def usable_cores():
+    try: return len(os.sched_getaffinity(0))
+    except AttributeError: return os.cpu_count() or 1
+
+
+def free_cores(seconds=1.0):
+    """Cores that idle now. Measured over a second and not taken from the load average, which still counts the case
+    that ended just before this one and would leave the next case of a queue two or three cores."""
+    def cpu():
+        with open(os.path.join(PROC_DIR, "stat")) as fh: v = [int(x) for x in fh.readline().split()[1:9]]
+        return v[3] + v[4], sum(v)   # idle and iowait, all
+    n = usable_cores()
+    try:
+        i0, t0 = cpu(); time.sleep(seconds); i1, t1 = cpu()
+        return min(n, round((i1 - i0) / (t1 - t0) * (os.cpu_count() or n)))
+    except (OSError, ValueError, IndexError, ZeroDivisionError):
+        pass
+    # No /proc (macOS): the CPU shares of the processes alive now, as ps gives them. Not the load average, which
+    # still counts the case that just ended; ps lists only processes that still exist.
+    try:
+        r = subprocess.run(["ps", "-A", "-o", "%cpu="], capture_output=True, text=True, timeout=10)
+        if r.returncode == 0:
+            busy = sum(float(x.replace(",", ".")) for x in r.stdout.split()) / 100
+            return max(0, min(n, round(n - busy)))
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return n
+
+
+def fluka_parts():
+    """Sub-runs of the case that starts now: the setting, else the free cores minus two, at most 16."""
+    try: n = int(STATE["cfg"].get("fluka_parts") or 0)
+    except (TypeError, ValueError): n = 0
+    return max(1, min(FLUKA_PARTS_MAX, n if n > 0 else free_cores() - FLUKA_SPARE_CORES))
 
 
 def fluka_module():
@@ -543,24 +589,159 @@ def fluka_module():
     return mod
 
 
-def fluka_script(name):
-    """The shell steps of one FLUKA job in its output folder: the cycles, then usbsuw merges the binary USRBIN files of
-    all cycles (file names one a line, a blank line, the output name) and usbrea prints the merged file as text (input
-    name, output name). Both read their answers from stdin, as the manual's description of the programs gives them.
+FLUKA_RUNS_SUFFIX = "_fluka_runs"
+def fluka_runs_dir(name): return name + FLUKA_RUNS_SUFFIX
+
+
+def fluka_check():
+    """The installation that a job needs, checked before anything of an earlier run is deleted. The folder must be
+    absolute: the sub-runs start from folders of their own, where a relative one would point elsewhere."""
+    d = fluka_dir()
+    if not os.path.isabs(d): raise RuntimeError(f"the FLUKA folder '{d}' is not an absolute path (Settings: FLUKA)")
+    for p in ("rfluka", "usbsuw", "usbrea"):
+        f = os.path.join(d, p)
+        if not (os.path.isfile(f) and os.access(f, os.X_OK)): raise RuntimeError(f"FLUKA program {p} not found in {d} (Settings: FLUKA)")
+
+
+def fluka_prepare(param, out, name):
+    """A fresh folder per sub-run below NAME_fluka_runs, each with its input. (folder, primaries of a cycle of each,
+    cycles of each), or None when the job was stopped meanwhile. Fresh, because rfluka goes on from a seed file that
+    an earlier run left beside the input. Nothing of the earlier run is deleted before the installation was found and
+    the job was not stopped: those sub-runs are often the only result of a long run."""
+    fluka_check()
+    with open(param) as fh: text = fh.read()
+    inputs, starts, cycles = fluka_module().sub_runs(text, fluka_parts())
+    if STATE["stop"] or STATE.get("closing"): return None   # the measurement of the free cores takes a second
+    top = os.path.join(out, fluka_runs_dir(name))
+    mark = os.path.join(top, FLUKA_MARK)
+    if os.path.lexists(top):
+        ours = not os.path.islink(top) and os.path.isdir(top) and (not os.listdir(top) or os.path.isfile(mark))
+        if not ours: raise RuntimeError(f"{fluka_runs_dir(name)} exists and was not made by the workbench: move it away")
+        try: shutil.rmtree(top)
+        except OSError:   # half emptied: the mark goes back, or every later run would refuse the folder as foreign
+            if os.path.isdir(top) and not os.path.exists(mark):
+                with open(mark, "w") as fh: fh.write(MARK_TEXT)
+            raise
+    os.makedirs(top)
+    with open(mark, "w") as fh: fh.write(MARK_TEXT)
+    for k, body in enumerate(inputs, 1):
+        os.mkdir(os.path.join(top, f"{k:02d}"))
+        with open(os.path.join(top, f"{k:02d}", FLUKA_RUN + ".inp"), "w") as fh: fh.write(body)
+    return top, starts, cycles
+
+
+def fluka_script(name, parts, cycles):
+    """The shell steps of one FLUKA job in its output folder: the sub-runs side by side, then usbsuw merges the binary
+    USRBIN files of all their cycles (file names one a line, a blank line, the output name) and usbrea prints the
+    merged file as text (input name, output name). Both read their answers from stdin, as the manual's description of
+    the programs gives them. The first sub-run that fails, or that ends without its results, ends the job unmerged.
 
     Every program is called by its path in the fluka_dir setting, never through PATH: a wrong setting must fail the
-    job, not start another FLUKA found on PATH."""
+    job, not start another FLUKA found on PATH. The loop polls, since 'wait -n' needs a newer bash than macOS has."""
     q, d = shlex.quote, fluka_dir()
-    merged, text = f"{name}_{FLUKA_UNIT}.bnn", f"{name}_{FLUKA_UNIT}.txt"
+    dirs = [f"{k:02d}" for k in range(1, parts + 1)]
+    results = [f"{FLUKA_RUN}{c:03d}_fort.{FLUKA_UNIT}" for c in range(1, cycles + 1)]
+    files = " ".join(f"{p}/{r}" for p in dirs for r in results)
     return "\n".join([
         "set -e",
         f"for p in rfluka usbsuw usbrea; do [ -x {q(d)}/$p ] || {{ echo \"FLUKA program $p not found in {d} (Settings: FLUKA)\"; exit 127; }}; done",
-        f"{q(d + '/rfluka')} -N0 -M{FLUKA_CYCLES} {q(name)}",
-        f"ls {q(name)}[0-9][0-9][0-9]_fort.{FLUKA_UNIT} > {q(name)}.usbsuw.in",
-        f"printf '\\n%s\\n' {q(merged)} >> {q(name)}.usbsuw.in",
-        f"{q(d + '/usbsuw')} < {q(name)}.usbsuw.in",
-        f"printf '%s\\n%s\\n' {q(merged)} {q(text)} | {q(d + '/usbrea')}",
+        f"cd {q('./' + fluka_runs_dir(name))}",   # with ./ bash does not search CDPATH
+        f"set -- {' '.join(dirs)}",
+        "pids=()",
+        'for s in "$@"; do',
+        f'  ( cd "./$s" && exec {q(d + "/rfluka")} -N0 -M{cycles} {FLUKA_RUN} ) > "$s/console.log" 2>&1 &',
+        "  pids+=($!)",
+        "done",
+        f'echo "Started $# sub-runs, cycles each: {cycles}"',
+        "left=$#",
+        'while [ "$left" -gt 0 ]; do',
+        "  i=0",
+        '  for s in "$@"; do',
+        '    pid="${pids[$i]}"',
+        '    if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then',
+        '      rc=0; wait "$pid" || rc=$?',
+        f'      for r in {" ".join(results)}; do [ "$rc" -ne 0 ] || [ -s "$s/$r" ] || rc=1; done',
+        '      if [ "$rc" -ne 0 ]; then',
+        '        tail -n 20 "$s/console.log"',
+        '        echo "error: sub-run $s of $# failed (rc $rc), nothing merged"',
+        '        exit "$rc"',
+        "      fi",
+        '      pids[$i]=""; left=$((left - 1)); echo "Sub-run $s of $# finished"',
+        "    fi",
+        "    i=$((i + 1))",
+        "  done",
+        '  [ "$left" -eq 0 ] || sleep 0.5',
+        "done",
+        f"{{ printf '%s\\n' {files}; printf '\\nmerged.bnn\\n'; }} > usbsuw.in",
+        f"{q(d + '/usbsuw')} < usbsuw.in",
+        f"printf 'merged.bnn\\nmerged.txt\\n' | {q(d + '/usbrea')}",
+        f"mv -f merged.bnn ../{q(f'{name}_{FLUKA_UNIT}.bnn')}",
+        f"mv -f merged.txt ../{q(f'{name}_{FLUKA_UNIT}.txt')}",
         ""])
+
+
+def fluka_done(job):
+    """Primaries handled over all sub-runs of a running job. A cycle whose result file is there counts in full; the
+    current one by the last progress line of its standard output, which lies in rfluka's fluka_NNNN folder while it
+    runs. Links are skipped: that folder also links into the installation."""
+    sr, fk = job["subruns"], fluka_module()
+    def handled(path, start):
+        with open(path, "rb") as fh:
+            fh.seek(0, 2); fh.seek(max(0, fh.tell() - 65536))
+            return fk.read_handled(fh.read().decode("utf-8", "replace"), start)
+    done = 0
+    for k, start in enumerate(sr["starts"], 1):
+        here = os.path.join(ws_path(sr["dir"]), f"{k:02d}")
+        for c in range(1, sr["cycles"] + 1):
+            if os.path.isfile(os.path.join(here, f"{FLUKA_RUN}{c:03d}_fort.{FLUKA_UNIT}")): done += start; continue
+            best = 0
+            try:
+                cand = [os.path.join(here, f"{FLUKA_RUN}{c:03d}.out")]
+                with os.scandir(here) as it:
+                    tmp = [e.path for e in it if e.name.startswith("fluka_") and e.is_dir(follow_symlinks=False)]
+                for t in tmp:
+                    with os.scandir(t) as it:
+                        cand += [e.path for e in it if (e.name.endswith(".out") or e.name == "fort.11")   # unit 11: standard output
+                                 and e.is_file(follow_symlinks=False)]
+            except OSError:
+                break   # rfluka removes its folder between two cycles
+            for p in cand:
+                try: best = max(best, handled(p, start))
+                except OSError: pass
+            done += best
+            break
+    return done
+
+
+def run_pids(pgid, mark):
+    """The processes of a run that are alive: its process group, and whoever carries its mark in the environment.
+    Without /proc the whole group as one negative number, as os.kill takes it."""
+    if not os.path.isdir(PROC_DIR):
+        try: os.kill(-pgid, 0); return [-pgid]
+        except OSError: return []
+    found, tag = [], f"{RUN_ENV}={mark}".encode()
+    for d in os.listdir(PROC_DIR):
+        if not d.isdigit() or int(d) == os.getpid(): continue
+        try:
+            st = _proc_read(d, "stat").rsplit(")", 1)[1].split()
+            if st[0] in ("Z", "X"): continue
+            if int(st[2]) == pgid or tag in _proc_read(d, "environ", True).split(b"\0"): found.append(int(d))
+        except (OSError, ValueError, IndexError):
+            continue   # gone meanwhile, or another user's process
+    return found
+
+
+def end_run(pgid, mark):
+    """Ends every process of a run: SIGTERM, and SIGKILL for what is left after STOP_GRACE seconds."""
+    for sig, wait in ((signal.SIGTERM, STOP_GRACE), (signal.SIGKILL, 2)):
+        pids = run_pids(pgid, mark)
+        for p in pids:
+            try: os.kill(p, sig)
+            except OSError: pass
+        end = time.time() + wait
+        while pids and time.time() < end:
+            time.sleep(0.1); pids = run_pids(pgid, mark)
+        if not pids: return
 
 
 def fluka_convert(param, out):
@@ -597,10 +778,22 @@ def run_job(job):
         os.makedirs(out, exist_ok=True)
         if binary is None and not fluka: raise RuntimeError(f"binary '{job['binary']}' not configured")
         env = dict(os.environ, **{k: os.path.expanduser(v) for k, v in (binary or {}).get("env", {}).items()})
-        if fluka:   # rfluka runs in its output folder and takes the input's name without .inp
+        mark = None
+        if fluka:   # the case's input stays beside its results, each sub-run has its own below them
             name = os.path.splitext(os.path.basename(param))[0]
+            prepared = fluka_prepare(param, out, name)
+            if prepared is None:
+                if STATE.get("closing"): return   # the record stays "running": the next start runs it again
+                with open(resolve(job["log"]), "w") as log: log.write(f"# {job['start']}  stopped before the sub-runs started\n")
+                job["status"] = "stopped"; return
+            top, starts, cycles = prepared
             if out != os.path.dirname(param): shutil.copy2(param, os.path.join(out, name + ".inp"))
-            cmd = ["bash", "-c", fluka_script(name)]
+            job["subruns"] = {"dir": relp(top), "starts": starts, "cycles": cycles}
+            job["threads"] = len(starts)   # the cores that the job holds, for whoever watches the computer's load
+            with STATE["lock"]: save_jobs()   # so jobs.json shows the held cores as the API does
+            LIVE.pop(job["id"], None)
+            mark = secrets.token_hex(8); env[RUN_ENV] = mark
+            cmd = ["bash", "-c", fluka_script(name, len(starts), cycles)]
         else:
             cmd = [os.path.expanduser(binary["cmd"]), param]
         # copy companion geometry files (STL/PLY) so relative InputFile paths work in a subfolder
@@ -611,16 +804,25 @@ def run_job(job):
         def snapshot():
             return {f: os.path.getmtime(os.path.join(out, f)) for f in os.listdir(out) if os.path.isfile(os.path.join(out, f))}
         before = snapshot()
-        job["total"], job["energy"] = job_size(param, max_age=0)   # the file may have been edited right before the start
+        if fluka: job["total"], job["energy"] = sum(starts) * cycles, None
+        else: job["total"], job["energy"] = job_size(param, max_age=0)   # the file may have been edited right before the start
         t0 = time.time(); job["t0"] = t0
         with open(resolve(job["log"]), "w") as log:
-            log.write(f"# {job['start']}  {' '.join(cmd) if fluka else binary['cmd'] + ' ' + param}\n# cwd: {out}\n"); log.flush()
-            proc = subprocess.Popen(cmd, cwd=out, stdout=log, stderr=subprocess.STDOUT,
-                                    env=env, start_new_session=True)
-            with STATE["lock"]: STATE["proc"] = proc
-            while True:   # this thread is the only one that feeds the keep-awake heartbeat, so it must not block for the whole run
+            # not the script itself: its error messages would show in every log as errors
+            what = f"{fluka_dir()}/rfluka -N0 -M{cycles} {FLUKA_RUN}, {len(starts)} sub-runs in {top}" if fluka else binary["cmd"] + " " + param
+            log.write(f"# {job['start']}  {what}\n# cwd: {out}\n"); log.flush()
+            proc, rc = None, None
+            with STATE["lock"]:   # one step with stop_current, so a stop during the preparation starts nothing
+                # nor does the end of the server: shut_down ignores signals, and a process started now would inherit that
+                if not STATE["stop"] and not STATE.get("closing"):
+                    proc = subprocess.Popen(cmd, cwd=out, stdout=log, stderr=subprocess.STDOUT, env=env, start_new_session=True)
+                    STATE["proc"], STATE["mark"] = proc, mark
+            while proc is not None:   # this thread is the only one that feeds the keep-awake heartbeat, so it must not block for the whole run
                 try: rc = proc.wait(timeout=AWAKE_EVERY); break
-                except subprocess.TimeoutExpired: tend_awake()
+                except subprocess.TimeoutExpired:
+                    tend_awake()
+                    if mark and STATE["stop"]: end_run(proc.pid, mark)
+            if mark and proc is not None and (rc != 0 or STATE["stop"]): end_run(proc.pid, mark)   # the other sub-runs still run
         if STATE.get("closing"): return   # the server is ending: the record stays "running", so the next start runs the job again
         if fluka and rc == 0 and not STATE["stop"]:
             try: fluka_convert(param, out)
@@ -641,7 +843,7 @@ def run_job(job):
     finally:
         if not STATE.get("closing"):
             with STATE["lock"]:
-                STATE["proc"] = None; STATE["stop"] = False; job["end"] = time.strftime("%Y-%m-%d %H:%M:%S"); save_jobs()
+                STATE["proc"] = STATE["mark"] = None; STATE["stop"] = False; job["end"] = time.strftime("%Y-%m-%d %H:%M:%S"); save_jobs()
             invalidate_cache(soft=True)
             notify_job(job)
 
@@ -658,11 +860,16 @@ def enqueue(files, binary, subdir, skip_existing):
             od = resolve(os.path.join(os.path.dirname(f), subdir or ""))
             if outs and os.path.isdir(od) and all(has_output(dir_names(od), o) for o in outs):
                 skipped.append(f); continue
+        fluka = f.lower().endswith(".inp")
+        size = {}
+        if fluka:   # the case record gives the queue's finish time its histories
+            try:
+                with open(p) as fh: size["total"] = fluka_module().read_case(fh.read())["beam"]["histories"]
+            except (ValueError, KeyError, IndexError, TypeError): pass   # an input from elsewhere
         with STATE["lock"]:
-            fluka = f.lower().endswith(".inp")
             STATE["jobs"].append({"id": STATE["next_id"], "file": f, "binary": FLUKA_BINARY if fluka else binary, "subdir": subdir,
                                   "status": "held" if fluka else "queued",
-                                  "queued": time.strftime("%Y-%m-%d %H:%M:%S")})
+                                  "queued": time.strftime("%Y-%m-%d %H:%M:%S"), **size})
             STATE["next_id"] += 1
         added.append(f)
     with STATE["lock"]: save_jobs()
@@ -727,9 +934,12 @@ def external_runs(max_age=3.0):
 def stop_current():
     with STATE["lock"]:
         p = STATE["proc"]
-        if p is not None and p.poll() is None:
+        if p is None:   # a job that prepares its start has no process yet
+            if any(j["status"] == "running" for j in STATE["jobs"]): STATE["stop"] = True
+        elif p.poll() is None:
             STATE["stop"] = True
-            os.killpg(os.getpgid(p.pid), signal.SIGTERM)
+            try: os.killpg(os.getpgid(p.pid), signal.SIGTERM)
+            except ProcessLookupError: pass   # it ended just now
 
 # ------------------------------------------------------------------ TOPAS CSV reader
 BIN_RE = re.compile(r"#\s*(\w+)\s+in\s+(\d+)\s+bins?\s+of\s+([\d.eE+\-]+)\s*(\w+)")
@@ -1251,6 +1461,9 @@ def list_folders(depth=3, limit=300):
         for e in entries:
             if len(out) >= limit: return
             if not e.is_dir(follow_symlinks=False) or e.name.startswith(".") or e.name == TRASH: continue
+            # a FLUKA case's sub-run folders hold no results of their own, and 16 of them per case would push real
+            # folders past the limit, out of the pickers and out of a saved list of searched folders
+            if e.name.endswith(FLUKA_RUNS_SUFFIX): continue
             r = f"{rel}/{e.name}" if rel else e.name
             if any(fnmatch.fnmatch(e.name, p) or fnmatch.fnmatch(r, p) for p in pats): continue
             out.append(r)
@@ -1579,15 +1792,16 @@ def letd_info():
 
 def letd_post(what, b):
     form = b.get("form") or {}
+    viewer = STATE["cfg"].get("viewer_dir")
     if what == "derive": return 200, letd.derive(b.get("mrt", ""))
     if what == "check":
-        bad, notes = letd.check(form, STATE["root"])
+        bad, notes = letd.check(form, STATE["root"], viewer)
         return 200, {"problems": bad, "notes": notes}
     if what == "start":
-        bad, notes = letd.check(form, STATE["root"])
+        bad, notes = letd.check(form, STATE["root"], viewer)
         letd_save(form=form)
         if bad: return 200, {"problems": bad, "notes": notes}
-        try: job = letd.start(form, on_end=lambda st: letd_save(last=st))
+        try: job = letd.start(form, on_end=lambda st: letd_save(last=st), viewer=viewer)
         except RuntimeError: return 409, {"error": "running"}
         letd_save(last=letd.JOB["state"])
         return 200, {"job": job, "notes": notes}
@@ -1682,6 +1896,8 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, {"root": STATE["root"], "cfg": STATE["cfg"], "version": VERSION, "detected": detected_binaries(),
                                        "default_exclude": DEFAULT_EXCLUDE,
                                        "fluka_dir_default": FLUKA_DIR_DEFAULT,
+                                       "viewer_dir_default": letd.VIEWER_DIR_DEFAULT,
+                                       "fluka_parts_auto_max": max(1, min(FLUKA_PARTS_MAX, usable_cores() - FLUKA_SPARE_CORES)),
                                        "folders": list_folders()})
             if u.path == "/api/ls": return self.send(200, fm_ls(q.get("p", "")))
             if u.path == "/api/read":
@@ -1717,10 +1933,10 @@ class H(BaseHTTPRequestHandler):
                 for j in alljobs: counts[j["status"]] = counts.get(j["status"], 0) + 1
                 for j in jobs:
                     if j["status"] == "running" and j.get("log"):
-                        done = log_progress(ws_path(j["log"]))
+                        done = fluka_done(j) if j.get("subruns") else log_progress(ws_path(j["log"]))
                         j["done"] = done
                         j["live"] = live_info(j)
-                        lv = j["live"]
+                        lv, done = j["live"], j["done"]
                         if lv.get("rate") and j.get("total"):  # rate from the history counts, excludes the initialisation time
                             j["progress"] = lv["est_done"] / j["total"]
                             j["eta"] = round((j["total"] - lv["est_done"]) / lv["rate"])
@@ -1862,7 +2078,13 @@ class H(BaseHTTPRequestHandler):
                 if "keep_display" in b: cfg["keep_display"] = bool(b["keep_display"])
                 if "toast" in b: cfg["toast"] = bool(b["toast"])
                 if "machines_dir" in b: cfg["machines_dir"] = str(b["machines_dir"] or "").strip()
+                if "fluka_parts" in b:   # before the other settings change: a wrong number saves nothing
+                    v = str(b["fluka_parts"] if b["fluka_parts"] is not None else "").strip() or "0"
+                    if not v.isdecimal() or int(v) > FLUKA_PARTS_MAX:
+                        raise ValueError(f"fluka_parts: a whole number from 1 to {FLUKA_PARTS_MAX}, or empty for automatic")
+                    cfg["fluka_parts"] = int(v)
                 if "fluka_dir" in b: cfg["fluka_dir"] = str(b["fluka_dir"] or "").strip()
+                if "viewer_dir" in b: cfg["viewer_dir"] = str(b["viewer_dir"] or "").strip()
                 for k in ("exclude", "include"):
                     if k in b: cfg[k] = [str(x).strip() for x in b[k] if str(x).strip()][:200]; invalidate_cache()
                 if "binaries" in b:
@@ -1963,6 +2185,17 @@ def ctrl_c_ends(now):
     return False
 
 
+def shut_down():
+    """Stops the running job as the server ends. Further SIGTERM, SIGHUP and Ctrl+C are ignored meanwhile: one would
+    break off end_run between SIGTERM and SIGKILL, and sub-runs that ignore SIGTERM would outlive the server."""
+    for name in ("SIGINT", "SIGTERM", "SIGHUP"):
+        if hasattr(signal, name): signal.signal(getattr(signal, name), signal.SIG_IGN)
+    STATE["closing"] = True   # set before the job is stopped, so run_job leaves its record untouched
+    stop_current()
+    p, mark = STATE["proc"], STATE.get("mark")
+    if p is not None and mark: end_run(p.pid, mark)   # the worker thread ends with the server, so not left to it
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     if argv[:1] in (["mcp"], ["enqueue"], ["jobs"]):
@@ -2005,8 +2238,7 @@ def main(argv=None):
                 print(f"A job is running. Press Ctrl+C again within {CTRL_C_WINDOW} s to stop it and end the workbench. "
                       "It runs again at the next start; waiting jobs stay in the queue.", flush=True)
     except KeyboardInterrupt:
-        STATE["closing"] = True   # set before the job is stopped, so run_job leaves its record untouched
-        stop_current()
+        shut_down()
     finally:
         remove_server_file()
         AWAKE.stop()

@@ -15,12 +15,18 @@ ends along the ridge; the air above the line is a zone of its own, so the layer'
 would copy one period instead, but needs one ROT-DEFI transformation per cell (81 cells per layer at 1.5 mm, up to
 three layers), more than the manual's index range of ROT-DEFI allows.
 """
-import json, math
+import hashlib, json, math, re
 
 GEV = 1e-3          # MeV to GeV
 FWHM = 2.0 * math.sqrt(2.0 * math.log(2.0))   # Gaussian FWHM / sigma; FLUKA's BEAM card takes FWHM
-MASS_GEV = {"proton": 0.93827209, "alpha": 3.72737941}
-BEAM_NAME = {"proton": "PROTON", "alpha": "4-HELIUM"}   # 4-HELIUM: WHAT(1) is the energy of the whole ion
+MASS_GEV = {"proton": 0.93827209, "alpha": 3.72737941, "GenericIon(6,12)": 11.17486}   # nuclear masses
+BEAM_NAME = {"proton": "PROTON", "alpha": "4-HELIUM", "GenericIon(6,12)": "HEAVYION"}
+# 4-HELIUM: WHAT(1) of BEAM is the energy of the whole ion. HEAVYION: WHAT(1) is "per nuclear mass unit" (manual, BEAM),
+# and the ion is set by HI-PROPE (Z, A). Ion transport needs no IONTRANS card with an ion beam (manual, IONTRANS note
+# 2). Below 125 MeV/n the BME event generator of the standard library handles nuclear interactions; above it FLUKA has
+# to be linked with DPMJET and RQMD, which the writer cannot check, so it refuses those energies.
+HEAVY_ION = {"GenericIon(6,12)": (6, 12)}
+BME_MAX_MEV_U = 125.0
 # Geant4 NIST materials of the TOPAS cases: density (g/cm3), mean excitation energy I (eV), composition. Atom counts
 # (positive) or mass fractions (negative), as COMPOUND reads them. Elements are FLUKA's pre-defined ones.
 MATERIALS = {
@@ -35,13 +41,15 @@ MATERIALS = {
 E_CUT_GEV, G_CUT_GEV, DELTA_GEV = 1e-4, 1e-5, 1e-4
 UNIT = 21           # USRBIN output unit, binary (negative on the card), merged by usbsuw and printed by usbrea
 CYCLES = 5          # rfluka -M: independent runs, so usbrea gives a statistical error per bin
+SEED_DEFAULT, SEED_LIMIT = 54217137, 900000000   # RANDOMIZ WHAT(2): its default, and "any number < 9.E8"
+START_DEFAULT = 5000   # START WHAT(1) when blank
 
 
 CASE_TAG = "* workbench-case "   # a comment card: FLUKA skips it, the converter reads the scorer layout from it
 
 
 class Unsupported(ValueError):
-    """A case that the FLUKA writer cannot write 1:1 (tilted plates, STL pins, ions beyond helium)."""
+    """A case that the FLUKA writer cannot write 1:1 (tilted plates, STL pins, ions other than p, 4He, 12C)."""
 
 
 def num(v):
@@ -154,10 +162,15 @@ def write(m):
     """The FLUKA input (text) of a case model. Raises Unsupported for what has no 1:1 translation."""
     b, ph, w = m["beam"], m["phantom"], m["world"]
     part = b["particle"]
-    if part not in BEAM_NAME: raise Unsupported(f"beam particle {part}: only protons and helium-4 are written for FLUKA")
+    if part not in BEAM_NAME:
+        raise Unsupported(f"beam particle {part}: only protons, helium-4 and carbon-12 are written for FLUKA")
     if any(f.get("tilt") for f in m["filters"]): raise Unsupported("tilted filter plates have no FLUKA writer yet")
-    t_gev = b["energy_mev"] * GEV
-    mass = MASS_GEV[part]
+    t_gev, mass = b["energy_mev"] * GEV, MASS_GEV[part]
+    ion = HEAVY_ION.get(part)
+    if ion:                         # energy and momentum per nucleon; the relative energy spread stays the same
+        if b["energy_mev"] / ion[1] > BME_MAX_MEV_U:
+            raise Unsupported(f"{part} above {BME_MAX_MEV_U:g} MeV/u needs FLUKA linked with DPMJET and RQMD")
+        t_gev, mass = t_gev / ion[1], mass / ion[1]
     p_gev = math.sqrt(t_gev ** 2 + 2 * t_gev * mass)
     dp_fwhm = FWHM * (t_gev + mass) / p_gev * t_gev * b["spread_pct"] / 100     # dp = (T + m) / p dT
     per_cycle = primaries(m) // CYCLES
@@ -171,6 +184,7 @@ def write(m):
            card("DEFAULTS", sdum="HADROTHE"),
            card("BEAM", -t_gev, -dp_fwhm, -FWHM * b["div_mrad"][0], -FWHM * b["sigma_mm"][0] / 10,
                 -FWHM * b["sigma_mm"][1] / 10, None, sdum=BEAM_NAME[part]),
+           *([card("HI-PROPE", float(ion[0]), float(ion[1]), 0.0)] if ion else []),
            card("BEAMPOS", *to_fluka((0.0, 0.0, b["z_cm"]))),
            card("GEOBEGIN", sdum="COMBNAME"),
            "    0    0          " + m["title"][:60] + "\n"]
@@ -208,10 +222,77 @@ def write(m):
     s = m["score"]
     out += [card("USRBIN", 10.0, "DOSE", -UNIT, ph["hl_cm"][0], ph["hl_cm"][1], pz1, sdum=s["short"]),
             card("USRBIN", -ph["hl_cm"][0], -ph["hl_cm"][1], pz0, 1.0, 1.0, float(ph["zbins"]), sdum="&"),
-            card("RANDOMIZ", 1.0, float(b.get("seed", 54217137))),
+            card("RANDOMIZ", 1.0, float(b.get("seed", SEED_DEFAULT))),
             card("START", float(per_cycle)),
             card("STOP")]
     return "".join(out)
+
+
+# ------------------------------------------------------------------ sub-runs: one input on several cores
+def sub_seed(seed, k, taken=()):
+    """RANDOMIZ WHAT(2) of sub-run k: a number below 9E8, where the manual promises an independent sequence for each.
+
+    A hash and not seed + k: cases are often repeated with the seeds 1, 2, 3, and seed + k would give those repeats
+    mostly the same sequences, so their spread would no longer be a statistical error."""
+    salt = 0
+    while True:
+        s = int(hashlib.sha256(f"{seed}/{k}/{salt}".encode()).hexdigest(), 16) % (SEED_LIMIT - 1) + 1
+        if s != seed and s not in taken: return s
+        salt += 1
+
+
+def sub_runs(text, n):
+    """(inputs, primaries of one cycle of each, cycles of each) that split an input into at most n sub-runs with the
+    same total. They differ only in RANDOMIZ WHAT(2) and START WHAT(1).
+
+    From CYCLES sub-runs on, each is one cycle: they are the independent estimates of the statistical error, and every
+    further cycle would repeat the initialisation. Fewer keep CYCLES cycles each, so usbrea still has enough of them.
+    A single sub-run is the input as it is, also one without a RANDOMIZ or START card, which FLUKA runs with the
+    manual's defaults."""
+    lines = text.splitlines(True)
+    if n <= 1:
+        at = [l for l in lines if l.startswith("START")]
+        raw = at[0].rstrip("\r\n")[10:20].strip() if len(at) == 1 else ""
+        try: start = int(float(raw)) if raw else START_DEFAULT
+        except (ValueError, OverflowError): start = START_DEFAULT   # FLUKA names a bad card itself
+        return [text], [max(start, 1)], CYCLES
+    def field(name, col, default):
+        at = [i for i, l in enumerate(lines) if l.startswith(name)]
+        if len(at) != 1: raise ValueError(f"the input has {len(at)} {name} cards, sub-runs need exactly one")
+        raw = lines[at[0]].rstrip("\r\n")[col:col + 10].strip()
+        try: return at[0], int(float(raw)) if raw else default
+        except (ValueError, OverflowError): raise ValueError(f"{name}: '{raw}' is not a number in fixed format")
+    (seed_at, seed), (start_at, start) = field("RANDOMIZ", 20, SEED_DEFAULT), field("START", 10, START_DEFAULT)
+    if start < 1: raise ValueError("START asks for no primaries")
+    cycles = 1 if min(n, start * CYCLES) >= CYCLES else CYCLES
+    total = start * CYCLES // cycles
+    n = min(n, total)
+    starts = [total // n + (k < total % n) for k in range(n)]
+    def put(line, col, value):
+        body = line.rstrip("\r\n"); end = line[len(body):]
+        body = body.ljust(col + 10)
+        s = num(value)
+        if float(s) != value: raise ValueError(f"{value} does not fit a WHAT field exactly")
+        return body[:col] + f"{s:>10}" + body[col + 10:] + end
+    inputs, taken = [], set()
+    for k in range(n):
+        s = sub_seed(seed, k, taken); taken.add(s)
+        part = list(lines)
+        part[seed_at], part[start_at] = put(lines[seed_at], 20, s), put(lines[start_at], 10, starts[k])
+        inputs.append("".join(part))
+    return inputs, starts, cycles
+
+
+PROGRESS_RE = re.compile(r"^\s*(\d+)\s+(\d+)\s+\d+\s+[\d.]+E[+-]\d+\s+[\d.]+E[+-]\d+")
+
+
+def read_handled(text, start):
+    """Primaries handled so far, from the lines that FLUKA's standard output repeats during a run (manual, main
+    output): handled, left, can still be handled, time per primary, time left. Handled and left add up to START."""
+    for line in reversed(text.splitlines()):
+        m = PROGRESS_RE.match(line)
+        if m and int(m.group(1)) + int(m.group(2)) == start: return int(m.group(1))
+    return 0
 
 
 # ------------------------------------------------------------------ results: usbrea output to the workbench CSV
@@ -242,18 +323,27 @@ def _floats(line):
 
 
 def read_usbrea(text, nbins):
-    """(values, relative errors in %) of one USRBIN detector from the ASCII file that usbrea writes.
+    """(values, relative errors in %) of the first USRBIN detector in the ASCII file that usbrea writes.
 
-    The file holds header lines in words, the bin values, another header, the percentage errors. Only lines that are
-    numbers alone count, so the layout of the header lines does not matter; the first nbins numbers are the values,
-    the next nbins the errors (absent when usbrea read a single cycle)."""
-    nums = []
+    The file holds header lines in words, a line "Data follow in a matrix ...", the bin values, a line "Percentage
+    errors follow in a matrix ...", the errors (absent when usbrea read a single cycle). Numbers count only after one
+    of these two lines: the file opens with a Fortran carriage-control "1" on a line of its own, which once was read
+    as the value of the first bin and moved every bin one deeper (task 3357)."""
+    sec, cur = {}, None
     for line in text.splitlines():
+        low = line.lower()
+        if "follow in a matrix" in low:
+            key = "errs" if "error" in low else "vals"
+            if key in sec: break          # a second detector: only the first is read
+            cur = sec[key] = []
+            continue
+        if "binning n." in low and sec: break
         f = _floats(line)
-        if f: nums += f
-    if len(nums) < nbins: raise ValueError(f"usbrea output holds {len(nums)} numbers, the detector has {nbins} bins")
-    vals, errs = nums[:nbins], nums[nbins:2 * nbins]
-    return vals, (errs if len(errs) == nbins else None)
+        if f and cur is not None: cur += f
+    vals, errs = sec.get("vals", []), sec.get("errs")
+    if len(vals) != nbins:
+        raise ValueError(f"usbrea output holds {len(vals)} values after its data header, the detector has {nbins} bins")
+    return vals, (errs if errs is not None and len(errs) == nbins else None)
 
 
 GY_PER_GEV_G = 1.602176634e-10 / 1e-3     # J per GeV over kg per g
