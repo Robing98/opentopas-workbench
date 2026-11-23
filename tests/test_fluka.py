@@ -1044,13 +1044,12 @@ s:Ge/Plate/Type = "TsRidgeFilter"
 s:Ge/Plate/Parent = "World"
 s:Ge/Plate/Material = "G4_PLEXIGLASS"
 d:Ge/Plate/TransZ = 30 cm
-d:Ge/Plate/TransY = 0.3 mm
 d:Ge/Plate/RotZ = 90 deg
 dv:Ge/Plate/XPoints = 4 0 0.5 1.5 2 mm
 dv:Ge/Plate/ZPoints = 4 1 3 3 1 mm
 d:Ge/Plate/Width = 2 mm
 d:Ge/Plate/Length = 8 cm
-dv:Ge/Plate/Displacement = 5 -5 -2 1 4 7 mm
+dv:Ge/Plate/Displacement = 5 -6 -3 0 3 6 mm
 s:Ge/Mon/Type = "TsBox"
 s:Ge/Mon/Parent = "World"
 b:Ge/Mon/IsParallel = "True"
@@ -1102,10 +1101,9 @@ def test_plain_topas_file_with_box_cylinder_and_ridge_plate():
     probe = [(-1.0 - 3.9, 0, -10), (-1.0 + 3.9, 0, -10), (0, 0, -20), (3.5, 0, -20), (0, 6.5, -20), (0, 0, 5)]
     _, at = where(bodies, regions, probe)
     assert list(at) == ["SOL001", "SOL001", "AIR", "SOL002", "AIR", "PHANTOM"]
-    # Ridge plate turned by 90 deg: its profile runs along TOPAS y. Ridge k stands centred on -5 + 3 k mm plus the
-    # 0.3 mm TransY; it rises from 1 to 3 mm over 0.5 mm and has 1 mm gaps of air between the ridges.
-    for y_mm, want in [(-5.3 + 0.3, 3.0), (-5.0 + 0.3 + 0.75, 1.0 + 2 * 0.25 / 0.5), (-3.5 + 0.3, 0.0), (7.0 + 0.3, 3.0),
-                       (8.5 + 0.3, 0.0)]:
+    # Ridge plate turned by 90 deg: its profile runs along TOPAS y. Ridge k stands centred on -6 + 3 k mm; it rises
+    # from 1 to 3 mm over 0.5 mm and has 1 mm gaps of air between the ridges.
+    for y_mm, want in [(-6.0, 3.0), (-6.75, 2.0), (-4.5, 0.0), (6.0, 3.0), (7.5, 0.0)]:
         zs = np.linspace(-30.0 - 0.15 + 1e-5, -30.0 + 0.15 - 1e-5, 3001)
         _, at = where(bodies, regions, [(0.7, y_mm / 10, z) for z in zs])
         assert (at == "RIFI1").sum() * (0.3 / 3000) * 10 == pytest.approx(want, abs=0.002), y_mm
@@ -1123,7 +1121,7 @@ def test_plain_topas_file_with_box_cylinder_and_ridge_plate():
     (("d:Ge/Shifter/TransZ = 10 cm", "d:Ge/Shifter/TransZ = 0.5 cm"), "Ge/Shifter/Type", "overlaps Water"),
     (('s:Sc/Dose/Quantity = "DoseToMedium"', 's:Sc/Dose/Quantity = "DoseToWater"'), "Sc/Dose/Quantity", "only DoseToMedium"),
     (("d:Ge/Shifter/HLY = 3 cm", "d:Ge/Shifter/HLY = 3 cm\nd:Ge/Shifter/HLY = 4 cm"), "HLY = 4 cm", "set again"),
-    (("5 -5 -2 1 4 7 mm", "5 -5 -2 1 4 8 mm"), "Displacement", "evenly spaced"),
+    (("5 -6 -3 0 3 6 mm", "5 -6 -3 0 3 7 mm"), "Displacement", "evenly spaced"),
     (('s:Sc/Dose/OutputType = "csv"', 's:Sc/Dose/OutputType = "root"'), "Sc/Dose/OutputType", "must be csv"),
     (("d:Ge/Water/RotX = 180 deg", "d:Ge/Water/RotX = 0 deg"), "Ge/Water/RotX", "bin 0 is the entrance"),
     (("d:Ge/Hole/RMax = 6 cm", "d:Ge/Hole/RMax = 6 cm\ns:So/Demo/BeamPositionDistribution = \"Flat\""), "BeamPositionDistribution", "Gaussian"),
@@ -1143,7 +1141,7 @@ def test_plain_topas_file_queues_for_fluka_and_its_result_pairs_with_topas(queue
     (ws / "cases" / "tilted.txt").write_text(PLAIN.replace("d:Ge/Plate/RotZ = 90 deg", "d:Ge/Plate/RotY = 10 mrad"))
     added, skipped, refused = wb.enqueue(["cases/plain.txt", "cases/tilted.txt"], "FLUKA", "", False)
     assert added == ["cases/plain.inp"] and [r["file"] for r in refused] == ["cases/tilted.txt"]
-    assert "line 39: Ge/Plate/RotY: tilted plates" in refused[0]["reason"]
+    assert "line 38: Ge/Plate/RotY: tilted plates" in refused[0]["reason"]
     assert (ws / "cases" / "plain.inp").read_text() == TF.convert(PLAIN, "plain")
     assert wb.STATE["jobs"][0]["status"] == "held" and wb.STATE["jobs"][0]["total"] == 30000
     assert wb.file_info(str(ws / "cases" / "plain.inp"))["outs"] == ["IDD_plain_fluka"]
@@ -1154,3 +1152,31 @@ def test_plain_topas_file_queues_for_fluka_and_its_result_pairs_with_topas(queue
     (ws / "cases" / "edited.txt").write_text(bad.replace("d:Ge/RiFi1/RotZ     = 0 deg", "d:Ge/RiFi1/RotZ     = 0 deg\nd:Ge/RiFi1/RotY = 1 mrad"))
     _, _, refused = wb.enqueue(["cases/edited.txt"], "FLUKA", "", False)
     assert refused[0]["reason"].startswith("the generator ripple_filter: ") and "as a plain TOPAS file, " in refused[0]["reason"]
+
+
+@pytest.mark.parametrize("edit,marker,why", [
+    (("d:So/Demo/BeamEnergy = 0.12 GeV", "d:So/Demo/BeamEnergy = 0 MeV"), "BeamEnergy", "above 0"),
+    (('s:So/Demo/BeamParticle = "proton"\nd:So/Demo/BeamEnergy = 0.12 GeV',
+      's:So/Demo/BeamParticle = "GenericIon(6,12)"\nd:So/Demo/BeamEnergy = 3000 MeV'), "BeamEnergy", "MeV/u"),
+    (("d:Ge/Shifter/HLZ = 1 cm", "d:Ge/Shifter/HLZ = -1 cm"), "Ge/Shifter/HLZ", "above 0"),
+    (("d:Ge/Hole/HL = 0.5 cm", "d:Ge/Hole/HL = 0 cm"), "Ge/Hole/RMax", "HL above 0"),
+    (("5 -6 -3 0 3 6 mm", "5 -5 -2 1 4 7 mm"), "Displacement", "move the plate with TransX"),
+    (("d:Ge/Plate/RotZ = 90 deg", "d:Ge/Plate/RotZ = 90 deg\nd:Ge/Plate/TransX = 0.3 mm"), "Ge/Plate/TransX", "turned plate"),
+    (("d:Ge/Shifter/HLZ = 1 cm", "d:Ge/Shifter/HLZ = 1 cm\ni:Ge/Shifter/XBins = 3"), "Ge/Shifter/XBins", "no dose scorer"),
+    (("d:Ge/Water/TransZ = -10 cm", "d:Ge/Water/TransZ = -10 cm\nd:Ge/Water/TransY = 1 cm"), "Ge/Water/TransY", "beam axis"),
+])
+def test_review_findings_refused_with_their_line(edit, marker, why):
+    test_plain_topas_file_refused_with_its_line(edit, marker, why)
+
+
+@pytest.mark.parametrize("edit,why", [
+    (("u:So/Demo/BeamEnergySpread = 0.5\n", ""), "BeamEnergySpread is missing"),
+    (('s:Sc/Dose/Quantity = "DoseToMedium"\ns:Sc/Dose/Component = "Water"\ns:Sc/Dose/OutputType = "csv"\n'
+      's:Sc/Dose/OutputFile = "IDD_plain"\n', ""), "no dose scorer"),
+    (('s:Sc/Dose/Component = "Water"\n', ""), "Sc/Dose/Component is missing"),
+    (('s:Ge/Water/Parent = "World"\n', 's:Ge/Water/Parent = "World"\nb:Ge/Water/IsParallel = "True"\n'), "no dose scorer"),
+])
+def test_files_without_a_dose_grid_or_spread_are_refused_not_crashed(edit, why):
+    text = PLAIN.replace(*edit)
+    assert text != PLAIN
+    with pytest.raises(TF.Refused, match=why): TF.convert(text, "plain")

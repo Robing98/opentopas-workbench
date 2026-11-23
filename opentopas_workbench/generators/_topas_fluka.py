@@ -38,7 +38,7 @@ BEAM_KEYS = {"type", "component", "beamparticle", "beamenergy", "beamenergysprea
              "beampositioncutoffy", "beamangulardistribution", "beamangularspreadx", "beamangularspready",
              "beamangularcutoffx", "beamangularcutoffy", "numberofhistoriesinrun"}
 SCORER_KEYS = {"quantity", "component", "outputtype", "outputfile", "ifoutputfilealreadyexists"}
-CUTOFF_SIGMAS = 3.0     # a Gaussian cut at 3 sigma loses 0.3 % of the beam; FLUKA's BEAM card has no cut
+CUTOFF_SIGMAS = 3.0     # an elliptic cut at 3 sigma loses about 1 % of the beam; FLUKA's BEAM card has no cut
 MAX_REASONS = 8
 
 
@@ -215,8 +215,16 @@ def convert(text, title):
         r.get(S + "BeamPositionCutoffShape")
         energy, hist = r.need(S + "BeamEnergy", "energy"), r.need(S + "NumberOfHistoriesInRun")
         if hist is not None and hist < 1: r.refuse(S + "NumberOfHistoriesInRun", "no histories")
-        spread = r.get(S + "BeamEnergySpread", default=0.0)
-        if None not in (part, energy, hist) and None not in sig and None not in div and part.lower() in PARTICLES:
+        if energy is not None and energy <= 0: r.refuse(S + "BeamEnergy", "the energy must be above 0"); energy = None
+        # TOPAS gives the Demo source a spread of its own when the line is missing; the converter does not guess it
+        spread = r.need(S + "BeamEnergySpread")
+        if spread is not None and spread < 0: r.refuse(S + "BeamEnergySpread", "the spread must be 0 or more"); spread = None
+        if part is not None and energy is not None and part.lower() in PARTICLES:
+            ion = FK.HEAVY_ION.get(PARTICLES[part.lower()])
+            if ion and energy / ion[1] > FK.BME_MAX_MEV_U:
+                r.refuse(S + "BeamEnergy", f"above {FK.BME_MAX_MEV_U:g} MeV/u FLUKA needs DPMJET and RQMD linked in"); energy = None
+        if any(v is not None and v < 0 for v in sig + div): r.refuse(S + "BeamPositionSpreadX", "spreads must be 0 or more"); sig = [None]
+        if None not in (part, energy, hist, spread) and None not in sig and None not in div and part.lower() in PARTICLES:
             beam = {"particle": PARTICLES[part.lower()], "energy_mev": energy, "spread_pct": float(spread),
                     "sigma_mm": [10 * v for v in sig], "div_mrad": [v * math.pi / 0.18 for v in div],
                     "z_cm": beam_z, "histories": int(hist)}
@@ -245,7 +253,8 @@ def convert(text, title):
         own = next(iter(sp.values())).name.split("/")[1]
         scorer = (own, comp, r.get(S + "OutputFile", default=own))
         r.get(S + "IfOutputFileAlreadyExists")
-    if scorer is None and not any(k[0] == "sc" for k in groups): r.bad.append((0, "no scorer: a DoseToMedium grid is needed"))
+    if scorer is None: r.bad.append((0, "no dose scorer: a DoseToMedium grid in World is needed"))
+    elif not isinstance(scorer[1], str): r.bad.append((0, f"Sc/{scorer[0]}/Component is missing"))
 
     # components
     phantom, solids, filters, boxes = None, [], [], []
@@ -268,15 +277,18 @@ def convert(text, title):
             bins = [r.get(G + f"{a}Bins", default=1) for a in "XYZ"]
             scored = scorer is not None and isinstance(scorer[1], str) and scorer[1].lower() == c
             if None in hl or None in tr: continue
+            if min(hl) <= 0: r.refuse(G + "HL" + "XYZ"[hl.index(min(hl))], "half lengths must be above 0"); continue
             if scored:
                 if bins[0] != 1 or bins[1] != 1: r.refuse(G + ("XBins" if bins[0] != 1 else "YBins"), "only a depth grid (XBins = YBins = 1) is translated")
                 if not isinstance(bins[2], int) or bins[2] < 1: r.refuse(G + "ZBins", "a whole number of depth bins is needed")
                 if abs(rot[0] - 180.0) > 1e-6 or not _zero(rot[1]) or not _zero(rot[2]):
                     r.refuse(G + "RotX", "the dose grid must be turned by RotX = 180 deg, so that bin 0 is the entrance")
-                if not _zero(tr[0]) or not _zero(tr[1]): r.refuse(G + "TransX", "the dose grid must be on the beam axis")
+                for a, v in zip("XY", tr[:2]):
+                    if not _zero(v): r.refuse(G + f"Trans{a}", "the dose grid must be on the beam axis")
                 phantom = {"hl_cm": hl, "tz_cm": tr[2], "material": mat, "zbins": bins[2]}
             else:
-                if any(b != 1 for b in bins): r.refuse(G + "ZBins", "bins on a box that no dose scorer reads")
+                for a, b in zip("XYZ", bins):
+                    if b != 1: r.refuse(G + f"{a}Bins", "bins on a box that no dose scorer reads")
                 for a, v in zip("XYZ", rot):
                     if not _half_turn(v): r.refuse(G + f"Rot{a}", "a box is translated turned by 0 or 180 deg only")
                 solids.append({"kind": "box", "hl_cm": hl, "t_cm": tr, "material": mat, "line": r.line(G + "Type")})
@@ -288,7 +300,7 @@ def convert(text, title):
             for a, v in zip("XY", rot):
                 if not _half_turn(v): r.refuse(G + f"Rot{a}", "a cylinder is translated along z only")
             if None in (rmin, rmax, hl): continue
-            if not 0 <= rmin < rmax: r.refuse(G + "RMax", "RMin must be below RMax")
+            if not 0 <= rmin < rmax or hl <= 0: r.refuse(G + "RMax", "0 <= RMin < RMax and HL above 0 are needed"); continue
             solids.append({"kind": "cyl", "rmin_cm": rmin, "rmax_cm": rmax, "hl_cm": hl, "t_cm": tr, "material": mat,
                            "line": r.line(G + "Type")})
             boxes.append((G, [(tr[0] - rmax, tr[0] + rmax), (tr[1] - rmax, tr[1] + rmax), (tr[2] - hl, tr[2] + hl)]))
@@ -333,6 +345,7 @@ def ridge(r, G, tr, rot, mat):
     length = r.get(G + "Length", "mm", default=None)
     tx, ty = (r.get(G + f"Trans{a}", "mm", default=0.0) for a in "XY")
     if length is None: r.bad.append((r.line(G + "Type"), f"{G}Length is missing")); return None
+    if length <= 0: r.refuse(G + "Length", "must be above 0"); return None
     for a, v in zip("XY", rot):
         if not _zero(v): r.refuse(G + f"Rot{a}", "tilted plates have no FLUKA writer yet"); return None
     if None in (xs, zs, width, disp): return None
@@ -344,6 +357,13 @@ def ridge(r, G, tr, rot, mat):
     pitch = disp[1] - disp[0] if n else width
     if n and (pitch < width - 1e-9 or any(abs(b - a - pitch) > 1e-7 for a, b in zip(disp, disp[1:]))):
         r.refuse(G + "Displacement", "the ridges must be evenly spaced by at least Width"); return None
+    # TOPAS sizes the plate's envelope symmetric about 0 from the displacements (ripple_filter.ridge), so an offset
+    # set there would cut ridges off in TOPAS: it is taken only as TransX, as the generators write it.
+    if abs(disp[0] + (n // 2) * pitch) > 1e-7:
+        r.refuse(G + "Displacement", "the displacements must be (k - n/2) times the spacing; move the plate with TransX"); return None
+    # The sign of a move of a turned plate in TOPAS was never checked against a TOPAS run, so it is refused.
+    if not _zero(rot[2] % 360) and not (_zero(tx) and _zero(ty)):
+        r.refuse(G + "TransX", "a turned plate moved sideways is not translated"); return None
     th = math.radians(rot[2])
     along = tx * math.cos(th) + ty * math.sin(th)        # mm, the plate's move along its profile axis
     across = -tx * math.sin(th) + ty * math.cos(th)
