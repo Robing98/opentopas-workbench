@@ -16,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from . import __version__ as VERSION
-from . import beamprofile, letd, machines
+from . import beamprofile, letd, machines, pet_run
 TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
 TEXT_EXT = {".txt", ".py", ".sh", ".bat", ".json", ".csv", ".md", ".log", ".in", ".mac", ".xml", ".header", ".binheader", ".mcc", ".asc", ".dat", ".tsv"}
 TRASH = "_trash"
@@ -1810,6 +1810,52 @@ def letd_post(what, b):
     return 404, {"error": "not found"}
 
 
+# ------------------------------------------------------------------ PET on MRI (pet_run.py), in the same tab
+PET_KEEP = ("status", "start", "end", "seconds", "rc", "error", "out", "out_local", "build", "page_local", "cache_local",
+            "view_local", "html", "t0")
+
+
+def pet_save(form=None, last=None):
+    """As letd_save: the paths typed and the run's state, nothing read from the images."""
+    c = STATE["cfg"].setdefault("pet", {})
+    if form is not None: c["form"] = {k: str(form.get(k, "") or "")[:1000] for k in pet_run.FIELDS}
+    if last is not None: c["last"] = {k: last[k] for k in PET_KEEP if k in last}
+    save_cfg()
+
+
+def pet_info():
+    c = STATE["cfg"].get("pet", {})
+    pet_run.restore(c.get("last"))
+    form = dict(c.get("form") or {"ref": "brain", "build": "1"})
+    # the viewer's folders are the same as for LETd: taken from that form until the PET form has its own
+    lf = STATE["cfg"].get("letd", {}).get("form") or {}
+    for k in ("mrt", "cache", "view"):
+        if not form.get(k) and lf.get(k): form[k] = lf[k]
+    for k, v in pet_run.default_out(STATE["root"]).items():
+        if not form.get(k): form[k] = v
+    return {"form": form, "job": pet_run.status(), "script": os.path.isfile(pet_run.SCRIPT)}
+
+
+def pet_post(what, b):
+    form = b.get("form") or {}
+    viewer = STATE["cfg"].get("viewer_dir")
+    if what == "derive": return 200, letd.derive(b.get("mrt", ""))
+    if what == "check":
+        bad, notes = pet_run.check(form, STATE["root"], viewer)
+        return 200, {"problems": bad, "notes": notes}
+    if what == "start":
+        bad, notes = pet_run.check(form, STATE["root"], viewer)
+        pet_save(form=form)
+        if bad: return 200, {"problems": bad, "notes": notes}
+        try: job = pet_run.start(form, on_end=lambda st: pet_save(last=st), viewer=viewer)
+        except RuntimeError: return 409, {"error": "running"}
+        pet_save(last=pet_run.JOB["state"])
+        return 200, {"job": job, "notes": notes}
+    if what == "stop": return 200, {"stopped": pet_run.stop()}
+    if what == "open": return 200, {"ok": pet_run.open_html()}
+    return 404, {"error": "not found"}
+
+
 # ------------------------------------------------------------------ HTTP
 class Server(ThreadingHTTPServer):
     def server_bind(self):
@@ -1917,6 +1963,11 @@ class H(BaseHTTPRequestHandler):
             if u.path.startswith("/api/machines/"): return self.send(200, machines_api(u.path[len("/api/machines/"):], q))
             if u.path == "/api/generators": return self.send(200, gen_schema())
             if u.path == "/api/letd": return self.send(200, letd_info())
+            if u.path == "/api/pet": return self.send(200, pet_info())
+            if u.path == "/api/pet/sheet":
+                p = pet_run.sheet_path()
+                if not p: return self.send(404, {"error": "not found"})
+                with open(p, "rb") as fh: return self.send(200, fh.read(), "image/png")
             if u.path == "/file":
                 p = resolve(q.get("p", ""))
                 ext = os.path.splitext(p)[1].lower()
@@ -2047,6 +2098,7 @@ class H(BaseHTTPRequestHandler):
                     cfg["binaries"] = bins
                 save_cfg(); return self.send(200, {"ok": True, "cfg": cfg})
             if u.path.startswith("/api/letd/"): return self.send(*letd_post(u.path[len("/api/letd/"):], b))
+            if u.path.startswith("/api/pet/"): return self.send(*pet_post(u.path[len("/api/pet/"):], b))
             if u.path.startswith("/api/rifi/"): return self.send(200, rifi_api(u.path[len("/api/rifi/"):], b))
             if u.path == "/api/generate":
                 gens = load_generators()

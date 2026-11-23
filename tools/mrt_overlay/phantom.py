@@ -109,3 +109,96 @@ def write_run(folder, centre_mm=(-11.0, 4.0, 26.0), sigma_mm=10.0, dose_gy=2.0):
     np.save(os.path.join(folder, "rbe_dose_1_1.npy"), (1.1 * phys).astype(np.float32))
     geo.write_rtdose(os.path.join(folder, "rbe_dose_1_1.dcm"), 1.1 * phys, grid.GetOrigin(), grid.GetSpacing())
     return grid
+
+
+# PET uptake per class, and PET-only regions: a striatum on each side and one hot lesion on the patient's right.
+PET_UPTAKE = {"air": 0.0, "scalp": 0.25, "skull": 0.1, "brain": 1.0, "white": 0.55, "ventricle": 0.1,
+              "ventricle_r": 0.1, "third": 0.1, "eye": 0.3}
+PET_HOT = (((-18.0, 2.0, 0.0), (6.0, 12.0, 8.0), 1.8), ((18.0, 2.0, 0.0), (6.0, 12.0, 8.0), 1.8),
+           ((-34.0, 22.0, 30.0), (8.0, 8.0, 8.0), 2.6))
+# A resection cavity on the patient's right, dark on T1 and cold on PET: a healthy brain is close to mirror
+# symmetric, and only such a one-sided structure inside the brain lets the side check tell left from right.
+CAVITY = ((-30.0, -24.0, 18.0), (12.0, 14.0, 11.0))
+CAVITY_T1, CAVITY_PET = 110.0, 0.08
+PET_ROT_DEG = (4.0, -3.0, 6.0)
+PET_SIZE, PET_SPACING = (84, 100, 72), (2.0, 2.0, 2.5)
+
+
+def pet_true_transform():
+    """PET header point (origin 0, unit orientation) -> patient point. The header origin is meaningless, so the
+    PET sits far from the patient frame and turned."""
+    c = np.multiply(PET_SIZE, PET_SPACING) / 2.0
+    t = sitk.Euler3DTransform()
+    t.SetCenter(c.tolist()); t.SetRotation(*np.radians(PET_ROT_DEG))
+    t.SetTranslation((-c + (5.0, -3.0, 4.0)).tolist())
+    return t
+
+
+def pet_values(seed=0):
+    """[z, y, x] PET activity on the header grid, blurred to about 6 mm FWHM, with noise."""
+    from scipy import ndimage as ndi
+    img = sitk.Image(list(PET_SIZE), sitk.sitkFloat32); img.SetSpacing(PET_SPACING)
+    x, y, z = _grid_points(img)
+    flat = _apply(pet_true_transform(), np.stack([x.ravel(), y.ravel(), z.ravel()], 1))
+    x, y, z = (flat[:, k].reshape(x.shape) for k in range(3))
+    v = np.vectorize(PET_UPTAKE.get, otypes=[float])(classes_at(x, y, z))
+    brain = _ell(x, y, z, (0, 0, 2), (60, 78, 68))
+    for c, r, u in PET_HOT: v[_ell(x, y, z, c, r) & brain] = u
+    v[_ell(x, y, z, *CAVITY)] = CAVITY_PET
+    v = ndi.gaussian_filter(v, np.divide(2.55, PET_SPACING[::-1]))
+    v = v + np.random.default_rng(seed).normal(0, 0.03, v.shape)
+    return np.clip(v, 0, None) * 5000.0
+
+
+def write_pet(folder, mirrored=False, seed=0, day="20200301", upside_down=False):
+    """The PET as an old scanner writes it: one file per slice, ImagePositionPatient 0,0,z with z rising with the
+    InstanceNumber, unit orientation, uint16 with a RescaleSlope of its own per slice, Units NONE. `mirrored` flips
+    columns (left and right), `upside_down` the slice order (head and foot), as a scanner that counted the other way."""
+    import pydicom
+    from pydicom.dataset import FileDataset, FileMetaDataset, Dataset
+    from pydicom.uid import ExplicitVRLittleEndian, generate_uid
+    v = pet_values(seed)
+    if mirrored: v = v[:, :, ::-1]
+    if upside_down: v = v[::-1]
+    os.makedirs(folder, exist_ok=True)
+    series, study = generate_uid(), generate_uid()
+    order = np.random.default_rng(seed + 1).permutation(v.shape[0])     # file names do not follow the slices
+    for n, k in enumerate(order):
+        meta = FileMetaDataset()
+        meta.MediaStorageSOPClassUID = "1.2.840.10008.5.1.4.1.1.128"
+        meta.MediaStorageSOPInstanceUID = generate_uid()
+        meta.TransferSyntaxUID = ExplicitVRLittleEndian
+        ds = FileDataset(None, {}, file_meta=meta, preamble=b"\0" * 128)
+        ds.SOPClassUID, ds.SOPInstanceUID = meta.MediaStorageSOPClassUID, meta.MediaStorageSOPInstanceUID
+        ds.Modality, ds.SeriesInstanceUID, ds.StudyInstanceUID = "PT", series, study
+        ds.AcquisitionDate = ds.SeriesDate = ds.StudyDate = day
+        ds.Units, ds.DecayCorrection, ds.PatientWeight = "NONE", "NONE", 0
+        rp = Dataset(); rp.Radiopharmaceutical = "Phantom-Tracer"; rp.RadionuclideTotalDose = 0
+        ds.RadiopharmaceuticalInformationSequence = [rp]
+        ds.ImagePositionPatient = [0.0, 0.0, float(k * PET_SPACING[2])]
+        ds.ImageOrientationPatient = [1, 0, 0, 0, 1, 0]
+        ds.PixelSpacing = [PET_SPACING[1], PET_SPACING[0]]
+        ds.SliceThickness = PET_SPACING[2]
+        ds.InstanceNumber = int(k) + 1
+        ds.Rows, ds.Columns = v.shape[1], v.shape[2]
+        ds.SamplesPerPixel, ds.PhotometricInterpretation = 1, "MONOCHROME2"
+        ds.BitsAllocated, ds.BitsStored, ds.HighBit, ds.PixelRepresentation = 16, 16, 15, 0
+        slope = max(float(v[k].max()), 1e-6) / 65535.0
+        ds.RescaleSlope, ds.RescaleIntercept = f"{slope:.8g}", "0"
+        ds.PixelData = np.rint(v[k] / float(f"{slope:.8g}")).clip(0, 65535).astype(np.uint16).tobytes()
+        pydicom.dcmwrite(os.path.join(folder, f"img{n:04d}.dcm"), ds, enforce_file_format=True)
+    return v
+
+
+def t1_patient(mr_spacing=(1.6, 1.6, 1.6), seed=0):
+    """(T1 in the patient frame, brain mask) on an LPS grid, as the viewer's cacheF holds them."""
+    rng = np.random.default_rng(seed)
+    mri = sitk.Image([int(round(160 / mr_spacing[0])), int(round(200 / mr_spacing[1])), int(round(170 / mr_spacing[2]))],
+                     sitk.sitkFloat32)
+    mri.SetSpacing(mr_spacing); mri.SetOrigin((-78.0, -96.0, -80.0))
+    t1 = _render(mri, 1)
+    x, y, z = _grid_points(mri)
+    t1[_ell(x, y, z, *CAVITY)] = CAVITY_T1
+    t1 = t1 + rng.normal(0, 15, size=t1.shape)
+    brain = _ell(x, y, z, (0, 0, 2), (60, 78, 68))
+    return geo.like(np.clip(t1, 0, None).astype(np.float32), mri), brain
