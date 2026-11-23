@@ -16,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 from . import __version__ as VERSION
-from . import beamprofile, letd, machines
+from . import beamprofile, letd, machines, physics
 TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
 TEXT_EXT = {".txt", ".py", ".sh", ".bat", ".json", ".csv", ".md", ".log", ".in", ".mac", ".xml", ".header", ".binheader", ".mcc", ".asc", ".dat", ".tsv"}
 TRASH = "_trash"
@@ -813,14 +813,9 @@ def topas_converter():
     return _CONVERTER["mod"]
 
 
-def fluka_input_from_topas(f):
-    """The FLUKA input (workspace path) of a TOPAS file, written beside it as NAME.inp, the name that a generator's own
-    FLUKA backend gives it. A file that a generator wrote goes through that generator, which knows its case; any other,
-    or one the generator refuses, through the converter for plain TOPAS files. ValueError says why a file has none,
-    with the line numbers. An existing NAME.inp with other content is left alone: it may be edited by hand, and the
-    queue must not run something else under its name."""
-    p = resolve(f)
-    with open(p, errors="replace") as fh: text = fh.read()
+def fluka_text_from_topas(text, f):
+    """The FLUKA input text of a TOPAS file's text (f its workspace path, for the name): through the generator that
+    wrote it, else through the converter for plain TOPAS files. ValueError says why there is none."""
     m = GEN_HEAD_RE.search(text.split("\n", 1)[0])
     mod = load_generators().get(m.group(1)) if m else None
     body, why = None, None
@@ -830,6 +825,16 @@ def fluka_input_from_topas(f):
     if body is None:
         try: body = topas_converter().convert(text, os.path.splitext(os.path.basename(f))[0])
         except ValueError as e: raise ValueError(f"{why}; as a plain TOPAS file, {e}" if why else str(e)) from None
+    return body
+
+
+def fluka_input_from_topas(f):
+    """The FLUKA input (workspace path) of a TOPAS file, written beside it as NAME.inp, the name that a generator's own
+    FLUKA backend gives it. A file that a generator wrote goes through that generator, which knows its case; any other,
+    or one the generator refuses, through the converter for plain TOPAS files. ValueError says why a file has none,
+    with the line numbers. An existing NAME.inp with other content is left alone: it may be edited by hand, and the
+    queue must not run something else under its name."""
+    with open(resolve(f), errors="replace") as fh: body = fluka_text_from_topas(fh.read(), f)
     inp = os.path.splitext(f)[0] + ".inp"
     q = resolve(inp)
     try:    # "x" and not an exists() check first: a NAME.inp that appears in between is never overwritten
@@ -839,6 +844,34 @@ def fluka_input_from_topas(f):
         with open(q, errors="replace") as fh:
             if fh.read() != body: raise ValueError(f"{os.path.basename(inp)} exists with other content: rename or delete it")
     return inp
+
+
+def physics_of(f):
+    """Both codes' physics of the case of an input file (workspace path), for the run detail. The other code's text is
+    the input beside it (NAME.txt, NAME.inp) when there is one, because that is what the queue runs; a TOPAS file
+    without one gets the FLUKA text that would be written for it, without writing it. Nothing here starts anything."""
+    def read(rel):
+        try:
+            with open(resolve(rel), errors="replace") as fh: return fh.read()
+        except (OSError, ValueError): return None
+    stem, ext = os.path.splitext(f)
+    own = read(f)
+    if own is None: raise ValueError(f"{f}: not readable")
+    out = {"file": f}
+    if ext.lower() == ".inp":
+        topas = read(stem + ".txt")
+        out["topas_from"] = stem + ".txt" if topas is not None else None
+        out["fluka_from"] = f
+        fluka = own
+    else:
+        topas, out["topas_from"] = own, f
+        fluka = read(stem + ".inp")
+        out["fluka_from"] = stem + ".inp" if fluka is not None else None
+        if fluka is None:
+            try: fluka, out["fluka_from"] = fluka_text_from_topas(own, f), "written for this file"
+            except ValueError as e: out["fluka_why"] = str(e)
+    out.update(physics.compare(topas, fluka))
+    return out
 
 
 def release_jobs(ids=None, group=None):
@@ -2252,6 +2285,8 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/log":
                 p = resolve(q.get("p", ""))
                 with open(p, errors="replace") as fh: fh.seek(0, 2); size = fh.tell(); fh.seek(max(0, size - 12000)); return self.send(200, {"text": fh.read()})
+            if u.path == "/api/physics":
+                return self.send(200, physics_of(relp(resolve(q.get("p", "")))))
             if u.path == "/api/csv":
                 col = q.get("collapse"); sl = q.get("slice")
                 res = read_any(resolve(q.get("p", "")), int(q.get("stat", 0) or 0),
