@@ -21,8 +21,38 @@ RUN_INPUTS = ("ct", "rtstruct", "rtplan")
 
 
 # ------------------------------------------------------------------ search
+# folders no search enters: system and program folders, synced clouds (cacheF lies outside OneDrive by design), caches
+SKIP = re.compile(r"^(onedrive.*|appdata|windows|program files.*|programdata|\$recycle\.bin|system volume information|"
+                  r"recovery|node_modules|site-packages|__pycache__|\.git|wsl.*|perflogs)$", re.I)
+CACHE_DEPTH = 4
+CACHE_LIMIT = 30000              # folders visited at most by one cacheF search over all its roots
+CACHE_SECONDS = 60
+EXAM = re.compile(r"^\S+ \d{4}-\d{2}-\d{2}$")   # a series of one exam in log.json: "t1 2020-01-01"
+
+
 def _walk(top, depth=DEPTH, limit=LIMIT):
     yield from letd._walk(top, depth, limit)
+
+
+class Unreadable:
+    """Files a search found but could not read. A file that OneDrive keeps only in the cloud is a placeholder: under
+    WSL it lists like any file and fails or comes back empty when read. The assistant names them instead of
+    reporting "nothing found"."""
+    def __init__(self): self.n, self.folders = 0, []
+
+    def __call__(self, path):
+        self.n += 1
+        d = os.path.dirname(path)
+        if d not in self.folders and len(self.folders) < 5: self.folders.append(d)
+
+    def __enter__(self):
+        self.prev, dicomkopf.ON_ERROR = dicomkopf.ON_ERROR, self
+        return self
+
+    def __exit__(self, *a): dicomkopf.ON_ERROR = self.prev
+
+    def report(self):
+        return {"anzahl": self.n, "ordner": self.folders} if self.n else None
 
 
 def _dicom_head(d, files):
@@ -38,10 +68,27 @@ def _dicom_head(d, files):
     return None
 
 
+def viewer_root(start):
+    """The folder of the follow-up viewer that holds `start`: the nearest folder at or above it with Analyse/Verlauf.html,
+    Analyse/Verlauf-Daten or Verlauf.html. The user may pick an exam folder deep inside; the search then still sees the
+    whole viewer. None when no folder above has one."""
+    d = start
+    for _ in range(12):
+        if any(os.path.exists(os.path.join(d, *p)) for p in (("Analyse", "Verlauf.html"), ("Analyse", "Verlauf-Daten"),
+                                                                ("Verlauf.html",))):
+            return d
+        up = os.path.dirname(d)
+        if up == d: break
+        d = up
+    return None
+
+
 def find_viewer(mrt):
-    """From the MRI folder: Verlauf.html (the newest), Verlauf-Daten, Skripte beside it, and cacheF when it lies inside."""
+    """From any folder of the viewer: Verlauf.html (the newest), Verlauf-Daten, Skripte beside it, and cacheF when it
+    lies inside. The search goes up to the viewer's own folder first."""
     top = letd.to_local(mrt)
     if not top or not os.path.isdir(top): return {"fehler": "mrt_nicht_gefunden"}
+    top = viewer_root(top) or top
     found, pages = {}, []
     for d, dirs, files in _walk(top, 5):
         for n in files:
@@ -51,26 +98,91 @@ def find_viewer(mrt):
             found["daten"] = d
             sk = os.path.join(os.path.dirname(d), "Skripte")
             if os.path.isdir(sk): found["skripte"] = sk
-        if "cache" not in found and {"log.json", "ref_t1.nii.gz"} <= files: found["cache"] = d
+        if "cache" not in found and _cache_log(d, files) is not None: found["cache"] = d
     if pages: found["seite"] = max(pages, key=os.path.getmtime)
     found["bilder"] = top
     return found
 
 
-def find_cache(roots):
-    """cacheF (log.json and ref_t1.nii.gz) under the remembered roots: it lies outside OneDrive, so the MRI folder
-    does not hold it."""
+def _cache_log(d, files):
+    """The exams a cacheF folder holds (keys of its log.json), or None when `d` is no cacheF: log.json with size and
+    spacing, in a folder named cacheF or beside ref_t1.nii.gz (cacheG has a log.json too)."""
+    if "log.json" not in files: return None
+    if os.path.basename(d).lower() != "cachef" and "ref_t1.nii.gz" not in files: return None
+    try:
+        with open(os.path.join(d, "log.json"), encoding="utf-8") as fh: log = json.load(fh)
+    except OSError:
+        if dicomkopf.ON_ERROR: dicomkopf.ON_ERROR(os.path.join(d, "log.json"))
+        return None
+    except ValueError:
+        return None
+    if not isinstance(log, dict) or "size" not in log or "spacing" not in log: return None
+    return {k for k in log if EXAM.match(k)}
+
+
+def stand_exams(skripte):
+    """The exams of the viewer's own copy of the cacheF log (Skripte/stand/cacheF_log.json): what the right cacheF
+    must hold. Empty when the viewer has no copy."""
+    try:
+        with open(os.path.join(skripte, "stand", "cacheF_log.json"), encoding="utf-8") as fh: log = json.load(fh)
+        return {k for k in log if EXAM.match(k)} if isinstance(log, dict) else set()
+    except (OSError, ValueError, TypeError):
+        return set()
+
+
+def cache_roots_default(mnt="/mnt", home=None):
+    """Where cacheF may lie on this computer, nearest first: the WSL home, C:\\dev, each Windows user folder (its
+    OneDrive is skipped), C:\\Uni, then every drive."""
+    out = [home or os.path.expanduser("~")]
+    c = os.path.join(mnt, "c")
+    out.append(os.path.join(c, "dev"))
+    users = os.path.join(c, "Users")
+    try:
+        out += sorted(e.path for e in os.scandir(users) if e.is_dir() and e.name not in ("Public", "Default", "Default User", "All Users"))
+    except OSError:
+        pass
+    out.append(os.path.join(c, "Uni"))
+    try:
+        out += sorted(e.path for e in os.scandir(mnt) if len(e.name) == 1 and e.is_dir())
+    except OSError:
+        pass
+    return [p for p in out if os.path.isdir(p)]
+
+
+def find_cache(roots, want=(), depth=CACHE_DEPTH, limit=CACHE_LIMIT, seconds=CACHE_SECONDS):
+    """The cacheF folder under the roots that holds the most exams of `want` (the viewer's copy of its log); without
+    `want`, the newest cacheF. With `want`, a folder that holds none of its exams belongs to another viewer and is
+    no candidate. Stops at the first folder holding every exam of `want`."""
+    want, seen, best, end, n = set(want), set(), None, time.monotonic() + seconds, 0
     for r in roots:
         r = letd.to_local(r)
         if not r or not os.path.isdir(r): continue
-        for d, _, files in _walk(r, 4):
-            if {"log.json", "ref_t1.nii.gz"} <= files: return d
-    return None
+        queue = [(r, 0)]
+        while queue and n < limit and time.monotonic() < end:
+            d, lvl = queue.pop(0)
+            real = os.path.realpath(d)
+            if real in seen: continue
+            seen.add(real); n += 1
+            try: entries = list(os.scandir(d))
+            except OSError: continue
+            files = {e.name for e in entries if e.is_file()}
+            exams = _cache_log(d, files)
+            if exams is not None:
+                hits = len(exams & want)
+                if hits or not want:
+                    key = (hits, os.path.getmtime(os.path.join(d, "log.json")))
+                    if best is None or key > best[0]: best = (key, d)
+                    if want and want <= exams: return d
+                continue
+            if lvl < depth:
+                queue.extend((e.path, lvl + 1) for e in entries
+                             if e.is_dir(follow_symlinks=False) and not SKIP.match(e.name) and not e.name.startswith("."))
+    return best[1] if best else None
 
 
 def run_inputs(run):
     """CT, RT structure set and RT plan a plan_mc run used, from its run.json; for a run older than run.json, from
-    chain.json when it names them. Missing ones stay out: the assistant asks for them once."""
+    chain.json when it names them. Missing ones stay out: complete_inputs looks for them beside the CT."""
     out = {}
     for name in ("run.json", "chain.json"):
         try:
@@ -83,6 +195,79 @@ def run_inputs(run):
             if k not in out and isinstance(v, str) and v:
                 p = v if os.path.isabs(v) else os.path.join(run, v)
                 if os.path.exists(p): out[k] = os.path.normpath(p)
+    return out
+
+
+MODALITY = {"ct": "CT", "rtstruct": "RTSTRUCT", "rtplan": "RTPLAN"}
+EXPORT_FILES = 4000              # DICOM files read at most when looking through an export folder
+
+
+def _dicom_files(top, depth=3, limit=EXPORT_FILES):
+    """(path, header) of the DICOM files under `top` (a file: itself). An image series counts once, as its folder.
+    Each file is read only as far as its Modality (8 KB); an RT file then in full, for its frame of reference."""
+    if os.path.isfile(top):
+        h = dicomkopf.read(top, limit=256 << 10)
+        return [(top, h)] if h else []
+    out, n, series = [], 0, set()
+    for d, _, files in _walk(top, depth, 2000):
+        for f in sorted(files):
+            if not (f.lower().endswith(".dcm") or "." not in f): continue
+            if n >= limit: return out
+            p = os.path.join(d, f); n += 1
+            h = dicomkopf.read(p, limit=8 << 10)
+            if not h: continue
+            if h.get("Modality") in ("CT", "MR", "PT"):
+                uid = (d, h.get("SeriesInstanceUID"))
+                if uid not in series:
+                    series.add(uid); out.append((d, dicomkopf.read(p, limit=64 << 10) or h))
+            elif h.get("Modality") in ("RTSTRUCT", "RTPLAN"):
+                out.append((p, dicomkopf.read(p, limit=256 << 10) or h))
+    return out
+
+
+def _is(kind, path):
+    """The header of `path` when it is the right thing for row `kind` (a CT folder, an RTSTRUCT or RTPLAN file)."""
+    if not path: return None
+    if kind == "ct":
+        if not os.path.isdir(path): return None
+        h = _dicom_head(path, os.listdir(path))
+    else:
+        h = dicomkopf.read(path, limit=256 << 10) if os.path.isfile(path) else None
+    return h if h and h.get("Modality") == MODALITY[kind] else None
+
+
+def complete_inputs(inp):
+    """CT, RTSTRUCT and RTPLAN from what is known: a row may name the export folder instead of the file. A missing or
+    folder row is looked up by DICOM Modality in the export folders of the known rows (the folder of the CT and the
+    one above it), and only a file of the CT's frame of reference fits. Returns {row: (path, source)}."""
+    out, heads = {}, {}
+    for k in RUN_INPUTS:
+        p = letd.to_local(inp.get(k)) if inp.get(k) else ""
+        h = _is(k, p)
+        if h: out[k], heads[k] = (p, "lauf"), h
+    if len(out) == 3: return out
+    places = []
+    for k in RUN_INPUTS:
+        p = letd.to_local(inp.get(k)) if inp.get(k) else ""
+        if not p or not os.path.exists(p): continue
+        base = p if os.path.isdir(p) and k != "ct" else os.path.dirname(p)
+        for q in (base, os.path.dirname(base)):
+            if q not in places: places.append(q)
+    if not places: return out
+    frame = next((dicomkopf.frame_uid(heads[k]) for k in RUN_INPUTS if k in heads and dicomkopf.frame_uid(heads[k])), None)
+    found = {k: [] for k in RUN_INPUTS}
+    for place in places:
+        for p, h in _dicom_files(place):
+            kind = next((k for k, m in MODALITY.items() if h.get("Modality") == m), None)
+            if kind and kind not in out and (p, h) not in found[kind]: found[kind].append((p, h))
+    if not frame:   # no known row gives the frame: one CT, or else one RT file alone, sets it
+        for k in RUN_INPUTS:
+            frames = {dicomkopf.frame_uid(h) for _, h in found[k]} - {None}
+            if len(frames) == 1: frame = frames.pop(); break
+    for k in RUN_INPUTS:
+        if k in out: continue
+        fit = [(p, h) for p, h in found[k] if frame and dicomkopf.frame_uid(h) == frame]
+        if fit: out[k] = (max(fit, key=lambda x: os.path.getmtime(x[0]))[0], "export")
     return out
 
 
@@ -103,12 +288,14 @@ def find_runs(roots):
 
 
 def find_pet(roots):
-    """Folders of DICOM series with Modality PT, one entry per series, with its date."""
+    """Folders of DICOM series with Modality PT, one entry per series, with its date, oldest first. A root may be
+    (folder, depth)."""
     out, seen = [], set()
     for r in roots:
+        r, depth = r if isinstance(r, tuple) else (r, DEPTH)
         r = letd.to_local(r)
         if not r or not os.path.isdir(r): continue
-        for d, _, files in _walk(r):
+        for d, _, files in _walk(r, depth):
             h = _dicom_head(d, files)
             if not h or h.get("Modality") != "PT": continue
             uid = h.get("SeriesInstanceUID") or d
@@ -134,48 +321,108 @@ def search_roots(root):
     return [os.path.join(base, z) for z in ("lokal", "eigen") if os.path.isdir(os.path.join(base, z))]
 
 
-def scan(mrt, root, cache_roots=(), pet_dir=None, extra_runs=()):
+# rows the LETd layer cannot start without; the prescription only when no RTSTRUCT gives the PTV. Every other row is
+# optional: shown grey when nothing is found, never red.
+REQUIRED = ("lauf", "ct", "cache", "daten", "fraktionen")
+
+
+def _mark(rows):
+    for k, r in rows.items():
+        need = k in REQUIRED or (k == "verschreibung" and not (rows.get("rtstruct") or {}).get("wert"))
+        r["pflicht"] = need
+        if r.get("quelle") == "fehlt" and not need: r["quelle"] = "optional"
+    return rows
+
+
+def scan(mrt, root, cache_roots=(), pet_dir=None, extra_runs=(), default_roots=None):
+    with Unreadable() as bad:
+        r = _scan(mrt, root, cache_roots, pet_dir, extra_runs, default_roots)
+    if "zeilen" in r and bad.report(): r["unlesbar"] = bad.report()
+    return r
+
+
+def _scan(mrt, root, cache_roots=(), pet_dir=None, extra_runs=(), default_roots=None):
     """The proposal of the assistant: one value per row, with candidates where several fit. Each row says where it
-    came from (gefunden, gemerkt, Plan, fehlt), so the page can mark what the user must still choose."""
+    came from (gefunden, gemerkt, lauf, export, plan, fehlt, optional), so the page can mark what the user must
+    still choose. `default_roots` (tests) replaces the places of this computer where cacheF is looked for."""
     v = find_viewer(mrt) if mrt else {}
     if v.get("fehler"): return {"fehler": v["fehler"]}
     rows = {k: {"wert": v.get(k), "quelle": "gefunden" if v.get(k) else "fehlt"} for k in ("seite", "daten", "skripte", "cache")}
     rows["bilder"] = {"wert": v.get("bilder"), "quelle": "eingegeben"}
     if not rows["cache"]["wert"]:
-        c = find_cache(cache_roots)
+        want = stand_exams(v["skripte"]) if v.get("skripte") else set()
+        c = find_cache(cache_roots, want, seconds=10) if cache_roots else None
         if c: rows["cache"] = {"wert": c, "quelle": "gemerkt"}
+        else:
+            c = find_cache(cache_roots_default() if default_roots is None else default_roots, want)
+            if c: rows["cache"] = {"wert": c, "quelle": "gefunden"}
     runs = find_runs(list(search_roots(root)) + list(extra_runs))
     rows["lauf"] = {"wert": runs[0]["ordner"] if runs else None, "quelle": "gefunden" if runs else "fehlt",
                     "kandidaten": [{"wert": r["ordner"], "info": r["zeit"]} for r in runs[:20]]}
-    inp = runs[0]["eingaben"] if runs else {}
-    for k in RUN_INPUTS:
-        rows[k] = {"wert": inp.get(k), "quelle": "lauf" if inp.get(k) else "fehlt"}
-    facts = plan_facts(rows["rtplan"]["wert"]) if rows["rtplan"]["wert"] else {}
-    rows["fraktionen"] = {"wert": facts.get("fraktionen"), "quelle": "plan" if facts.get("fraktionen") else "fehlt"}
-    rows["verschreibung"] = {"wert": facts.get("verschreibung_gy_rbe"),
-                             "quelle": "plan" if facts.get("verschreibung_gy_rbe") else "fehlt"}
-    pets = find_pet([p for p in (pet_dir, v.get("bilder")) if p])
-    rows["pet"] = {"wert": [p["ordner"] for p in pets], "quelle": "gefunden" if pets else "keins",
-                   "kandidaten": [{"wert": p["ordner"], "info": " ".join(x for x in (p["datum"], p["beschreibung"]) if x)} for p in pets]}
+    rows.update(input_rows(runs[0]["eingaben"] if runs else {}))
+    vb = v.get("bilder")
+    pets = find_pet([p for p in (pet_dir, vb) if p] + ([(os.path.dirname(vb), 3)] if vb else []))
+    rows["pet"] = {"wert": [pets[-1]["ordner"]] if pets else [], "quelle": "gefunden" if pets else "keins",
+                   "kandidaten": [{"wert": p["ordner"], "info": " ".join(x for x in (p["datum"], p["beschreibung"]) if x)}
+                                  for p in reversed(pets)]}
     outs = dict(letd.default_out(root)); outs.update({"pet_" + k: x for k, x in pet_run.default_out(root).items()})
     rows["ausgabe"] = {"wert": outs.get("out"), "quelle": "zone"}
     rows["kennzahlen"] = {"wert": outs.get("kz"), "quelle": "zone"}
     rows["synthseg"] = {"wert": True, "quelle": "standard"}
     rows["seite_neu"] = {"wert": True, "quelle": "standard"}
-    return {"zeilen": rows}
+    return {"zeilen": _mark(rows)}
+
+
+def input_rows(inp):
+    """The rows CT, RTSTRUCT, RTPLAN, fractions and prescription from what a run names (or the user gave), completed
+    from the export folder."""
+    found = complete_inputs(inp)
+    rows = {k: {"wert": found[k][0], "quelle": found[k][1]} if k in found else {"wert": None, "quelle": "fehlt"}
+            for k in RUN_INPUTS}
+    rows.update(plan_rows(rows["rtplan"]["wert"]) if rows["rtplan"]["wert"] else plan_rows(None))
+    return rows
 
 
 def plan_rows(rtplan):
     """Fractions and prescription rows after the user picked another RT plan."""
-    f = plan_facts(rtplan)
+    f = plan_facts(rtplan) if rtplan else {}
     return {"fraktionen": {"wert": f.get("fraktionen"), "quelle": "plan" if f.get("fraktionen") else "fehlt"},
             "verschreibung": {"wert": f.get("verschreibung_gy_rbe"), "quelle": "plan" if f.get("verschreibung_gy_rbe") else "fehlt"}}
 
 
+# what a pasted or chosen path must be, per row: a folder, a file, and what it holds
+FOLDER_ROWS = {"daten", "skripte", "cache", "lauf", "ct", "pet", "bilder", "mrt", "ausgabe", "pet_ausgabe"}
+FILE_ROWS = {"seite", "rtstruct", "rtplan", "kennzahlen"}
+NEW_OK = {"ausgabe", "pet_ausgabe", "kennzahlen"}      # written by the run: need not exist yet
+
+
+def check_path(key, text):
+    """A path the user pasted or chose for row `key`, in any form (Windows with or without quotes, \\ or /, /mnt/...),
+    as the local path, its Windows form, and a verdict: ok, fehlt (does not exist) or falsch (exists, wrong content).
+    A folder given for a file row (RTSTRUCT, RTPLAN) is looked through for the file by DICOM Modality."""
+    p = letd.to_local(text)
+    if not p: return {"wert": None, "anzeige": "", "befund": "fehlt"}
+    res = lambda q, b: {"wert": q, "anzeige": letd.to_windows(q), "befund": b}
+    if key in NEW_OK: return res(p, "ok" if os.path.exists(p) or os.path.isdir(os.path.dirname(p)) else "fehlt")
+    if not os.path.exists(p): return res(p, "fehlt")
+    if key in ("rtstruct", "rtplan"):
+        if _is(key, p): return res(p, "ok")
+        if os.path.isdir(p):
+            hits = [q for q, h in _dicom_files(p) if h.get("Modality") == MODALITY[key]]
+            if hits: return res(max(hits, key=os.path.getmtime), "ok")
+        return res(p, "falsch")
+    if key == "ct": return res(p, "ok" if _is("ct", p) else "falsch")
+    if key == "cache":
+        ok = os.path.isdir(p) and _cache_log(p, set(os.listdir(p))) is not None
+        return res(p, "ok" if ok else "falsch")
+    if key == "lauf": return res(p, "ok" if all(os.path.isfile(os.path.join(p, n)) for n in RUN_FILES) else "falsch")
+    if key == "pet":
+        return res(p, "ok" if find_pet([(p, 3)]) else "falsch")
+    if key in FILE_ROWS: return res(p, "ok" if os.path.isfile(p) else "falsch")
+    return res(p, "ok" if os.path.isdir(p) else "falsch")
+
+
 # ------------------------------------------------------------------ save a case
-REQUIRED = ("lauf", "ct", "cache", "daten", "fraktionen")
-
-
 def missing(values):
     m = [k for k in REQUIRED if not values.get(k)]
     if not values.get("verschreibung") and not values.get("rtstruct"): m.append("verschreibung")
@@ -294,9 +541,21 @@ def pet_form(folder, serie=None):
 
 
 # ------------------------------------------------------------------ folder chooser of the server
-def browse(path, root):
-    """One folder for the chooser: its subfolders and a hint per folder of what it holds (a plan_mc run, a viewer
-    data folder). Starts at the workspace root when no path is given. Names only, nothing opened."""
+DRIVES = ":laufwerke"            # the chooser's top under WSL: the drives as C:, D: instead of /mnt
+
+
+def _drives(mnt):
+    try: return sorted(e.name for e in os.scandir(mnt) if len(e.name) == 1 and e.is_dir())
+    except OSError: return []
+
+
+def browse(path, root, mnt="/mnt"):
+    """One folder for the chooser: its subfolders and files, each with its path, and the folder in Windows form.
+    Starts at the workspace root when no path is given; above a drive (/mnt/c) come the drives as C:, D:. A pasted
+    path in any form is taken. Names only, nothing opened."""
+    if path == DRIVES and _drives(mnt):
+        return {"pfad": DRIVES, "anzeige": "", "oben": None, "ordner": [], "dateien": [], "lauf": False,
+                "ziele": [{"name": d.upper() + ":", "pfad": os.path.join(mnt, d)} for d in _drives(mnt)], "datei_ziele": []}
     p = letd.to_local(path) if path else root
     if not os.path.isdir(p): p = os.path.dirname(p) if os.path.isdir(os.path.dirname(p)) else root
     try: entries = sorted(os.scandir(p), key=lambda e: e.name.lower())
@@ -306,10 +565,14 @@ def browse(path, root):
         if not e.is_dir(follow_symlinks=True) or e.name.startswith("."): continue
         dirs.append(e.name)
         if len(dirs) >= 500: break
-    files = [e.name for e in entries if e.is_file() and e.name.lower().endswith((".dcm", ".html", ".json", ".npy"))][:200]
+    files = [e.name for e in entries if e.is_file() and (e.name.lower().endswith((".dcm", ".html", ".json", ".npy"))
+                                                          or "." not in e.name)][:300]
     parent = os.path.dirname(p.rstrip(os.sep)) or os.sep
+    if os.path.dirname(p.rstrip(os.sep)) == mnt.rstrip(os.sep) and _drives(mnt): parent = DRIVES
+    j = lambda n: os.path.join(p, n)
     return {"pfad": p, "anzeige": letd.to_windows(p), "oben": parent if parent != p else None, "ordner": dirs,
-            "dateien": files, "lauf": all(os.path.isfile(os.path.join(p, n)) for n in RUN_FILES)}
+            "dateien": files, "lauf": all(os.path.isfile(j(n)) for n in RUN_FILES),
+            "ziele": [{"name": n, "pfad": j(n)} for n in dirs], "datei_ziele": [{"name": n, "pfad": j(n)} for n in files]}
 
 
 # ------------------------------------------------------------------ demo case (public, synthetic)
@@ -382,7 +645,7 @@ def demo(folder):
     with open(j("viewer", "Verlauf.html"), "w", encoding="utf-8") as fh: fh.write("<!doctype html><title>Demo</title>\n")
     with open(j("viewer", "Analyse", "Skripte", "viewer.json"), "w", encoding="utf-8") as fh: json.dump({"demo": True}, fh)
     with open(j("cacheF", "log.json"), "w", encoding="utf-8") as fh:
-        json.dump({"demo": True, "serien": ["t1_2001-02-01"]}, fh)
+        json.dump({"size": [8, 8, 8], "spacing": 1.0, "t1 2001-02-01": {"series": "demo", "kind": "3D", "native": [1.0, 1.0, 1.0]}}, fh)
     _nifti_gz(j("cacheF", "ref_t1.nii.gz"), 8, 8, 8, [int(100 + 50 * ((i // 64) % 2)) for i in range(512)])
     values = {"lauf": run, "ct": j("bilder", "ct_plan"), "rtstruct": j("plan", "rtstruct.dcm"), "rtplan": j("plan", "rtplan.dcm"),
               "seite": j("viewer", "Verlauf.html"), "daten": j("viewer", "Analyse", "Verlauf-Daten"),

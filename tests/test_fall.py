@@ -174,13 +174,13 @@ def tree(tmp_path):
 
 
 def test_search_finds_the_right_folders(tree):
-    r = fall_setup.scan(str(tree["mrt"]), str(tree["ws"]), [str(tree["cache_root"])])["zeilen"]
+    r = fall_setup.scan(str(tree["mrt"]), str(tree["ws"]), [str(tree["cache_root"])], default_roots=[])["zeilen"]
     m = tree["mrt"]
     assert r["seite"]["wert"] == str(m / "Verlauf.html")
     assert r["daten"]["wert"] == str(m / "Analyse" / "Verlauf-Daten") and r["skripte"]["wert"] == str(m / "Analyse" / "Skripte")
-    assert r["cache"] == {"wert": str(tree["cache_root"] / "cacheF"), "quelle": "gemerkt"}
+    assert (r["cache"]["wert"], r["cache"]["quelle"]) == (str(tree["cache_root"] / "cacheF"), "gemerkt")
     assert r["lauf"]["wert"] == str(tree["new"]) and [c["wert"] for c in r["lauf"]["kandidaten"]] == [str(tree["new"]), str(tree["old"])]
-    assert r["rtplan"] == {"wert": str(tree["plan"] / "rtplan.dcm"), "quelle": "lauf"}
+    assert (r["rtplan"]["wert"], r["rtplan"]["quelle"]) == (str(tree["plan"] / "rtplan.dcm"), "lauf")
     assert r["ct"]["wert"] == str(tree["ws"] / "lokal" / "ct")
     assert (r["fraktionen"]["wert"], r["verschreibung"]["wert"]) == (30, 60.0)
     assert r["pet"]["wert"] == [str(m / "PET" / "2001" / "serie1")] and r["pet"]["kandidaten"][0]["info"].startswith("2001-04-01")
@@ -188,14 +188,15 @@ def test_search_finds_the_right_folders(tree):
 
 def test_search_without_cache_root_and_with_an_old_run_asks(tree):
     shutil.rmtree(tree["new"])
-    r = fall_setup.scan(str(tree["mrt"]), str(tree["ws"]))["zeilen"]
+    r = fall_setup.scan(str(tree["mrt"]), str(tree["ws"]), default_roots=[])["zeilen"]
     assert r["cache"]["quelle"] == "fehlt" and r["lauf"]["wert"] == str(tree["old"])
-    assert r["rtplan"]["quelle"] == r["ct"]["quelle"] == r["fraktionen"]["quelle"] == "fehlt"
+    assert r["ct"]["quelle"] == r["fraktionen"]["quelle"] == "fehlt" and r["ct"]["pflicht"]
+    assert r["rtplan"]["quelle"] == "optional" and not r["rtplan"]["pflicht"]       # grey, it blocks nothing
     assert fall_setup.scan(str(tree["mrt"] / "nichts"), str(tree["ws"])) == {"fehler": "mrt_nicht_gefunden"}
 
 
 def test_save_case_keeps_machine_paths_out_of_fall_json(tree, tmp_path):
-    r = fall_setup.scan(str(tree["mrt"]), str(tree["ws"]), [str(tree["cache_root"])])["zeilen"]
+    r = fall_setup.scan(str(tree["mrt"]), str(tree["ws"]), [str(tree["cache_root"])], default_roots=[])["zeilen"]
     vals = {k: v["wert"] for k, v in r.items()}
     folder = str(tree["ws"] / "lokal" / "faelle" / "mein-fall")
     fall_setup.save_case(folder, "mein-fall", vals)
@@ -285,3 +286,116 @@ def test_case_without_results_section_loads_with_empty_lists(tmp_path):
     (tmp_path / "fall.json").write_text(json.dumps(d))
     got = fall.load(str(tmp_path))
     assert got["ergebnisse"] == {} and got["bilder"] == []
+
+
+# ------------------------------------------------------------------ the search from any folder (handoff 6111)
+@pytest.fixture
+def computer(tmp_path):
+    """A computer as the first hand test met it: the user picks an exam folder deep inside the viewer, cacheF lies
+    hidden outside the synced folder beside a cacheF of another viewer, the run names only the CT, the export holds
+    the RT files of two frames, and the PET series lies in a sibling of the viewer's folder."""
+    src = fall_setup.demo(str(tmp_path / "src"))
+    sync = tmp_path / "Sync" / "Klinik"
+    view = sync / "MRT Bilder"
+    touch(str(view / "Analyse" / "Verlauf.html"))
+    os.makedirs(view / "Analyse" / "Verlauf-Daten")
+    exam = view / "2001-02-01 Klinik" / "Bilder"; os.makedirs(exam)
+    stand = view / "Analyse" / "Skripte" / "stand"
+    log = {"size": [8, 8, 8], "spacing": 1.0, "t1 2001-02-01": {}, "flair 2001-02-01": {}, "t1 2001-05-01": {}}
+    touch(str(stand / "cacheF_log.json"), json.dumps(log))
+    shutil.copytree(os.path.join(src, "bilder", "pet_2001-04-01"), str(sync / "PET" / "2001-04-01" / "serie"))
+    disk = tmp_path / "disk"
+    right = disk / "a" / "b" / "arbeit" / "cacheF"; other = disk / "anderer" / "cacheF"; g = disk / "a" / "cacheG"
+    for d, keys in ((right, ("t1 2001-02-01", "flair 2001-02-01", "t1 2001-05-01")), (other, ("t1 1999-01-01",)), (g, ())):
+        touch(str(d / "log.json"), json.dumps({"size": [8, 8, 8], "spacing": 1.0, **{k: {} for k in keys}}))
+    os.utime(str(right / "log.json"), (1, 1))      # the other viewer's cacheF is newer: the exams decide, not the time
+    ws = tmp_path / "ws"
+    export = ws / "lokal" / "export"
+    shutil.copytree(os.path.join(src, "bilder", "ct_plan"), str(export / "CT"))
+    shutil.copy(os.path.join(src, "plan", "rtstruct.dcm"), str(export / "RS1"))      # no extension, as exports have
+    shutil.copy(os.path.join(src, "plan", "rtplan.dcm"), str(export / "RP1.dcm"))
+    dicomkopf.write(str(export / "RS_fremd.dcm"), {"Modality": "RTSTRUCT", "SOPInstanceUID": "2.25.7.1",
+                                                   "ReferencedFrameOfReferenceSequence": [{"FrameOfReferenceUID": "2.25.7.9"}]})
+    run = ws / "lokal" / "plan_mc" / "lauf"
+    shutil.copytree(os.path.join(src, "laeufe", "mc-ohne-rifi"), str(run))
+    json.dump({"eingaben": {"ct": str(export / "CT")}}, open(run / "run.json", "w"))
+    return {"exam": exam, "view": view, "right": right, "other": other, "disk": disk, "ws": ws, "export": export,
+            "pet": sync / "PET" / "2001-04-01" / "serie", "run": run}
+
+
+def test_a_start_from_an_exam_folder_finds_every_row(computer):
+    c = computer
+    r = fall_setup.scan(str(c["exam"]), str(c["ws"]), default_roots=[str(c["disk"])])["zeilen"]
+    assert r["bilder"]["wert"] == str(c["view"])
+    assert r["seite"]["wert"] == str(c["view"] / "Analyse" / "Verlauf.html")
+    assert r["daten"]["wert"] == str(c["view"] / "Analyse" / "Verlauf-Daten")
+    assert (r["cache"]["wert"], r["cache"]["quelle"]) == (str(c["right"]), "gefunden")
+    assert r["lauf"]["wert"] == str(c["run"]) and r["ct"]["wert"] == str(c["export"] / "CT")
+    assert (r["rtstruct"]["wert"], r["rtstruct"]["quelle"]) == (str(c["export"] / "RS1"), "export")
+    assert (r["rtplan"]["wert"], r["rtplan"]["quelle"]) == (str(c["export"] / "RP1.dcm"), "export")
+    assert (r["fraktionen"]["wert"], r["verschreibung"]["wert"]) == (30, 60.0)
+    assert r["pet"]["wert"] == [str(c["pet"])]
+    assert not [k for k, x in r.items() if x["quelle"] in ("fehlt", "optional")]
+    vals = {k: x["wert"] for k, x in r.items()}
+    assert fall_setup.missing(vals) == []
+
+
+def test_cache_search_takes_the_most_matching_exams_and_skips_synced_folders(computer, tmp_path):
+    c = computer
+    assert fall_setup.find_cache([str(c["disk"])], {"t1 1999-01-01"}) == str(c["other"])
+    assert fall_setup.find_cache([str(c["disk"])], {"t2 2030-01-01"}) is None       # another viewer's cacheF never fits
+    assert fall_setup.find_cache([str(c["disk"])]) == str(c["other"])                # without the viewer's copy: the newest
+    synced = tmp_path / "u" / "OneDrive - Uni" / "cacheF"
+    shutil.copytree(str(c["right"]), str(synced))
+    assert fall_setup.find_cache([str(tmp_path / "u")]) is None
+
+
+def test_viewer_root_from_below_and_outside(computer, tmp_path):
+    assert fall_setup.viewer_root(str(computer["exam"])) == str(computer["view"])
+    os.makedirs(tmp_path / "leer")
+    assert fall_setup.viewer_root(str(tmp_path / "leer")) is None
+
+
+def test_a_pasted_path_in_any_form_is_checked(computer):
+    c = computer
+    exp = str(c["export"])
+    r = fall_setup.check_path("rtstruct", f'  "{exp}"  ')          # quoted, the export folder instead of the file
+    assert (r["wert"], r["befund"]) == (os.path.join(exp, "RS1") if os.path.getmtime(os.path.join(exp, "RS1"))
+                                        >= os.path.getmtime(os.path.join(exp, "RS_fremd.dcm")) else os.path.join(exp, "RS_fremd.dcm"), "ok")
+    assert fall_setup.check_path("ct", exp + "/CT")["befund"] == "ok"
+    assert fall_setup.check_path("ct", exp)["befund"] == "falsch"
+    assert fall_setup.check_path("cache", str(c["right"]))["befund"] == "ok"
+    assert fall_setup.check_path("cache", str(c["view"]))["befund"] == "falsch"
+    assert fall_setup.check_path("daten", str(c["view"] / "fehlt hier"))["befund"] == "fehlt"
+    assert fall_setup.check_path("pet", str(c["pet"].parent))["befund"] == "ok"
+    assert letd.to_windows("/mnt/c/Users/a b/MRT Bilder") == "C:\\Users\\a b\\MRT Bilder" and letd.to_windows("/mnt/d") == "D:\\"
+
+
+@pytest.mark.skipif(not os.path.isdir("/mnt"), reason="Windows paths map to /mnt only under WSL")
+def test_windows_forms_become_one_local_path():
+    for text in ('"C:\\Users\\a b\\MRT Bilder"', "C:/Users/a b/MRT Bilder", "c:\\Users\\a b\\MRT Bilder", "/mnt/c/Users/a b/MRT Bilder"):
+        assert letd.to_local(text) == "/mnt/c/Users/a b/MRT Bilder"
+
+
+def test_the_chooser_shows_drives_above_a_drive(tmp_path):
+    mnt = tmp_path / "mnt"
+    for d in ("c", "d", "wslg"): os.makedirs(mnt / d / "x")
+    top = fall_setup.browse(fall_setup.DRIVES, str(tmp_path), mnt=str(mnt))
+    assert [z["name"] for z in top["ziele"]] == ["C:", "D:"] and top["oben"] is None
+    assert fall_setup.browse(str(mnt / "c"), str(tmp_path), mnt=str(mnt))["oben"] == fall_setup.DRIVES
+    touch(str(mnt / "c" / "x" / "RS1"))
+    b = fall_setup.browse(str(mnt / "c" / "x"), str(tmp_path), mnt=str(mnt))
+    assert [z["name"] for z in b["datei_ziele"]] == ["RS1"]
+
+
+def test_files_that_cannot_be_read_are_named_not_hidden(computer, monkeypatch):
+    """An OneDrive placeholder lists like a file and fails when read: the search says so."""
+    c = computer
+    real_open = open
+    def fake_open(path, *a, **k):
+        if str(c["pet"]) in str(path): raise OSError(5, "cloud file not available")
+        return real_open(path, *a, **k)
+    monkeypatch.setattr("builtins.open", fake_open)
+    r = fall_setup.scan(str(c["exam"]), str(c["ws"]), default_roots=[str(c["disk"])])
+    assert r["zeilen"]["pet"]["wert"] == [] and r["unlesbar"]["anzahl"] >= 1 and r["unlesbar"]["ordner"][0] == str(c["pet"])
+    assert dicomkopf.ON_ERROR is None

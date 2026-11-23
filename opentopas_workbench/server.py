@@ -1934,7 +1934,10 @@ def fall_post(what, b):
             return 200, r
         if what == "browse": return 200, fall_setup.browse(b.get("pfad", ""), root)
         if what == "plan": return 200, fall_setup.plan_rows(b.get("rtplan", ""))
-        if what == "runinputs": return 200, fall_setup.run_inputs(letd.to_local(b.get("lauf", "")))
+        if what == "runinputs": return 200, fall_setup.input_rows(fall_setup.run_inputs(letd.to_local(b.get("lauf", ""))))
+        if what == "inputs":    # the user set CT, RTSTRUCT or RTPLAN: the others are looked up beside it again
+            return 200, fall_setup.input_rows({k: b.get(k) for k in fall_setup.RUN_INPUTS})
+        if what == "pfad": return 200, fall_setup.check_path(str(b.get("zeile", "")), str(b.get("pfad", "")))
         if what == "save":
             fid = str(b.get("fall_id", "")).strip()
             if not os.path.isdir(os.path.join(fall_base(), "lokal")): return 200, {"fehler": "kein_lokal"}

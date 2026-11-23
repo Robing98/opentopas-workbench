@@ -38,6 +38,7 @@ TAGS = {
     "NumberOfFractionsPlanned": (0x300A, 0x0078),
     "RadiationType": (0x300A, 0x00C6),
     "IonBeamSequence": (0x300A, 0x03A2),
+    "ReferencedFrameOfReferenceSequence": (0x3006, 0x0010),
     "StructureSetROISequence": (0x3006, 0x0020),
     "ROIName": (0x3006, 0x0026),
     "ReferencedStructureSetSequence": (0x300C, 0x0060),
@@ -48,6 +49,7 @@ EXPLICIT_LE, IMPLICIT_LE = "1.2.840.10008.1.2.1", "1.2.840.10008.1.2"
 LONG_VR = {b"OB", b"OW", b"OF", b"OD", b"OL", b"OV", b"SQ", b"UC", b"UR", b"UT", b"UN"}
 SEQ_IMPLICIT = {v for k, v in TAGS.items() if k.endswith("Sequence")}   # implicit VR carries no "SQ": known by tag
 UNDEFINED = 0xFFFFFFFF
+ON_ERROR = None                  # called with the path of a file that exists but cannot be read (a search counts them)
 
 
 def _value(vr, raw):
@@ -137,6 +139,7 @@ def read(path, limit=1 << 20):
     try:
         with open(path, "rb") as fh: buf = fh.read(limit)
     except OSError:
+        if ON_ERROR: ON_ERROR(path)
         return None
     if len(buf) < 132 or buf[128:132] != b"DICM": return None
     meta, i = _meta(buf)
@@ -185,6 +188,16 @@ def plan_facts(ds):
         rs = r.get("ReferencedSOPInstanceUID") or rs
     return {"fraktionen": fx, "verschreibung_gy_rbe": rx, "teilchen": particle, "rtstruct_uid": rs,
             "frame_of_reference_uid": ds.get("FrameOfReferenceUID")}
+
+
+def frame_uid(ds):
+    """The frame of reference of a data set: its own FrameOfReferenceUID (CT, MR, PT, RT plan, RT dose), else the first
+    one an RT structure set names in ReferencedFrameOfReferenceSequence."""
+    if not ds: return None
+    if ds.get("FrameOfReferenceUID"): return ds["FrameOfReferenceUID"]
+    for r in ds.get("ReferencedFrameOfReferenceSequence") or []:
+        if r.get("FrameOfReferenceUID"): return r["FrameOfReferenceUID"]
+    return None
 
 
 # ------------------------------------------------------------------ writer (synthetic files only)

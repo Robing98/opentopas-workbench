@@ -49,8 +49,8 @@ def to_local(p):
 
 def to_windows(p):
     """/mnt/c/x -> C:\\x for a Windows program; other paths stay."""
-    m = re.match(r"^/mnt/([a-z])/(.*)$", p)
-    return f"{m.group(1).upper()}:\\" + m.group(2).replace("/", "\\") if m else p
+    m = re.match(r"^/mnt/([a-z])(?:/(.*))?$", p or "")
+    return f"{m.group(1).upper()}:\\" + (m.group(2) or "").replace("/", "\\") if m else p
 
 
 def in_public_zone(p, root=None):
