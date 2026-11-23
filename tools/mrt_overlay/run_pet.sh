@@ -24,6 +24,11 @@ ARGS=(--out "$OUT" --ref "$REF")
 if [ "$REF" = striatum ]; then ARGS+=(--labels "$(win "${LABELS:?LABELS: SynthSeg-Datei fuer --ref striatum angeben}")"); fi
 if [ -n "$SIDE" ]; then ARGS+=(--side "$SIDE"); fi
 if [ -n "${PET_STARTS:-}" ]; then ARGS+=(--starts "$PET_STARTS"); fi
+# FALL: case folder of a start from the case; the cli writes the transform and the side check back into fall.json
+if [ -n "${FALL:-}" ]; then
+  ARGS+=(--fall "$(win "$FALL")")
+  if [ -n "${PET_SERIE:-}" ]; then ARGS+=(--serie "$PET_SERIE"); fi
+fi
 mkdir -p "$OUT"
 cd "$HERE/.."
 "$PY" -m mrt_overlay.cli pet "$PET" "$CACHE" "$VIEW" "${ARGS[@]}"

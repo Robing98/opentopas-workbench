@@ -190,3 +190,30 @@ def test_control_sheet_puts_the_patient_s_right_on_the_left_also_for_a_ras_grid(
         red = axial[:, 0] - axial[:, 1] > 40
         half = len(axial) // 2
         assert red[:half].mean() > 0.9 and red[half:].mean() < 0.1, name
+
+
+def test_pet_command_from_case_file(cache, pet_dir, tmp_path):
+    """--fall: the PET series, the viewer folders and the reference from fall.json; the transform and the side check
+    written back into that series' entry."""
+    from mrt_overlay import cli
+    sys.path.insert(0, ROOT)
+    from opentopas_workbench import fall
+    case = tmp_path / "fall"; os.makedirs(case)
+    orte = {}
+    cp = lambda p: fall.to_case_path(str(case), p, orte)
+
+    def setup(d):
+        d["bilder"] = [{"serie": "pet_x", "modalitaet": "PT", "datum": None, "ordner": cp(pet_dir[0]), "nach_bezug": None,
+                        "guete": None, "pet": {"tracer": "aminosaeure", "referenz": None, "suv_eingabe": None}}]
+        d["viewer"] = {"cache": cp(cache[0]), "daten": "data"}
+        d["einstellungen"] = {"pet_ausgabe": "pet_out"}
+    fall.save_orte(str(case), orte)
+    fall.update(str(case), setup, create="pet-fall")
+    fall.save_orte(str(case), orte)
+    cli.main(["pet", "--fall", str(case), "--starts", "0"])
+    (b,) = fall.load(str(case))["bilder"]
+    assert b["nach_bezug"] == f"pet_out/grid_to_pet_{DAY}.tfm" and os.path.isfile(case / b["nach_bezug"])
+    assert b["guete"]["ok"] and b["guete"]["seitenpruefung"]["ok"] and b["guete"]["seitenpruefung"]["mi"] < b["guete"]["seitenpruefung"]["mi_gespiegelt"]
+    assert b["pet"]["referenz"]["art"] == "brain" and b["datum"] == DAY
+    assert os.path.isfile(case / "data" / f"pet_{DAY}.js")
+    assert not fall.check(str(case))["fehler"]

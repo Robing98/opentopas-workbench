@@ -1869,7 +1869,7 @@ function fcRow(k){const r=FC.rows[k]||{wert:null,quelle:"fehlt"};let val;
  else if(k==="pet"&&(r.kandidaten||[]).length)val=r.kandidaten.map(c=>`<label style="display:block"><input type="checkbox" data-fcp="${esc(c.wert)}"${(r.wert||[]).includes(c.wert)?" checked":""}> ${esc(c.info)} · ${esc(c.wert)}</label>`).join("");
  else val=fcShow(k,r.wert);
  const btn=FC_BOOL[k]||FC_NUM[k]?"":`<button data-fcc="${k}">${esc(t("fc_change"))}</button>`;
- return `<tr><td>${esc(t("fc_r_"+k))}</td><td style="word-break:break-all">${val}</td><td class="${r.quelle==="fehlt"?"log-err":"mute"}">${esc(t("fc_q_"+r.quelle))}</td><td>${btn}</td></tr>`}
+ return `<tr><td>${esc(t("fc_r_"+k))}</td><td style="white-space:normal;word-break:break-all;width:100%">${val}</td><td class="${r.quelle==="fehlt"?"log-err":"mute"}">${esc(t("fc_q_"+r.quelle))}</td><td>${btn}</td></tr>`}
 function fcRows(){$("fcRows").innerHTML=FC_MAIN.map(fcRow).join("");$("fcRowsMore").innerHTML=FC_MORE.map(fcRow).join("");
  document.querySelectorAll("[data-fcc]").forEach(b=>b.onclick=()=>{const k=b.dataset.fcc,v=FC.rows[k]&&FC.rows[k].wert;fcBrowse(k,Array.isArray(v)?v[0]||FC.mrt:v||FC.mrt,!!FC_FILE[k])});
  document.querySelectorAll("[data-fcb]").forEach(i=>i.onchange=()=>{FC.rows[i.dataset.fcb]={wert:i.checked,quelle:"gewaehlt"}});

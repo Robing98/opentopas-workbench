@@ -312,6 +312,8 @@ def start(form, on_end=None, viewer=None):
         args += [str(_num(f["rx"], float) or ""), str(_num(f["fx"], int)), out, to_local(f["kz"])]
         env = dict(os.environ, PYTHONUNBUFFERED="1")
         if not synthseg: env["SYNTHSEG"] = "none"
+        # a start from a case (fall_setup.letd_form) names its folder: the cli writes its results back into fall.json
+        if form.get("fall"): env["FALL"] = to_local(str(form["fall"]))
         t = threading.Thread(target=_run, args=(["bash", SCRIPT] + args, env, on_end), daemon=True)
         JOB["thread"] = t
     t.start()

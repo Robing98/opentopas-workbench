@@ -169,6 +169,7 @@ def start(form, on_end=None, viewer=None):
         if ref == "contralateral": args.append(f["side"])
         env = dict(os.environ, PYTHONUNBUFFERED="1")
         if ref == "striatum": env["LABELS"] = to_local(f["labels"])
+        if form.get("fall"): env.update(FALL=to_local(str(form["fall"])), PET_SERIE=str(form.get("serie") or ""))
         t = threading.Thread(target=_run, args=(["bash", SCRIPT] + args, env, on_end), daemon=True)
         JOB["thread"] = t
     t.start()

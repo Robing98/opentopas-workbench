@@ -1887,6 +1887,11 @@ def fall_register(folder):
     save_cfg()
 
 
+# keys of a form from a case that the saved form of the expert view must not keep: a later start from that view is
+# no start from the case and must neither write into fall.json nor pass the zone check of a public plan
+CASE_ONLY = ("oeffentlich", "fall", "serie")
+
+
 def fall_start(folder, want_letd, want_pet, pet_serie=None):
     """Starts the layers of a case: LETd first, PET after it, so the two never build the viewer page at once."""
     viewer = STATE["cfg"].get("viewer_dir")
@@ -1902,13 +1907,13 @@ def fall_start(folder, want_letd, want_pet, pet_serie=None):
 
     def start_pet(_st=None):
         if _st is not None and _st.get("status") != "done": return
-        pet_save(form={k: v for k, v in forms["pet"].items() if k != "oeffentlich"})
+        pet_save(form={k: v for k, v in forms["pet"].items() if k not in CASE_ONLY})
         try: pet_run.start(forms["pet"], on_end=lambda st: pet_save(last=st), viewer=viewer)
         except (RuntimeError, ValueError): pass
 
     try:
         if "letd" in forms:
-            letd_save(form={k: v for k, v in forms["letd"].items() if k != "oeffentlich"})
+            letd_save(form={k: v for k, v in forms["letd"].items() if k not in CASE_ONLY})
             def end(st):
                 letd_save(last=st)
                 if "pet" in forms: start_pet(st)

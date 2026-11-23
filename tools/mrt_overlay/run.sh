@@ -40,5 +40,5 @@ elif [ -n "${SYNTHSEG:-}" ] || command -v mri_synthseg >/dev/null; then SEG=(--s
 # without a prescription the cli takes the median 1.1 dose in the PTV of the structure set
 OPT=(); [ -n "$RS" ] && OPT+=(--rtstruct "$RS"); [ -n "$RX" ] && OPT+=(--prescription "$RX")
 "$PY" -m mrt_overlay.cli viewer "$CACHE" "$CT" "$OUT/ct_frame" "$OUT/viewer_grid" "${OPT[@]}" \
-  --viewer-data "$VIEW" --kennzahlen "$KZ" "${SEG[@]}"
+  --viewer-data "$VIEW" --kennzahlen "$KZ" "${SEG[@]}" ${FALL:+--fall "$(win "$FALL")"}
 echo "Fertig: $OUT/viewer_grid/overlay.json (Registrierung je Untersuchung, Hinschau-Liste)."

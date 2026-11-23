@@ -263,3 +263,63 @@ def test_synthseg_call_is_robust_on_cpu_and_cropped(tmp_path):
     argv = json.load(open(seen))
     assert argv[:4] == ["--i", "in.nii.gz", "--o", "out.nii.gz"]
     assert "--robust" in argv and "--cpu" in argv and argv[argv.index("--crop") + 1] == "192"
+
+
+def _case(folder, d_change):
+    sys.path.insert(0, ROOT)
+    from opentopas_workbench import fall
+    fall.update(str(folder), d_change, create="test-fall")
+    return fall
+
+
+def test_viewer_command_from_case_file(head, tmp_path):
+    """--fall: every path from fall.json, the export done when ct_frame is missing, and the registration of each
+    exam and the viewer result written back, so that fall_check sees the result as current."""
+    from mrt_overlay import cli
+    ct, mri, labels, truth = head
+    case = tmp_path / "fall"
+    cache = case / "cacheF"; os.makedirs(cache)
+    sitk.WriteImage(mri, str(cache / "ref_t1.nii.gz"))
+    a = sitk.GetArrayFromImage(mri)
+    a8 = np.clip(a / a.max() * 255, 0, 255).astype(np.uint8)
+    np.save(cache / "t1_2020-01-01.npy", a8)
+    np.save(cache / "t1_2020-06-01.npy", np.roll(a8, 3, axis=2))
+    json.dump({"t1 2020-01-01": {"series": "x", "kind": "3D", "native": [1.0, 1.0, 1.0]},
+               "t1 2020-06-01": {"series": "z", "kind": "3D", "native": [1.0, 1.0, 1.0]}}, open(cache / "log.json", "w"))
+    os.makedirs(case / "ct")
+    sitk.WriteImage(ct, str(case / "ct" / "ct.nii.gz"))
+    sitk.WriteImage(labels, str(tmp_path / "seg.nii.gz"))
+    ph.write_run(str(case / "run"), centre_mm=(-11.0, 4.0, 24.0), sigma_mm=8.0)
+
+    def setup(d):
+        d["bilder"] = [{"serie": "ct_plan", "modalitaet": "CT", "datum": None, "ordner": "ct/ct.nii.gz",
+                        "nach_bezug": None, "guete": None}]
+        d["bezug"] = {"serie": "ct_plan"}
+        d["plan_ohne_datei"] = {"fraktionen": 1, "verschreibung_gy_rbe": 2.2}
+        d["viewer"] = {"cache": "cacheF", "daten": "data"}
+        d["einstellungen"] = {"ausgabe": "out", "synthseg": False, "lauf": "mc-1"}
+        d["ergebnisse"]["workbench"] = [{"id": "mc-1", "ordner": "run", "eingaben": {}, "dateien": {}}]
+    fall = _case(case, setup)
+    cli.main(["viewer", "--fall", str(case), "--labels", str(tmp_path / "seg.nii.gz")])
+    assert os.path.isfile(case / "out" / "ct_frame" / "dose_rbe_1_1.nii.gz")
+    info = json.load(open(case / "out" / "viewer_grid" / "overlay.json"))
+    assert info["prescription_gy_rbe"] == 2.2 and info["margin"] is True
+    d = fall.load(str(case))
+    mr = {b["serie"]: b for b in d["bilder"] if b["modalitaet"] == "MR"}
+    assert set(mr) == {"t1_2020-01-01", "t1_2020-06-01"}
+    assert mr["t1_2020-01-01"]["guete"]["ok"] is True and mr["t1_2020-06-01"]["guete"]["ok"] is False
+    assert mr["t1_2020-01-01"]["nach_bezug"] == "out/viewer_grid/mri_to_ct.tfm" and mr["t1_2020-01-01"]["datum"] == "2020-01-01"
+    (v,) = d["ergebnisse"]["viewer"]
+    assert v["aus"] == ["mc-1"] and v["ordner"] == "data" and set(v["dateien"]) == {"letd_all.js", "marks_all.js", "letd.json"}
+    rep = fall.check(str(case))
+    assert {(r["art"], r["zustand"]) for r in rep["ergebnisse"]} >= {("viewer", "aktuell")}
+    assert "bilder t1_2020-06-01: Registrierung nicht ok" in rep["warnungen"]
+    # a viewer file changed after the run: the result is broken, and fall_check says so
+    open(case / "data" / "letd.json", "a").write(" ")
+    assert ("viewer", "kaputt") in {(r["art"], r["zustand"]) for r in fall.check(str(case))["ergebnisse"]}
+
+
+def test_viewer_command_needs_paths_or_case():
+    from mrt_overlay import cli
+    with pytest.raises(SystemExit, match="--fall"):
+        cli.main(["viewer", "only-a-cache"])

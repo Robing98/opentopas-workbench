@@ -270,7 +270,7 @@ def letd_form(folder):
             "out": _get(folder, d, orte, "einstellungen", "ausgabe"),
             "kz": _get(folder, d, orte, "einstellungen", "kennzahlen"),
             "build": "1" if ein.get("seite_neu", True) else "", "synthseg": "1" if ein.get("synthseg", True) else "",
-            "oeffentlich": bool((d.get("plan") or {}).get("oeffentlich"))}
+            "oeffentlich": bool((d.get("plan") or {}).get("oeffentlich")), "fall": folder}
 
 
 def pet_form(folder, serie=None):
@@ -286,7 +286,8 @@ def pet_form(folder, serie=None):
             "cache": _get(folder, d, orte, "viewer", "cache"), "view": _get(folder, d, orte, "viewer", "daten"),
             "ref": ref if ref in pet_run.REFS else "brain", "side": "", "labels": "",
             "out": _get(folder, d, orte, "einstellungen", "pet_ausgabe"),
-            "build": "1" if ein.get("seite_neu", True) else "", "oeffentlich": bool((d.get("plan") or {}).get("oeffentlich"))}
+            "build": "1" if ein.get("seite_neu", True) else "", "oeffentlich": bool((d.get("plan") or {}).get("oeffentlich")),
+            "fall": folder, "serie": b["serie"]}
 
 
 # ------------------------------------------------------------------ folder chooser of the server
