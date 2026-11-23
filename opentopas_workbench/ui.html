@@ -932,10 +932,11 @@ $("rfRun").onclick=async()=>{const files=[...document.querySelectorAll(".rfc:che
 $("rfBoth").onclick=async()=>{const files=[...document.querySelectorAll(".rfc:checked")].map(e=>e.value);if(!files.length){$("rfMsg").textContent=t("nothing_selected");return}
  const bins=((INFO&&INFO.cfg.binaries)||[]).map(b=>b.name).filter(n=>n!=="FLUKA"),binary=bins.includes($("rfBin").value)?$("rfBin").value:bins[0];
  if(!binary){$("rfMsg").textContent=t("no_topas");return}
+ $("rfBoth").disabled=true;
  try{const j=await api("/api/enqueue_both",{files,binary,subdir:$("rfSub").value.trim(),skip:$("rfSkip").checked}),ref=j.refused||[],pairs=j.added.filter(f=>f.toLowerCase().endsWith(".inp")).length;
   $("rfMsg").textContent=`${j.added.length} ${t("added")}, ${j.skipped.length} ${t("skipped")}`+(ref.length?`, ${ref.length} ${t("refused")}`:"");
   if(pairs)toast(t("both_queued").replace("{n}",pairs),"ok");
-  for(const r of ref)toast(`${r.file.split("/").pop()}: ${t("no_fluka")} ${r.reason}`,"err");poll()}catch(e){$("rfMsg").textContent=t("error")+": "+e.message}};
+  for(const r of ref)toast(`${r.file.split("/").pop()}: ${t("no_fluka")} ${r.reason}`,"err");poll()}catch(e){$("rfMsg").textContent=t("error")+": "+e.message}finally{$("rfBoth").disabled=false}};
 $("rfPlot").onclick=()=>plotCases([...document.querySelectorAll(".rfc:checked")].map(e=>e.value));
 async function plotCases(files){if(!files.length){toast(t("nothing_selected"));return}
  const j=await api("/api/outputs",{files});const out=[...new Set(files.flatMap(f=>j.outputs[f]||[]))];if(!out.length){toast(t("no_outputs"));return}plotPaths(out)}
@@ -1036,10 +1037,11 @@ function renderGroups(gs){const ids=Object.keys(gs).map(Number).sort((a,b)=>a-b)
  if(Q.html.qGroups!==html){Q.html.qGroups=html;$("qGroups").innerHTML=html}}
 $("qGroups").addEventListener("click",async e=>{const b=e.target.closest("button");if(!b)return;
  if(b.dataset.gstart){await api("/api/release",{group:+b.dataset.gstart});poll()}
- else if(b.dataset.gshow){const x=JOBS&&JOBS.groups&&JOBS.groups[b.dataset.gshow];if(!x||!x.outputs.length)return;RS.cv=true;plotPaths(x.outputs);RS.cvGroup=b.dataset.gshow}});
-/* the comparison of a group follows its finished pairs: each new pair adds its two results, the view loads again */
-function followGroup(gs){const g=RS.cvGroup,x=g!=null&&gs[g];if(!x)return;
- if(x.outputs.join("\n")===RS.pick.join("\n"))return;RS.pick=x.outputs.slice();savePick();if(isTab("results"))loadPlot()}
+ else if(b.dataset.gshow){const x=JOBS&&JOBS.groups&&JOBS.groups[b.dataset.gshow];if(!x||!x.outputs.length)return;RS.cv=true;plotPaths(x.outputs);RS.cvGroup=b.dataset.gshow;RS.cvSeen=x.outputs.slice()}});
+/* the comparison of a group follows its finished pairs: only a new pair's results are added, so a file that the user
+   unticked or a view that the user loaded stays as it is */
+function followGroup(gs){const g=RS.cvGroup,x=g!=null&&gs[g];if(!x)return;const seen=new Set(RS.cvSeen||[]),add=x.outputs.filter(o=>!seen.has(o));
+ if(!add.length)return;RS.cvSeen=x.outputs.slice();RS.pick=RS.pick.concat(add.filter(o=>!RS.pick.includes(o)));savePick();if(isTab("results"))loadPlot()}
 armed($("qRemove"),async()=>{const j=await api("/api/dequeue",{all:true});toast(t("removed_n").replace("{n}",j.removed||0),"ok");poll()});
 armed($("qClear"),async()=>{await api("/api/clearhistory",{});Q.sel=null;Q.more=30;poll()});
 

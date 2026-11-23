@@ -957,3 +957,18 @@ def test_groups_in_the_api_count_finished_pairs_and_release_by_group(queue, monk
             api("/api/enqueue_both", {"files": [t4], "binary": "FLUKA"})
     finally:
         srv.shutdown(); srv.server_close()
+
+
+def test_two_requests_at_once_put_each_case_into_one_group_once(queue, monkeypatch):
+    """A double click on Compute in both codes: the second request waits for the first, so its pairs are skipped as
+    already waiting instead of putting a third job into the case and leaving the group without a comparison."""
+    wb, ws = queue
+    t4, r0 = both_cases(ws)
+    slow = wb.fluka_input_from_topas
+    monkeypatch.setattr(wb, "fluka_input_from_topas", lambda f: (time.sleep(0.2), slow(f))[1])
+    res = []
+    ts = [threading.Thread(target=lambda: res.append(wb.enqueue_both([t4, r0], "OpenTOPAS", "", False))) for _ in range(2)]
+    for t in ts: t.start()
+    for t in ts: t.join()
+    assert len(wb.STATE["jobs"]) == 4 and sorted(len(r[0]) for r in res) == [0, 4]
+    assert wb.job_groups(wb.STATE["jobs"])[str(wb.STATE["jobs"][0]["group"])]["cases"] == 2

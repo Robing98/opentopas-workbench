@@ -974,6 +974,14 @@ def enqueue_both(files, binary, subdir, skip_existing):
     "Start comparison" releases the group, whose list order then is the run order. A file without a FLUKA input of its
     case is refused whole: a pair with one half compares nothing. (added, skipped, refused, group)."""
     if not binary or binary == FLUKA_BINARY: raise ValueError("choose a TOPAS program for the TOPAS half of each pair")
+    with _BOTH_LOCK:   # requests run in parallel: a double click must not put a case into one group twice
+        return _enqueue_both(files, binary, subdir, skip_existing)
+
+
+_BOTH_LOCK = threading.Lock()
+
+
+def _enqueue_both(files, binary, subdir, skip_existing):
     added, skipped, refused = [], [], []
     with STATE["lock"]: group = STATE["next_id"]   # the id of the group's first job: unique, and stays after a restart
     for f in files:
