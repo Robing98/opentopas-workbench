@@ -410,7 +410,7 @@ def t_enqueue(wb, a):
         prog = progs[0]
     r = wb.post("/api/enqueue", {"files": a["files"], "binary": prog, "subdir": a.get("subfolder", ""),
                                  "skip": bool(a.get("skip_existing"))})
-    return {"program": prog, "added": r["added"], "skipped_with_results": r["skipped"]}
+    return {"program": prog, "added": r["added"], "skipped_with_results": r["skipped"], "refused": r.get("refused", [])}
 
 
 def t_dequeue(wb, a):
@@ -487,7 +487,7 @@ TOOLS = {
                       "folder": d(S, "target folder in the workspace"), "overwrite": B, "preview": B}, ["generator"])),
     "enqueue": (t_enqueue, True, "Queue cases for a run. Runs start one after another in the background.",
                 obj({"files": {"type": "array", "items": S, "description": "parameter files"},
-                     "program": d(S, "program name from info (optional when only one is configured)"),
+                     "program": d(S, "program name from info (optional when only one is configured), or FLUKA: a generator's TOPAS file then goes in as the FLUKA input of its case, on hold until the user starts it"),
                      "subfolder": d(S, "write results into this subfolder next to each case"),
                      "skip_existing": d(B, "skip cases whose outputs already exist")}, ["files"])),
     "dequeue": (t_dequeue, True, "Remove waiting jobs from the queue (not the running one).",
@@ -644,6 +644,7 @@ def cli_enqueue(argv):
         sys.exit(f"error: {e}")
     for f in r["added"]: print(f"queued   {f}  ({r['program']})")
     for f in r["skipped_with_results"]: print(f"skipped  {f}  (results exist)")
+    for x in r["refused"]: print(f"refused  {x['file']}  ({x['reason']})")
 
 
 def cli_jobs(argv):
