@@ -11,7 +11,7 @@ Security: listens on 127.0.0.1 only, checks the Host header and requires a per-s
 and only touches files inside the workspace. The one exception is the Machines view: it reads matRad machine files
 (.mat) that the page names, by default from the matRad folder in the user's home, and writes nothing there.
 """
-import argparse, base64, csv, fnmatch, io, zipfile, importlib.util, json, os, re, secrets, shlex, shutil, signal, socketserver, subprocess, sys, threading, time, webbrowser
+import argparse, base64, bisect, csv, fnmatch, io, zipfile, importlib.util, json, math, os, re, secrets, shlex, shutil, signal, socketserver, subprocess, sys, threading, time, webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
@@ -1253,6 +1253,145 @@ def producer_of(rel):
     return None
 
 
+# ------------------------------------------------------------------ code comparison
+PLATEAU_MM = (2.0, 6.0)   # the plateau of the code comparison of task 3358 (workspace/offen/fluka_vergleich)
+SEED_TOKEN = re.compile(r"(?:s|seed)\d+", re.I)
+CMP_KEYS = ("r80", "bpw80", "dfo", "peak_plateau")
+CMP_MAX_FILES = 400
+
+
+def code_name(code): return code["code"] + (" " + code["version"] if code.get("version") else "")
+
+
+def case_key(name, code):
+    """The case a result belongs to: its file name without the parts that name its code or its seed, so that
+    IDD_c_s1.csv of TOPAS 3.9, of OpenTOPAS 4.3 (often in folders t39 and t43) and IDD_c_s2_fluka.csv of FLUKA all
+    give IDD_c. Only tokens of the result's own code are dropped: t4 is a filter, t43 the version of OpenTOPAS 4.3.
+    The code name glued to its version (topas39, fluka4) counts too; the major alone only after a full name, never
+    after a bare t, because t3 and t4 name filters.
+    A bare number is never dropped: it may be an energy or a thickness that the other codes keep."""
+    groups = re.findall(r"\d+", code.get("version") or "")
+    names = {code["code"].lower(), "topas", "opentopas"} if code["code"] != "FLUKA" else {"fluka"}
+    own = set(names)
+    # 4.3.0 is also written 43, FLUKA 4-5.2 also 45 or 452
+    for v in {"".join(groups), "".join(groups[:2])} - {""}:
+        own |= {n + v for n in names}
+        if len(v) > 1: own |= {"t" + v, "ot" + v, "v" + v, "f" + v}   # a version "4" alone must not take the filter t4
+    if groups: own |= {n + groups[0] for n in names}
+    toks = [t for t in re.split(r"[_\-\s.]+", os.path.splitext(name)[0]) if t]
+    kept = [t for t in toks if t.lower() not in own and not SEED_TOKEN.fullmatch(t)]
+    return "_".join(kept or toks)
+
+
+def _stat(xs):
+    xs = [x for x in xs if x is not None]
+    if not xs: return None, None
+    m = sum(xs) / len(xs)
+    return m, (math.sqrt(sum((x - m) ** 2 for x in xs) / (len(xs) - 1)) if len(xs) > 1 else None)
+
+
+def _plateau(x, y):
+    pl = [v for xv, v in zip(x, y) if PLATEAU_MM[0] <= xv <= PLATEAU_MM[1]] or y[:5]
+    return sum(pl) / len(pl) if pl else 0.0
+
+
+def _interp(xs, ys, x):
+    if x < xs[0] or x > xs[-1]: return None
+    k = max(1, bisect.bisect_left(xs, x)); k = min(k, len(xs) - 1)
+    x0, x1 = xs[k - 1], xs[k]
+    return ys[k - 1] + (ys[k] - ys[k - 1]) * ((x - x0) / (x1 - x0) if x1 != x0 else 0.0)
+
+
+def _cmp_run(rel, stat):
+    fp = resolve(rel)
+    code = result_code(fp)
+    if code is None: return None, "no code in its head"
+    d = read_any(fp, stat)
+    if d.get("mode") != "1d" or d.get("measured"): return None, "not a depth curve"
+    code = with_case(code, producer_of(relp(fp)))
+    if code.get("seed") is None:
+        s = [t for t in re.split(r"[_\-\s.]+", os.path.splitext(os.path.basename(fp))[0]) if SEED_TOKEN.fullmatch(t)]
+        if s: code["seed"] = int(re.sub(r"\D", "", s[-1]))
+    f = {"cm": 10, "m": 1000}.get(d["dims"][d["axis"]]["unit"], 1)
+    x, y = [v * f for v in d["x"]], d["y"]
+    m = metrics_1d(x, y)
+    if "r80" not in m: return None, "no R80"
+    pl = _plateau(x, y)
+    return {"path": relp(fp), "code": code, "name": code_name(code), "case": case_key(os.path.basename(fp), code),
+            "x": x, "y": y, "plateau": pl, "r80": m.get("r80"), "bpw80": m.get("bpw80"), "dfo": m.get("dfo"),
+            "peak_plateau": max(y) / pl if pl > 0 else None}, None
+
+
+def code_compare(paths, ref=None, base_tag="rifi0", stat=0):
+    """Results of the same case from different codes side by side: per case and code the seed mean and spread of R80,
+    BPW80, D80-D20 and peak/plateau, their difference to the reference code, the filter shift R80(base) - R80(case)
+    and broadening BPW80(case) - BPW80(base) against the case with base_tag in its name, and the difference curve to
+    the reference code. Curves are scaled to their plateau, the difference is in % of the reference's maximum."""
+    runs, skipped = [], []
+    for rel in list(dict.fromkeys(paths))[:CMP_MAX_FILES]:
+        try: r, why = _cmp_run(rel, stat)
+        except (OSError, ValueError, IndexError, KeyError) as e: r, why = None, str(e)
+        if r: runs.append(r)
+        else: skipped.append({"path": rel, "why": why})
+    groups = {}
+    for r in runs: groups.setdefault(r["case"], {}).setdefault(r["name"], []).append(r)
+    in_cases = {}
+    for codes in groups.values():
+        for n in codes: in_cases[n] = in_cases.get(n, 0) + 1
+    names = sorted(in_cases, key=natkey)
+    if ref not in in_cases:
+        # the code found in most cases; on a tie OpenTOPAS, the code of the thesis
+        ref = max(names, key=lambda n: (in_cases[n], n.startswith("OpenTOPAS")), default=None)
+    rows = {}
+    for case, codes in groups.items():
+        for n, rs in codes.items():
+            row = {"code": n, "files": [r["path"] for r in rs], "seeds": sorted(r["code"]["seed"] for r in rs if r["code"].get("seed") is not None),
+                   "runs": len(rs), "histories": sorted({r["code"]["histories"] for r in rs if r["code"].get("histories")})}
+            for k in CMP_KEYS: row[k], row[k + "_sd"] = _stat([r[k] for r in rs])
+            # the seed mean of the curves, on the grid of the first run
+            x0 = rs[0]["x"]
+            # a point outside a seed's depth range is left out of the mean, not counted as dose 0
+            ys = [[(lambda v: v / r["plateau"] if v is not None and r["plateau"] > 0 else None)(_interp(r["x"], r["y"], xv))
+                   for xv in x0] for r in rs]
+            mean = [[v for v in c if v is not None] for c in zip(*ys)]
+            row["_curve"] = ([xv for xv, c in zip(x0, mean) if c], [sum(c) / len(c) for c in mean if c])
+            rows[(case, n)] = row
+    def base_of(case):
+        toks = case.split("_")
+        if base_tag in toks: return None
+        best = None
+        for b in groups:
+            bt = b.split("_")
+            if base_tag not in bt: continue
+            rest, it = [t for t in bt if t != base_tag], iter(toks)
+            if all(t in it for t in rest) and (best is None or len(rest) > len(best[1])): best = (b, rest)
+        return best[0] if best else None
+    cases = []
+    for case in sorted(groups, key=natkey):
+        base = base_of(case) if base_tag else None
+        ref_row = rows.get((case, ref))
+        out, diff = [], []
+        for n in sorted(groups[case], key=lambda n: (n != ref, natkey(n))):
+            row = dict(rows[(case, n)]); row.pop("_curve")
+            if ref_row and n != ref:
+                for k in CMP_KEYS:
+                    a, b = row[k], ref_row[k]
+                    row["d_" + k] = a - b if a is not None and b is not None else None
+                    row["d_" + k + "_sd"] = math.hypot(row[k + "_sd"] or 0, ref_row[k + "_sd"] or 0) if row["d_" + k] is not None else None
+                rx, ry = ref_row["_curve"]; cx, cy = rows[(case, n)]["_curve"]; top = max(ry) or 1.0
+                pts = [(xv, _interp(cx, cy, xv)) for xv in rx]
+                diff.append({"code": n, "x": [round(xv, 4) for xv, v in pts if v is not None],
+                             "y": [round(100 * (v - yv) / top, 4) for (xv, v), yv in zip(pts, ry) if v is not None]})
+            b = rows.get((base, n)) if base else None
+            if b:
+                row["shift"] = b["r80"] - row["r80"]; row["broadening"] = row["bpw80"] - b["bpw80"] if row["bpw80"] is not None and b["bpw80"] is not None else None
+                row["shift_sd"] = math.hypot(b["r80_sd"] or 0, row["r80_sd"] or 0)
+                row["broadening_sd"] = math.hypot(b["bpw80_sd"] or 0, row["bpw80_sd"] or 0) if row["broadening"] is not None else None
+            out.append(row)
+        cases.append({"case": case, "base": base, "rows": out, "diff": diff})
+    return {"codes": names, "ref": ref, "base_tag": base_tag, "cases": cases, "skipped": skipped}
+
+
 INDEX_READ_MAX = 64_000_000   # larger data files are listed without metrics instead of being parsed
 
 
@@ -2093,6 +2232,9 @@ class H(BaseHTTPRequestHandler):
                         if j["status"] in ("queued", "held") and (b.get("all") or j["id"] in ids): j["status"] = "removed"; n += 1
                     save_jobs()
                 return self.send(200, {"ok": True, "removed": n})
+            if u.path == "/api/compare":
+                return self.send(200, code_compare([str(p) for p in b.get("paths", [])], b.get("ref") or None,
+                                                   str(b.get("base", "rifi0") or "").strip(), int(b.get("stat", 0) or 0)))
             if u.path == "/api/outputs":
                 out = {}
                 for f in b.get("files", [])[:2000]:

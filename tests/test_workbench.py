@@ -650,3 +650,118 @@ def test_first_ctrl_c_during_a_run_only_warns(ws, monkeypatch):
     wb.STATE["term"] = False; wb.STATE.pop("ctrl_c")
     monkeypatch.setattr(wb.sys, "stdin", type("Pipe", (), {"isatty": lambda self: False})())
     assert wb.ctrl_c_ends(500.0)                 # no terminal, nobody to ask
+
+
+# ------------------------------------------------------------------ code comparison (task 3375, step 3)
+def bragg_csv(path, peak_mm, head, plateau=1.0):
+    """A depth curve with a plateau of `plateau`, a peak of 5 x plateau at peak_mm and a Gaussian fall-off of 1 mm,
+    so that R80 = peak_mm + sqrt(ln 1.25) mm. 1000 bins of 0.05 mm."""
+    import math
+    rows = []
+    for k in range(1000):
+        z = (k + 0.5) * 0.05
+        y = plateau * (1 + 4 * math.exp(-((z - peak_mm) / 1.5) ** 2)) if z <= peak_mm else 5 * plateau * math.exp(-((z - peak_mm) / 1.0) ** 2)
+        rows.append(f"0, 0, {k}, {y:.8g}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(head + ["# X in 1 bin of 20 cm", "# Y in 1 bin of 20 cm", "# Z in 1000 bins of 0.005 cm",
+                                      "# DoseToMedium ( Gy ) : Sum"] + rows) + "\n")
+
+
+def topas_head(v): return [f"# TOPAS Version: {v}", "# Results for scorer: IDD"]
+
+
+def fluka_head(seed): return ["# FLUKA (converter), case c", "# FLUKA Version: 4-5.2", "# Histories: 1000", f"# Seed: {seed}",
+                              "# Results for scorer: IDD"]
+
+
+R80_OFF = 0.4724   # sqrt(ln 1.25)
+
+
+@pytest.fixture
+def cmp_ws(ws):
+    # OpenTOPAS 4.3 in t43, TOPAS 3.9 named topas39, FLUKA named fluka; two seeds each, a case without and with a filter
+    for case, p in (("rifi0", 30.0), ("t4", 27.0)):
+        for s, d in ((1, 0.0), (2, 0.02)):
+            bragg_csv(ws / "t43" / f"IDD_p63_{case}_s{s}.csv", p + d, topas_head("4.3"))
+            bragg_csv(ws / "fl" / f"IDD_p63_{case}_s{s}_fluka.csv", p - 0.05 + d, fluka_head(100 + s))
+        bragg_csv(ws / "t39" / f"IDD_p63_{case}_topas39.csv", p + (0.1 if case == "t4" else 0.0), topas_head("3.9"))
+    return ws
+
+
+def cmp_paths(ws): return sorted(str(p.relative_to(ws)).replace(os.sep, "/") for p in ws.rglob("*.csv"))
+
+
+def test_case_key_drops_only_the_own_code_and_seed():
+    ot, t39, fl = {"code": "OpenTOPAS", "version": "4.3"}, {"code": "TOPAS", "version": "3.9"}, {"code": "FLUKA", "version": "4-5.2"}
+    assert wb.case_key("IDD_c_s1.csv", ot) == wb.case_key("IDD_c_s2_fluka.csv", fl) == wb.case_key("IDD_c_topas39.csv", t39) == "IDD_c"
+    assert wb.case_key("IDD_c088_t4_t43_seed3.csv", ot) == "IDD_c088_t4"   # t4 is a filter, t43 the version
+    assert wb.case_key("IDD_c088_t3_fluka4.csv", fl) == "IDD_c088_t3"
+    assert wb.case_key("IDD_c_fluka.csv", ot) == "IDD_c_fluka"              # a FLUKA token in a TOPAS result is no code of its own
+    assert wb.case_key("fluka.csv", fl) == "fluka"                            # never an empty case
+    # a patch part in the version, and a bare number that is a case token, not a code (review of step 3)
+    assert wb.case_key("IDD_c_t39.csv", {"code": "TOPAS", "version": "3.9.1"}) == "IDD_c"
+    assert wb.case_key("IDD_c_t43.csv", {"code": "OpenTOPAS", "version": "4.3.0"}) == "IDD_c"
+    assert wb.case_key("IDD_c_fluka45.csv", fl) == wb.case_key("IDD_c_f45.csv", fl) == "IDD_c"
+    assert wb.case_key("IDD_E_39.csv", t39) == wb.case_key("IDD_E_39.csv", ot) == "IDD_E_39"
+    assert wb.case_key("IDD_c_t4.csv", {"code": "OpenTOPAS", "version": "4"}) == "IDD_c_t4"
+
+
+def test_code_compare_groups_cases_and_gives_deltas_against_the_reference(cmp_ws):
+    r = wb.code_compare(cmp_paths(cmp_ws), base_tag="rifi0")
+    assert r["codes"] == ["FLUKA 4-5.2", "OpenTOPAS 4.3", "TOPAS 3.9"] and r["ref"] == "OpenTOPAS 4.3" and not r["skipped"]
+    cases = {c["case"]: c for c in r["cases"]}
+    assert set(cases) == {"IDD_p63_rifi0", "IDD_p63_t4"} and cases["IDD_p63_t4"]["base"] == "IDD_p63_rifi0"
+    rows = {w["code"]: w for w in cases["IDD_p63_t4"]["rows"]}
+    assert [w["code"] for w in cases["IDD_p63_t4"]["rows"]][0] == "OpenTOPAS 4.3"   # the reference first
+    ot, fl, t39 = rows["OpenTOPAS 4.3"], rows["FLUKA 4-5.2"], rows["TOPAS 3.9"]
+    assert ot["runs"] == 2 and fl["seeds"] == [101, 102] and t39["runs"] == 1 and t39["r80_sd"] is None
+    assert ot["r80"] == pytest.approx(27.01 + R80_OFF, abs=0.01) and ot["r80_sd"] == pytest.approx(0.02 / 2 ** 0.5, abs=0.003)
+    assert fl["d_r80"] == pytest.approx(-0.05, abs=0.005) and t39["d_r80"] == pytest.approx(0.09, abs=0.005)
+    assert abs(fl["d_bpw80"]) < 0.005 and abs(fl["d_peak_plateau"]) < 0.01 and "d_r80" not in ot
+    # filter shift R80(rifi0) - R80(t4) per code: 3 mm, TOPAS 3.9 0.1 mm less
+    assert ot["shift"] == pytest.approx(3.0, abs=0.005) and fl["shift"] == pytest.approx(3.0, abs=0.005)
+    assert t39["shift"] == pytest.approx(2.9, abs=0.005) and abs(ot["broadening"]) < 0.005
+    assert "shift" not in {w["code"]: w for w in cases["IDD_p63_rifi0"]["rows"]}["FLUKA 4-5.2"]
+    # the difference curve: FLUKA 0.05 mm short, so below the reference on the distal edge, zero on the plateau
+    d = {c["code"]: c for c in cases["IDD_p63_t4"]["diff"]}
+    assert set(d) == {"FLUKA 4-5.2", "TOPAS 3.9"}
+    fx, fy = d["FLUKA 4-5.2"]["x"], d["FLUKA 4-5.2"]["y"]
+    at = lambda z: fy[min(range(len(fx)), key=lambda i: abs(fx[i] - z))]
+    assert abs(at(4.0)) < 0.1 and at(27.0 + R80_OFF) < -2
+
+
+def test_code_compare_takes_the_chosen_reference_and_skips_what_it_cannot_compare(cmp_ws):
+    (cmp_ws / "mess.csv").write_text("0 1\n1 2\n2 1\n")                      # a measurement names no code
+    r = wb.code_compare(cmp_paths(cmp_ws) + ["../outside.csv", "nope.csv"], ref="FLUKA 4-5.2", base_tag="")
+    assert r["ref"] == "FLUKA 4-5.2" and all(c["base"] is None for c in r["cases"])
+    assert {s["path"] for s in r["skipped"]} == {"mess.csv", "../outside.csv", "nope.csv"}
+    rows = {w["code"]: w for w in r["cases"][0]["rows"]}
+    assert rows["OpenTOPAS 4.3"]["d_r80"] == pytest.approx(0.05, abs=0.005) and "shift" not in rows["FLUKA 4-5.2"]
+    assert wb.code_compare([])["cases"] == [] and wb.code_compare([])["ref"] is None
+
+
+def test_seed_mean_curve_leaves_out_depths_a_seed_does_not_cover(cmp_ws):
+    # every t4 curve gets a flat background of 1, so there is dose behind the peak; the second OpenTOPAS seed ends at
+    # 35 mm. Beyond it the OpenTOPAS mean is seed 1 alone; counting the missing depths as 0 would halve it there.
+    for p in cmp_ws.rglob("IDD_p63_t4*.csv"):
+        out = []
+        for l in p.read_text().splitlines():
+            if l.startswith("#"): out.append(l); continue
+            i, j, k, v = l.split(", ")
+            if p.name == "IDD_p63_t4_s2.csv" and int(k) >= 700: continue
+            out.append(f"{i}, {j}, {k}, {float(v) + 1:.8g}")
+        if p.name == "IDD_p63_t4_s2.csv": out = [l.replace("1000 bins", "700 bins") for l in out]
+        p.write_text("\n".join(out) + "\n")
+    r = wb.code_compare(cmp_paths(cmp_ws), base_tag="")
+    case = next(c for c in r["cases"] if c["case"] == "IDD_p63_t4")
+    assert {w["code"]: w for w in case["rows"]}["OpenTOPAS 4.3"]["runs"] == 2
+    d = {c["code"]: c for c in case["diff"]}["FLUKA 4-5.2"]
+    far = [v for x, v in zip(d["x"], d["y"]) if x > 36]
+    assert far and all(abs(v) < 1 for v in far)
+
+
+def test_http_compare(srv, cmp_ws):
+    code, r = call(srv + "/api/compare", {"paths": cmp_paths(cmp_ws), "ref": "TOPAS 3.9", "base": "rifi0"})
+    assert code == 200 and r["ref"] == "TOPAS 3.9" and len(r["cases"]) == 2
+    code, r = call(srv + "/api/compare", {"paths": cmp_paths(cmp_ws), "base": None})
+    assert code == 200 and r["base_tag"] == "" and all(c["base"] is None for c in r["cases"])
