@@ -7,6 +7,7 @@
   python -m mrt_overlay.cli pet PETDIR CACHEF VIEWERDATA [--ref brain|striatum|contralateral] [--out DIR]
   python -m mrt_overlay.cli viewer --fall CASEDIR      every path from fall.json; a path given beside it wins
   python -m mrt_overlay.cli pet --fall CASEDIR [--serie pet_2001-04-01]
+  python -m mrt_overlay.cli cachef PAGE VIEWERDATA STANDLOG OUT   cacheF decoded from the viewer's own page
 """
 import argparse
 import json
@@ -18,7 +19,7 @@ import sys
 import numpy as np
 import SimpleITK as sitk
 
-from . import export as ex, geometry as geo, layer as ly, pet as pe, register as rg, series as se, ventricles as ve
+from . import cachef as cf, export as ex, geometry as geo, layer as ly, pet as pe, register as rg, series as se, ventricles as ve
 
 
 def _ptv(a, grid_ct):
@@ -285,6 +286,12 @@ def cmd_pet(a):
     if a.fall: _pet_to_case(a, e)
 
 
+def cmd_cachef(a):
+    try: r = cf.build(a.page, a.viewer_data, a.stand_log, a.out, say=lambda m: print(m, flush=True))
+    except cf.CacheError as e: raise SystemExit(str(e))
+    print(json.dumps(r, ensure_ascii=False))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -330,6 +337,11 @@ def main(argv=None):
     p.add_argument("--starts", default=",".join(f"{d:g}" for d in pe.START_DEG),
                    help="start rotations about x and z in degrees, comma separated; each pair is one start")
     p.set_defaults(f=cmd_pet)
+    p = sub.add_parser("cachef", help="cacheF from the viewer's page and data folder, when the aligned volumes are gone")
+    p.add_argument("page", help="Verlauf.html"); p.add_argument("viewer_data", help="Verlauf-Daten folder")
+    p.add_argument("stand_log", help="the viewer's copy of the cacheF log (Skripte/stand/cacheF_log.json)")
+    p.add_argument("out", help="the new cacheF folder")
+    p.set_defaults(f=cmd_cachef)
     a = ap.parse_args(argv)
     a.f(a)
 

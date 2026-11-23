@@ -9,7 +9,9 @@ import gzip
 import json
 import os
 import re
+import shlex
 import struct
+import threading
 import time
 
 from . import dicomkopf, fall, letd, pet_run
@@ -351,11 +353,16 @@ def _scan(mrt, root, cache_roots=(), pet_dir=None, extra_runs=(), default_roots=
     rows["bilder"] = {"wert": v.get("bilder"), "quelle": "eingegeben"}
     if not rows["cache"]["wert"]:
         want = stand_exams(v["skripte"]) if v.get("skripte") else set()
+        mine = cachef_target(root)      # one made from the viewer earlier lies here
+        cache_roots = ([os.path.dirname(mine)] if mine else []) + list(cache_roots)
         c = find_cache(cache_roots, want, seconds=10) if cache_roots else None
         if c: rows["cache"] = {"wert": c, "quelle": "gemerkt"}
         else:
             c = find_cache(cache_roots_default() if default_roots is None else default_roots, want)
             if c: rows["cache"] = {"wert": c, "quelle": "gefunden"}
+        src = cachef_sources({k: v.get(k) for k in ("seite", "daten", "skripte")})
+        if not rows["cache"]["wert"] and src and mine:
+            rows["cache"].update(erzeugbar=True, ziel=mine)
     runs = find_runs(list(search_roots(root)) + list(extra_runs))
     rows["lauf"] = {"wert": runs[0]["ordner"] if runs else None, "quelle": "gefunden" if runs else "fehlt",
                     "kandidaten": [{"wert": r["ordner"], "info": r["zeit"]} for r in runs[:20]]}
@@ -388,6 +395,95 @@ def plan_rows(rtplan):
     f = plan_facts(rtplan) if rtplan else {}
     return {"fraktionen": {"wert": f.get("fraktionen"), "quelle": "plan" if f.get("fraktionen") else "fehlt"},
             "verschreibung": {"wert": f.get("verschreibung_gy_rbe"), "quelle": "plan" if f.get("verschreibung_gy_rbe") else "fehlt"}}
+
+
+# ------------------------------------------------------------------ cacheF from the viewer's own page
+# The aligned volumes of a case (cacheF) may be gone while the viewer still shows them: the page holds each one as a
+# mosaic. tools/mrt_overlay/cachef.py decodes them; this runs it as a job of the server, as the LETd and PET runs.
+CACHEF_SCRIPT = os.path.join(os.path.dirname(letd.TOOL_DIR), "tools", "mrt_overlay", "run_cachef.sh")
+CACHEF_LOG = "cachef_lauf.log"
+CACHEF_STEPS = ("read", "volumes", "mask", "write")
+CACHEF_JOB = {"proc": None, "thread": None, "stop": False, "state": None}
+
+
+def cachef_target(root):
+    """Where a cacheF made from the viewer goes: the zone lokal, beside the cases. None without that zone."""
+    base = root if os.path.isdir(os.path.join(root, "lokal")) else os.path.join(root, "workspace")
+    return os.path.join(base, "lokal", "viewer", "cacheF") if os.path.isdir(os.path.join(base, "lokal")) else None
+
+
+def cachef_sources(values):
+    """Page, data folder and the viewer's copy of the cacheF log, when all three are there; else None."""
+    page, daten, sk = (letd.to_local(values.get(k) or "") for k in ("seite", "daten", "skripte"))
+    log = os.path.join(sk, "stand", "cacheF_log.json") if sk else ""
+    if page and os.path.isfile(page) and daten and os.path.isdir(daten) and log and os.path.isfile(log):
+        return {"seite": page, "daten": daten, "log": log}
+    return None
+
+
+def _cachef_running():
+    j = CACHEF_JOB
+    return j["proc"] is not None or (j["thread"] is not None and j["thread"].is_alive())
+
+
+def cachef_status():
+    with letd.LOCK:
+        st = dict(CACHEF_JOB["state"] or {})
+        running = _cachef_running()
+    if not st: return {"running": False}
+    lines = letd._all_lines(st["log_local"])
+    steps, vol = {s: "todo" for s in CACHEF_STEPS}, None
+    for line in lines:
+        m = re.match(r"^## STEP (\w+)", line)
+        if m and m.group(1) in steps:
+            for s in steps:
+                if steps[s] == "now": steps[s] = "done"
+            steps[m.group(1)] = "now"
+        m = re.match(r"^## VOL (\d+)/(\d+)", line)
+        if m: vol = [int(m.group(1)), int(m.group(2))]
+    if st.get("status") == "done": steps = {s: "done" for s in steps}
+    tail = letd._tail(st["log_local"], 4000)
+    st.update(running=running, steps=steps, vol=vol, log=tail)
+    if st.get("status") == "failed":
+        st["meldung"] = next((l for l in reversed(tail.splitlines()) if l.strip() and not l.startswith("#")), "")
+    return st
+
+
+def cachef_start(values, root, on_end=None):
+    """Starts run_cachef.sh for the viewer of the case rows. Raises ValueError when page, data folder or the copy of
+    the log is missing or there is no zone lokal, RuntimeError when a run is going."""
+    src, out = cachef_sources(values), cachef_target(root)
+    if not src: raise ValueError("quellen")
+    if not out: raise ValueError("kein_lokal")
+    with letd.LOCK:
+        if _cachef_running(): raise RuntimeError("running")
+        os.makedirs(out, exist_ok=True)
+        CACHEF_JOB["stop"] = False
+        CACHEF_JOB["state"] = {"status": "running", "start": time.strftime("%Y-%m-%d %H:%M:%S"), "t0": time.time(),
+                               "cache": out, "log_local": os.path.join(os.path.dirname(out), CACHEF_LOG)}
+        cmd = ["bash", CACHEF_SCRIPT, src["seite"], src["daten"], src["log"], out]
+        t = threading.Thread(target=_cachef_run, args=(cmd, on_end), daemon=True)
+        CACHEF_JOB["thread"] = t
+    t.start()
+    return cachef_status()
+
+
+def _cachef_run(cmd, on_end):
+    st = CACHEF_JOB["state"]
+    try:
+        with open(st["log_local"], "w") as log:
+            log.write(f"# {st['start']}  {' '.join(shlex.quote(c) for c in cmd)}\n"); log.flush()
+            rc = letd._spawn(cmd, log, dict(os.environ, PYTHONUNBUFFERED="1"), job=CACHEF_JOB)
+        ok = rc == 0 and _cache_log(st["cache"], set(os.listdir(st["cache"]))) is not None
+        st["rc"] = rc
+        st["status"] = "stopped" if CACHEF_JOB["stop"] else ("done" if ok else "failed")
+    except Exception as e:  # the record says what went wrong; the page shows it
+        st["status"] = "failed"; st["error"] = str(e)
+    finally:
+        st["end"] = time.strftime("%Y-%m-%d %H:%M:%S"); st["seconds"] = round(time.time() - st["t0"])
+        if on_end:
+            try: on_end(st)
+            except Exception: pass
 
 
 # what a pasted or chosen path must be, per row: a folder, a file, and what it holds

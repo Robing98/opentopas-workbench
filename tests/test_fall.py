@@ -399,3 +399,15 @@ def test_files_that_cannot_be_read_are_named_not_hidden(computer, monkeypatch):
     r = fall_setup.scan(str(c["exam"]), str(c["ws"]), default_roots=[str(c["disk"])])
     assert r["zeilen"]["pet"]["wert"] == [] and r["unlesbar"]["anzahl"] >= 1 and r["unlesbar"]["ordner"][0] == str(c["pet"])
     assert dicomkopf.ON_ERROR is None
+
+
+def test_cachef_from_the_viewer_needs_its_page_data_and_log(computer, ws):
+    """Without the viewer's copy of the cacheF log there is nothing to make it from: the row offers no button and the
+    action refuses with a word the page shows."""
+    c = computer
+    os.remove(str(c["view"] / "Analyse" / "Skripte" / "stand" / "cacheF_log.json"))
+    r = fall_setup.scan(str(c["exam"]), str(c["ws"]), default_roots=[])["zeilen"]["cache"]
+    assert r["wert"] is None and "erzeugbar" not in r
+    vals = {"seite": str(c["view"] / "Analyse" / "Verlauf.html"), "daten": str(c["view"] / "Analyse" / "Verlauf-Daten"),
+            "skripte": str(c["view"] / "Analyse" / "Skripte")}
+    assert wb.fall_post("cachef", vals) == (200, {"fehler": "quellen"})
