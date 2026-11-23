@@ -783,9 +783,7 @@ def job_code(job, param):
     for o in job.get("outputs") or []:
         if o.lower().endswith(".csv"):
             c = result_code(resolve(o))
-            if c:
-                c.pop("param", None)
-                return with_case(c, file_info(param))
+            if c: return with_case(c, file_info(param))
     return None
 
 
@@ -1026,7 +1024,7 @@ def result_code(path):
         v = kv["topas version"]
         major = re.match(r"\d+", v)
         return {"code": "OpenTOPAS" if major and int(major.group()) >= 4 else "TOPAS", "version": v,
-                "histories": None, "seed": None, "parts": None, "param": kv.get("parameter file")}
+                "histories": None, "seed": None, "parts": None}
     if head and head[0].startswith("# FLUKA"):
         return {"code": "FLUKA", "version": kv.get("fluka version"), "histories": num("histories"), "seed": num("seed"),
                 "parts": num("sub-runs")}
