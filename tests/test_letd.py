@@ -1,8 +1,8 @@
 """The tab "LETd on MRI": paths as typed, paths found in the viewer's folder, the checks before a start, the run with
 its steps, and the result on the page. Synthetic folders only; the last test runs the real run.sh on phantom.py data.
 
-Requirements tested: one form is enough (cacheF, Verlauf-Daten and build_page.py are found from the MRI folder, the
-values come back on the next visit), a wrong path is named before anything runs, results never go to workspace/offen,
+Requirements tested: one form is enough (cacheF and Verlauf-Daten are found from the MRI folder, build_page.py comes
+from the viewer's own clone, the values come back on the next visit), a wrong path is named before anything runs, results never go to workspace/offen,
 the page sees the steps while it runs and the exams and Verlauf.html after it.
 """
 import json
@@ -22,7 +22,8 @@ REPO_SCRIPT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fil
 
 
 @pytest.fixture(autouse=True)
-def script_of_the_checkout(monkeypatch):
+def script_of_the_checkout(monkeypatch, tmp_path):
+    monkeypatch.setattr(letd, "VIEWER_DIR_DEFAULT", str(tmp_path / "timeline-viewer"))
     # CI installs the package into site-packages, where tools/ does not come along; the tab runs from a checkout
     monkeypatch.setattr(letd, "SCRIPT", REPO_SCRIPT)
 
@@ -63,11 +64,13 @@ def touch(path, text=""):
 
 
 def viewer_tree(top):
-    """The layout of a viewer folder: Analyse/Skripte/build_page.py, Analyse/Verlauf-Daten, a cacheF deeper down."""
+    """The layout of a case: Analyse/Skripte (case files and an old build_page.py), Analyse/Verlauf-Daten, the caches."""
     touch(top / "Analyse" / "Skripte" / "build_page.py", "")
     os.makedirs(top / "Analyse" / "Verlauf-Daten")
     touch(top / "Analyse" / "cacheF" / "log.json", "{}")
     touch(top / "Analyse" / "cacheF" / "ref_t1.nii.gz")
+    for n in ("viewer.json", "befunde.json"): touch(top / "Analyse" / "Skripte" / n, "{}")
+    for n in ("log.json", "vent.json"): touch(top / "Analyse" / "cacheG" / n, "{}")
     return top
 
 
@@ -77,9 +80,9 @@ def full_form(tmp):
     for n in ("letd.npy", "rbe_dose_1_1.npy", "rbe_dose_1_1.dcm"): touch(run / n)
     touch(tmp / "ct" / "CT1.dcm")
     top = viewer_tree(tmp / "MRT")
+    touch(tmp / "timeline-viewer" / "build_page.py")
     return {"mrt": str(top), "run": str(run), "ct": str(tmp / "ct"), "rs": "", "cache": str(top / "Analyse" / "cacheF"),
-            "view": str(top / "Analyse" / "Verlauf-Daten"), "page": str(top / "Analyse" / "Skripte" / "build_page.py"),
-            "rx": "54", "fx": "30", "out": str(tmp / "out"), "kz": str(tmp / "kz" / "kennzahlen.json"),
+            "view": str(top / "Analyse" / "Verlauf-Daten"), "rx": "54", "fx": "30", "out": str(tmp / "out"), "kz": str(tmp / "kz" / "kennzahlen.json"),
             "build": "1", "synthseg": "0"}
 
 
@@ -100,15 +103,14 @@ def test_public_zone_is_refused_wherever_the_workspace_lies():
     assert not letd.in_public_zone("/x/offen")
 
 
-def test_derive_finds_the_three_viewer_paths(tmp_path):
+def test_derive_finds_the_two_viewer_paths_and_no_old_build_page(tmp_path):
     top = viewer_tree(tmp_path / "MRT Bilder")
     # a second, deeper cacheF (an old copy) must lose against the nearer one
     touch(top / "Analyse" / "alt" / "x" / "cacheF" / "log.json"); touch(top / "Analyse" / "alt" / "x" / "cacheF" / "ref_t1.nii.gz")
     got = letd.derive(f'"{top}"')
-    assert got == {"cache": str(top / "Analyse" / "cacheF"), "view": str(top / "Analyse" / "Verlauf-Daten"),
-                   "page": str(top / "Analyse" / "Skripte" / "build_page.py")}
+    assert got == {"cache": str(top / "Analyse" / "cacheF"), "view": str(top / "Analyse" / "Verlauf-Daten")}
     assert letd.derive(str(tmp_path / "nothing")) == {"error": "not_found"}
-    assert letd.derive(str(tmp_path / "MRT Bilder" / "Analyse" / "Skripte")) == {"page": str(top / "Analyse" / "Skripte" / "build_page.py")}
+    assert letd.derive(str(tmp_path / "MRT Bilder" / "Analyse" / "Skripte")) == {}
 
 
 def test_default_out_uses_the_private_zones_only_when_they_exist(tmp_path):
@@ -147,8 +149,12 @@ def test_check_refuses_results_in_the_public_zone(tmp_path):
 
 
 def test_check_needs_build_page_only_when_the_page_is_rebuilt(tmp_path):
-    f = full_form(tmp_path); f["page"] = str(tmp_path / "gone.py")
-    assert [m["field"] for m in letd.check(f)[0]] == ["page"]
+    f = full_form(tmp_path)
+    bad = letd.check(f, viewer=str(tmp_path / "gone"))[0]
+    assert bad == [{"field": "build", "msg": "no_viewer", "args": [str(tmp_path / "gone" / "build_page.py")]}]
+    os.remove(tmp_path / "MRT" / "Analyse" / "Skripte" / "viewer.json")
+    bad = letd.check(f)[0]
+    assert [(m["field"], m["msg"]) for m in bad] == [("build", "no_case")] and "viewer.json" in bad[0]["args"][0]
     f["build"] = "0"
     assert letd.check(f)[0] == []
 
@@ -194,8 +200,9 @@ def test_start_runs_the_script_then_build_page_and_shows_the_result(srv, ws, mon
     monkeypatch.setattr(letd, "SCRIPT", str(fake))
     monkeypatch.setattr(letd.shutil, "which", lambda n: sys.executable if n == "python3" else None)
     f = full_form(ws)
-    # build_page.py of the viewer writes Verlauf.html one folder above itself
-    touch(f["page"], "import os\nopen(os.path.join('..', 'Verlauf.html'), 'w').write('<html>')\nprint('built')\n")
+    # build_page.py of the viewer's clone writes Verlauf.html next to the data folder it is given
+    touch(ws / "timeline-viewer" / "build_page.py", "import os, sys\na = sys.argv\nassert os.path.isdir(a[a.index('--cache') + 1])\n"
+          "open(os.path.join(os.path.dirname(a[a.index('--view') + 1]), 'Verlauf.html'), 'w').write('<html>')\nprint('built')\n")
     code, r = call(srv + "/api/letd/start", {"form": f})
     assert code == 200 and not r.get("problems"), r
     job = wait_done(srv)
@@ -215,6 +222,21 @@ def test_start_runs_the_script_then_build_page_and_shows_the_result(srv, ws, mon
     letd.JOB.update(state=None, thread=None)
     info = call(srv + "/api/letd")[1]
     assert info["form"]["cache"] == f["cache"] and info["job"]["result"]["exams"]
+
+
+def test_start_runs_build_page_of_the_clone_that_the_setting_names(srv, ws, monkeypatch):
+    fake = ws / "fake_run.sh"; fake.write_text(FAKE_RUN); fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    monkeypatch.setattr(letd, "SCRIPT", str(fake))
+    monkeypatch.setattr(letd.shutil, "which", lambda n: sys.executable if n == "python3" else None)
+    f = full_form(ws)
+    for clone in ("timeline-viewer", "second clone"):
+        touch(ws / clone / "build_page.py", f"print('built by {clone}')\n")
+    assert call(srv + "/api/config", {"viewer_dir": str(ws / "second clone")})[0] == 200
+    code, r = call(srv + "/api/letd/start", {"form": f})
+    assert code == 200 and not r.get("problems"), r
+    job = wait_done(srv)
+    assert job["status"] == "done", job["log"]
+    assert "built by second clone" in job["log"] and "built by timeline-viewer" not in job["log"]
 
 
 def test_start_refuses_a_bad_form_and_runs_nothing(srv, ws):
@@ -298,6 +320,35 @@ def test_derive_and_check_over_http(srv, ws):
     assert r["view"].endswith("Verlauf-Daten")
     r = call(srv + "/api/letd/check", {"form": {}})[1]
     assert {m["field"] for m in r["problems"]} >= {"run", "ct", "cache"}
+
+
+# ------------------------------------------------------------------ the viewer's own repository
+def test_default_viewer_is_a_clone_next_to_the_workbench(monkeypatch):
+    monkeypatch.undo()
+    repo = os.path.dirname(os.path.dirname(os.path.abspath(letd.__file__)))
+    assert letd.VIEWER_DIR_DEFAULT == os.path.join(os.path.dirname(repo), "timeline-viewer")
+
+
+def test_page_command_takes_windows_python_only_when_it_reaches_every_path(monkeypatch):
+    monkeypatch.setattr(letd.shutil, "which", lambda n: "/bin/" + n)
+    page = "/mnt/c/dev/timeline-viewer/build_page.py"
+    got = letd.page_command(page, ("--cache", "/mnt/c/w/cacheF", "--view", "/mnt/c/a b/Verlauf-Daten"))
+    assert got == ["/bin/py.exe", "-3", r"C:\dev\timeline-viewer\build_page.py", "--cache", r"C:\w\cacheF", "--view", r"C:\a b\Verlauf-Daten"]
+    assert letd.page_command(page, ("--cache", "/home/x/cacheF"))[0] == "/bin/python3"
+    # a mount that is no drive letter (a network share, say) is no path that Windows Python can open
+    assert letd.page_command(page, ("--cache", "/mnt/wsl/x/cacheF"))[0] == "/bin/python3"
+
+
+def test_the_setting_names_the_clone_that_the_tab_runs(srv, ws):
+    f = full_form(ws)
+    other = ws / "elsewhere"
+    assert call(srv + "/api/config", {"viewer_dir": f" {other} "})[0] == 200
+    assert wb.STATE["cfg"]["viewer_dir"] == str(other)
+    r = call(srv + "/api/letd/check", {"form": f})[1]
+    assert [(m["field"], m["args"]) for m in r["problems"]] == [("build", [str(other / "build_page.py")])]
+    touch(other / "build_page.py")
+    assert call(srv + "/api/letd/check", {"form": f})[1]["problems"] == []
+    assert call(srv + "/api/info")[1]["viewer_dir_default"] == letd.VIEWER_DIR_DEFAULT
 
 
 # ------------------------------------------------------------------ the real run.sh on phantom data

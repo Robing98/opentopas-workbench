@@ -1,6 +1,9 @@
 """The tab "LETd on MRI": start tools/mrt_overlay/run.sh from one form instead of a start file that asks for ten paths.
 
-The paths point outside the workspace (the plan_mc run, the planning CT, the MRI viewer's folders), because the data
+The page itself is built by the Timeline Viewer, a repository of its own: the tab runs build_page.py from its clone
+(setting viewer_dir).
+
+The paths point outside the workspace (the plan_mc run, the planning CT, the Timeline Viewer's folders), because the data
 they hold must not lie in the workspace's public part. So this module takes absolute paths, never serves a file
 from them, and only runs the one script. The run's log and results go to the output folder the user names, not to
 the workspace's .workbench folder: the log lists exams and numbers derived from the patient's data.
@@ -19,9 +22,10 @@ import time
 
 TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(os.path.dirname(TOOL_DIR), "tools", "mrt_overlay", "run.sh")
+VIEWER_DIR_DEFAULT = os.path.join(os.path.dirname(os.path.dirname(TOOL_DIR)), "timeline-viewer")   # a clone next to this one
 LOG_NAME = "letd_lauf.log"
 STEPS = ("check", "export", "synthseg", "register", "exams", "write", "page")
-FIELDS = ("mrt", "run", "ct", "rs", "cache", "view", "rx", "fx", "out", "kz", "page", "build", "synthseg")
+FIELDS = ("mrt", "run", "ct", "rs", "cache", "view", "rx", "fx", "out", "kz", "build", "synthseg")
 SEARCH_DEPTH = 4
 SEARCH_LIMIT = 20000          # folders visited at most when deriving from the MRI folder
 SYNTHSEG_GB = 10              # memory that mri_synthseg --robust --crop 192 needs (9.5 GB measured)
@@ -77,16 +81,16 @@ def _walk(top, depth=SEARCH_DEPTH, limit=SEARCH_LIMIT):
 
 
 def derive(mrt):
-    """From the MRI folder of the viewer: the cacheF folder (log.json and ref_t1.nii.gz), the data folder of the
-    viewer (Verlauf-Daten) and build_page.py. Each found value is a suggestion the form shows and the user may change."""
+    """From the MRI folder of the viewer: the cacheF folder (log.json and ref_t1.nii.gz) and the data folder of the
+    viewer (Verlauf-Daten). Each found value is a suggestion the form shows and the user may change. build_page.py is
+    not searched: an old copy next to the images must not win over the viewer's repository."""
     top = to_local(mrt)
     if not top or not os.path.isdir(top): return {"error": "not_found"}
     found = {}
     for d, dirs, files in _walk(top):
         if "cache" not in found and {"log.json", "ref_t1.nii.gz"} <= files: found["cache"] = d
         if "view" not in found and os.path.basename(d).lower() == "verlauf-daten": found["view"] = d
-        if "page" not in found and "build_page.py" in files: found["page"] = os.path.join(d, "build_page.py")
-        if len(found) == 3: break
+        if len(found) == 2: break
     return found
 
 
@@ -111,10 +115,22 @@ def _num(v, kind):
         return None
 
 
-def check(form, root=None):
+def page_script(viewer=None):
+    """build_page.py in the clone of the viewer's repository."""
+    return os.path.join(to_local(viewer) or VIEWER_DIR_DEFAULT, "build_page.py")
+
+
+def page_inputs(cache, view):
+    """What build_page.py needs beside the form's folders, at its default places."""
+    case, work = os.path.join(os.path.dirname(view), "Skripte"), os.path.join(os.path.dirname(cache), "cacheG")
+    return [os.path.join(case, "viewer.json"), os.path.join(case, "befunde.json"),
+            os.path.join(work, "log.json"), os.path.join(work, "vent.json")]
+
+
+def check(form, root=None, viewer=None):
     """(problems, notes) for a form. A problem stops the start and names the field; a note does not."""
     f = {k: str(form.get(k, "") or "") for k in FIELDS}
-    p = {k: to_local(f[k]) for k in ("run", "ct", "rs", "cache", "view", "out", "kz", "page")}
+    p = {k: to_local(f[k]) for k in ("run", "ct", "rs", "cache", "view", "out", "kz")}
     bad, notes = [], []
     need = lambda k, msg, *a: bad.append({"field": k, "msg": msg, "args": list(a)})
     if not p["run"]: need("run", "empty")
@@ -147,8 +163,12 @@ def check(form, root=None):
         elif in_public_zone(p[k], root): need(k, "public_zone")
     if p["kz"] and not p["kz"].lower().endswith(".json"): need("kz", "json")
     if f["build"] in ("1", "true", "True"):
-        if not p["page"]: need("page", "empty")
-        elif not os.path.isfile(p["page"]): need("page", "not_found")
+        # named here: otherwise the page fails only after the whole run, which takes up to an hour
+        script = page_script(viewer)
+        if not os.path.isfile(script): need("build", "no_viewer", script)
+        elif p["cache"] and p["view"]:
+            miss = [n for n in page_inputs(p["cache"], p["view"]) if not os.path.isfile(n)]
+            if miss: need("build", "no_case", ", ".join(miss))
     if not os.path.isfile(SCRIPT): need("", "no_script", SCRIPT)
     if f["synthseg"] in ("1", "true", "True"):
         if not synthseg_found(): notes.append({"field": "synthseg", "msg": "synthseg_missing"})
@@ -177,12 +197,13 @@ def memory_gb():
 
 
 # ------------------------------------------------------------------ the run
-def page_command(page):
-    """How build_page.py runs: under WSL with the Windows Python launcher when there is one, since the viewer's
-    scripts are run on Windows otherwise; else with this Python."""
+def page_command(page, args=()):
+    """How build_page.py runs: under WSL with the Windows Python launcher when there is one and it can reach every
+    path, since the viewer's scripts are run on Windows otherwise; else with this Python."""
     py = shutil.which("py.exe")
-    if py and page.startswith("/mnt/"): return [py, "-3", to_windows(page)]
-    return [shutil.which("python3") or "python3", page]
+    if py and all(re.match(r"^/mnt/[a-z]/", a) for a in (page, *args) if a.startswith("/")):
+        return [py, "-3", to_windows(page), *(to_windows(a) for a in args)]
+    return [shutil.which("python3") or "python3", page, *args]
 
 
 def _progress(lines, build, synthseg):
@@ -235,10 +256,10 @@ def result(out):
                                      "ptv", "margin", "hinweis")}
 
 
-def find_page_html(page):
-    """Verlauf.html next to the viewer's scripts: in their folder or up to two folders above, the newest one."""
-    if not page: return ""
-    d, best = os.path.dirname(page), None
+def find_page_html(start):
+    """Verlauf.html next to the viewer's data folder (`start`) or up to two folders above, the newest one."""
+    if not start: return ""
+    d, best = os.path.dirname(start), None
     for _ in range(3):
         try: names = os.listdir(d)
         except OSError: names = []
@@ -264,10 +285,10 @@ def status():
     return st
 
 
-def start(form, on_end=None):
+def start(form, on_end=None, viewer=None):
     """Checks the form and starts run.sh, then build_page.py. Raises ValueError with the problems when the form
     does not pass, RuntimeError when a run is going."""
-    bad, _ = check(form)
+    bad, _ = check(form, viewer=viewer)
     if bad: raise ValueError(json.dumps(bad))
     with LOCK:
         if JOB["proc"] is not None or (JOB["thread"] is not None and JOB["thread"].is_alive()):
@@ -279,7 +300,8 @@ def start(form, on_end=None):
         JOB["stop"] = False
         JOB["state"] = {"status": "running", "start": time.strftime("%Y-%m-%d %H:%M:%S"), "t0": time.time(),
                         "out": f["out"], "out_local": out, "build": build, "synthseg": synthseg,
-                        "page_local": to_local(f["page"]) if build else ""}
+                        "page_local": page_script(viewer) if build else "",
+                        "cache_local": to_local(f["cache"]), "view_local": to_local(f["view"])}
         args = [to_local(f[k]) for k in ("run", "ct", "rs", "cache", "view")]
         args += [str(_num(f["rx"], float) or ""), str(_num(f["fx"], int)), out, to_local(f["kz"])]
         env = dict(os.environ, PYTHONUNBUFFERED="1")
@@ -312,10 +334,10 @@ def _run(cmd, env, on_end):
             if rc == 0 and st["build"] and not JOB["stop"]:
                 page = st["page_local"]
                 log.write("## STEP page\n"); log.flush()
-                pc = page_command(page)
+                pc = page_command(page, ("--cache", st["cache_local"], "--view", st["view_local"]))
                 log.write(f"# {' '.join(shlex.quote(c) for c in pc)}\n"); log.flush()
                 rc = _spawn(pc, log, env, cwd=os.path.dirname(page))
-                if rc == 0: st["html"] = find_page_html(page)
+                if rc == 0: st["html"] = find_page_html(st["view_local"])
         st["rc"] = rc
         st["status"] = "stopped" if JOB["stop"] else ("done" if rc == 0 else "failed")
     except Exception as e:  # the record says what went wrong; the page shows it
