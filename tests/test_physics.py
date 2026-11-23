@@ -157,3 +157,19 @@ def test_server_names_why_a_file_has_no_fluka_side(ws):
     out = wb.physics_of("lone.inp")
     assert out["topas_from"] is None and rows(out)["list"]["topas"]["src"] == "default"
     with pytest.raises(ValueError): wb.physics_of("../outside.txt")
+
+
+def test_review_findings_d_exponent_zero_bom_and_case():
+    text = "﻿" + card("DEFAULTS", sdum="HADROTHE") + "\n" + "\n".join([
+        card("EMFCUT", "-1.0D-4", "1.0D-5", "1.0", "WATER", sdum="PROD-CUT"),
+        card("EMFCUT", "0.0", "-1.0E-5", None, "REG1"),     # photons only: the 0.0 is "ignored", not a cut
+        card("EMFCUT", "-2.E-4", None, None, "REG2"),
+        card("PART-THR", "0.0", "1.0")])
+    f = {k: v["fluka"] for k, v in rows(physics.compare(None, text)).items()}
+    assert f["list"]["v"] == "DEFAULTS HADROTHE"
+    assert (f["e_prod"]["v"], f["g_prod"]["v"]) == ("100 keV kinetic", "10 keV")
+    assert f["e_trans"]["v"] == "200 keV kinetic" and f["g_trans"]["v"] == "10 keV"
+    assert f["had_trans"]["src"] == "default"
+    assert rows(physics.compare(None, card("BEAM", "-0.1")))["had_trans"]["fluka"]["v"] == "set by NEW-DEFAults"
+    t = rows(physics.compare('s:Ph/ListName = "default"\n', None))["modules"]["topas"]
+    assert t["src"] == "default"

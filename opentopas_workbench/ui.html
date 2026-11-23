@@ -1020,7 +1020,7 @@ async function showJob(force){const j=JOBS;if(!j||!isTab("run"))return;const run
 /* the physics of the shown job's case in both codes; read only while the box is open, once per file */
 const PHY={file:null};
 async function showPhysics(){const f=$("jobPhysBox").dataset.file,box=$("jobPhys");if(!f||f===PHY.file)return;PHY.file=f;box.textContent="…";
- let r;try{r=await api("/api/physics?p="+encodeURIComponent(f),null,{timeout:12000})}catch(e){PHY.file=null;box.textContent=e.message;return}
+ let r;try{r=await api("/api/physics?p="+encodeURIComponent(f),null,{timeout:12000})}catch(e){if($("jobPhysBox").dataset.file===f){PHY.file=null;box.textContent=e.message}return}
  if($("jobPhysBox").dataset.file!==f)return;
  const val=c=>{if(!c)return "–";const v=c.v==="not set"?t("phy_v_unset"):c.v==="no parameter"?t("phy_v_nopar"):c.v;
   return c.src==="file"?`<span title="${esc(t("phy_line"))} ${c.line}">${esc(v)}</span>`:`<span class="mute">${esc(v)}${c.src==="default"?` (${esc(t("phy_default"))})`:""}</span>`};

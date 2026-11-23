@@ -71,7 +71,7 @@ def topas_column(text):
     if mods is not None:
         col["modules"] = cell(", ".join(re.findall(r'"([^"]*)"', mods)) or mods, ml)
     else:
-        col["modules"] = cell(None, None, ", ".join(TOPAS_DEFAULTS["modules"]) if lst == "Default" else None)
+        col["modules"] = cell(None, None, ", ".join(TOPAS_DEFAULTS["modules"]) if lst.lower() == "default" else None)
     all_cut, al = get("cutforallparticles")
 
     def cut(particle):
@@ -106,7 +106,7 @@ def cards(text):
     (* or !) and the geometry between GEOBEGIN and GEOEND are skipped. A FREE card stops the reading: free format is
     not read, and the caller says so."""
     out, geo = [], False
-    for n, raw in enumerate(text.splitlines(), 1):
+    for n, raw in enumerate(text.lstrip("\ufeff").splitlines(), 1):
         if not raw.strip() or raw[0] in "*!": continue
         name = raw[:8].strip().upper()
         if geo:
@@ -117,8 +117,10 @@ def cards(text):
         what = []
         for k in range(6):
             f = raw[10 + 10 * k:20 + 10 * k].strip()
-            try: what.append(float(f) if f else None)
-            except ValueError: what.append(None)
+            # a Fortran D exponent reads like E; 0.0 means "ignored" for every card read here, so it counts as blank
+            try: v = float(f.upper().replace("D", "E")) if f else None
+            except ValueError: v = None
+            what.append(v if v else None)
         out.append((name, what, raw[70:78].strip(), n))
     return out
 
@@ -161,7 +163,8 @@ def fluka_column(text):
     if col["list"]["src"] == "none":
         col["list"] = {"v": "no DEFAULTS card (NEW-DEFAults)", "src": "default"}
     if col["had_trans"]["src"] == "none":
-        col["had_trans"] = {"v": f"set by {col['list']['v'].split(' (')[0]}", "src": "default"}
+        by = "NEW-DEFAults" if col["list"]["src"] == "default" else col["list"]["v"]
+        col["had_trans"] = {"v": f"set by {by}", "src": "default"}
     return col, free
 
 
