@@ -349,14 +349,16 @@ def read_usbrea(text, nbins):
 GY_PER_GEV_G = 1.602176634e-10 / 1e-3     # J per GeV over kg per g
 
 
-def to_csv(vals, errs, m):
+def to_csv(vals, errs, m, meta=()):
     """The depth dose as a TOPAS-style CSV (DoseToMedium, Gy summed over all histories), so the workbench's
     results, comparisons and the MCP tools read it unchanged. FLUKA gives GeV/g per primary; the sum is over the
-    primaries that ran (primaries(m)), as TOPAS sums over its histories."""
+    primaries that ran (primaries(m)), as TOPAS sums over its histories. meta: (key, value) pairs for "# Key: value"
+    lines under the first, as TOPAS writes "# TOPAS Version: 4.3"; the workbench reads the code of a result from them."""
     ph, n = m["phantom"], primaries(m)
     nb = int(ph["zbins"])
     width = 2 * ph["hl_cm"][2] / nb
     head = [f"# FLUKA (OpenTOPAS Workbench converter from usbrea), case {m['title']}",
+            *[f"# {k}: {v}" for k, v in meta if v is not None],
             f"# Results for scorer: {m['score']['name']}",
             f"# X in 1 bin of {g(2 * ph['hl_cm'][0])} cm", f"# Y in 1 bin of {g(2 * ph['hl_cm'][1])} cm",
             f"# Z in {nb} bins of {g(width)} cm",
