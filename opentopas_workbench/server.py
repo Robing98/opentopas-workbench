@@ -1943,6 +1943,7 @@ def fall_post(what, b):
             except ValueError as e: return 200, {"fehler": str(e)}
             except RuntimeError: return 409, {"error": "running"}
         if what == "cachef_status": return 200, fall_setup.cachef_status()
+        if what == "cachef_stop": return 200, {"stopped": fall_setup.cachef_stop(), **fall_setup.cachef_status()}
         if what == "save":
             fid = str(b.get("fall_id", "")).strip()
             if not os.path.isdir(os.path.join(fall_base(), "lokal")): return 200, {"fehler": "kein_lokal"}

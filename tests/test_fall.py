@@ -178,7 +178,8 @@ def test_search_finds_the_right_folders(tree):
     m = tree["mrt"]
     assert r["seite"]["wert"] == str(m / "Verlauf.html")
     assert r["daten"]["wert"] == str(m / "Analyse" / "Verlauf-Daten") and r["skripte"]["wert"] == str(m / "Analyse" / "Skripte")
-    assert (r["cache"]["wert"], r["cache"]["quelle"]) == (str(tree["cache_root"] / "cacheF"), "gemerkt")
+    # the tree's viewer has no copy of its cacheF log: a hit under a named root is only a proposal
+    assert (r["cache"]["wert"], r["cache"]["quelle"]) == (str(tree["cache_root"] / "cacheF"), "vorschlag")
     assert r["lauf"]["wert"] == str(tree["new"]) and [c["wert"] for c in r["lauf"]["kandidaten"]] == [str(tree["new"]), str(tree["old"])]
     assert (r["rtplan"]["wert"], r["rtplan"]["quelle"]) == (str(tree["plan"] / "rtplan.dcm"), "lauf")
     assert r["ct"]["wert"] == str(tree["ws"] / "lokal" / "ct")
@@ -352,6 +353,9 @@ def test_cache_search_takes_the_most_matching_exams_and_skips_synced_folders(com
 
 def test_viewer_root_from_below_and_outside(computer, tmp_path):
     assert fall_setup.viewer_root(str(computer["exam"])) == str(computer["view"])
+    an = computer["view"] / "Analyse"
+    for d in (an, an / "Verlauf-Daten", an / "Skripte", an / "Skripte" / "stand"):     # Analyse holds Verlauf.html too
+        assert fall_setup.viewer_root(str(d)) == str(computer["view"]), d
     os.makedirs(tmp_path / "leer")
     assert fall_setup.viewer_root(str(tmp_path / "leer")) is None
 
@@ -411,3 +415,12 @@ def test_cachef_from_the_viewer_needs_its_page_data_and_log(computer, ws):
     vals = {"seite": str(c["view"] / "Analyse" / "Verlauf.html"), "daten": str(c["view"] / "Analyse" / "Verlauf-Daten"),
             "skripte": str(c["view"] / "Analyse" / "Skripte")}
     assert wb.fall_post("cachef", vals) == (200, {"fehler": "quellen"})
+
+
+def test_a_cachef_found_without_the_viewers_log_is_only_a_proposal(computer):
+    """Without Skripte/stand/cacheF_log.json the search cannot tell whose cacheF it found: the row stays red until
+    the user accepts it on the page, which saves no case while a row is a proposal."""
+    c = computer
+    os.remove(str(c["view"] / "Analyse" / "Skripte" / "stand" / "cacheF_log.json"))
+    r = fall_setup.scan(str(c["exam"]), str(c["ws"]), default_roots=[str(c["disk"])])["zeilen"]["cache"]
+    assert (r["wert"], r["quelle"], r["pflicht"]) == (str(c["other"]), "vorschlag", True)

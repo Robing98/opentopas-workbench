@@ -17,6 +17,7 @@ sitk = pytest.importorskip("SimpleITK")
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools"))
 from mrt_overlay import cachef as cf  # noqa: E402
 from opentopas_workbench import fall_setup  # noqa: E402
+from opentopas_workbench import server as wb  # noqa: E402
 
 NX, NY, NZ, COLS = 10, 8, 14, 4          # 14 slices in 4 columns: the last mosaic row is half empty
 
@@ -111,7 +112,8 @@ def test_the_assistant_makes_cachef_and_the_next_search_finds_it(tmp_path, monke
     ws = tmp_path / "ws"; os.makedirs(ws / "workspace" / "lokal")
     root = str(ws)
     r = fall_setup.scan(str(exam), root, default_roots=[])["zeilen"]["cache"]
-    target = str(ws / "workspace" / "lokal" / "viewer" / "cacheF")
+    target = fall_setup.cachef_target(root, page)
+    assert os.path.dirname(os.path.dirname(target)) == str(ws / "workspace" / "lokal" / "viewer")
     assert (r["wert"], r["quelle"], r["erzeugbar"], r["ziel"]) == (None, "fehlt", True, target)
     monkeypatch.setenv("MRT_PY", sys.executable)
     fall_setup.cachef_start({"seite": page, "daten": daten, "skripte": sk}, root)
@@ -130,3 +132,70 @@ def test_the_job_refuses_without_sources_or_lokal(tmp_path):
         fall_setup.cachef_start({"seite": page, "daten": daten, "skripte": str(tmp_path)}, str(tmp_path))
     with pytest.raises(ValueError, match="kein_lokal"):
         fall_setup.cachef_start({"seite": page, "daten": daten, "skripte": sk}, str(tmp_path / "leer"))
+
+
+def test_each_viewer_gets_its_own_cachef(tmp_path):
+    """A second patient's viewer must never write into the first one's cacheF."""
+    os.makedirs(tmp_path / "ws" / "lokal")
+    a = fall_setup.cachef_target(str(tmp_path / "ws"), str(tmp_path / "a" / "Analyse" / "Verlauf.html"))
+    b = fall_setup.cachef_target(str(tmp_path / "ws"), str(tmp_path / "b" / "Analyse" / "Verlauf.html"))
+    assert a != b and os.path.basename(a) == os.path.basename(b) == "cacheF"
+    assert fall_setup.cachef_target(str(tmp_path / "ws"), None) is None
+
+
+def test_a_failed_rerun_leaves_the_earlier_cachef_whole(tmp_path):
+    page, daten, sk, vols = viewer(str(tmp_path / "v"))
+    log, out = os.path.join(sk, "stand", "cacheF_log.json"), str(tmp_path / "c" / "cacheF")
+    cf.build(page, daten, log, out, say=lambda m: None)
+    before = {n: open(os.path.join(out, n), "rb").read() for n in os.listdir(out)}
+    for n in os.listdir(daten):
+        if n.startswith("t1_"): os.remove(os.path.join(daten, n))     # no T1: the rerun stops at ref_t1
+    with pytest.raises(cf.CacheError):
+        cf.build(page, daten, log, out, say=lambda m: None)
+    assert {n: open(os.path.join(out, n), "rb").read() for n in os.listdir(out)} == before
+    assert not os.path.exists(out + ".part")
+    open(os.path.join(out, "notizen.txt"), "w").write("x")
+    with pytest.raises(cf.CacheError, match="fremde"):
+        cf.build(page, daten, log, out, say=lambda m: None)
+
+
+def test_the_job_can_be_stopped_says_why_it_failed_and_runs_once(tmp_path, monkeypatch):
+    page, daten, sk, _ = viewer(str(tmp_path / "v"))
+    os.makedirs(tmp_path / "ws" / "lokal")
+    slow = tmp_path / "slow.sh"; slow.write_text("echo '## STEP read'; sleep 30\n")
+    monkeypatch.setattr(fall_setup, "CACHEF_SCRIPT", str(slow))
+    vals = {"seite": page, "daten": daten, "skripte": sk}
+    assert fall_setup.cachef_start(vals, str(tmp_path / "ws"))["running"]
+    with pytest.raises(RuntimeError):
+        fall_setup.cachef_start(vals, str(tmp_path / "ws"))
+    assert wb.fall_post("cachef_stop", {})[1]["stopped"] is True
+    end = time.time() + 20
+    while fall_setup.cachef_status()["running"] and time.time() < end: time.sleep(0.1)
+    assert fall_setup.cachef_status()["status"] == "stopped"
+    with fall_setup.letd.LOCK: fall_setup.CACHEF_JOB["state"].update(status="failed", error="Platte voll")
+    assert fall_setup.cachef_status()["meldung"] == "Platte voll"
+
+
+def test_an_own_cachef_that_lacks_a_new_exam_is_made_again(tmp_path):
+    """The viewer gained an exam after its cacheF was made: the row offers the button again instead of keeping it."""
+    page, daten, sk, _ = viewer(str(tmp_path / "v"))
+    ws = tmp_path / "ws"; os.makedirs(ws / "lokal")
+    target = fall_setup.cachef_target(str(ws), page)
+    cf.build(page, daten, os.path.join(sk, "stand", "cacheF_log.json"), target, say=lambda m: None)
+    r = fall_setup.scan(os.path.dirname(page), str(ws), default_roots=[])["zeilen"]["cache"]
+    assert (r["wert"], r["quelle"]) == (target, "gemerkt")
+    log = os.path.join(sk, "stand", "cacheF_log.json")
+    d = json.load(open(log)); d["t1 2001-09-01"] = {}; json.dump(d, open(log, "w"))
+    r = fall_setup.scan(os.path.dirname(page), str(ws), default_roots=[])["zeilen"]["cache"]
+    assert r["wert"] is None and r["erzeugbar"] and r["ziel"] == target
+
+
+def test_a_rerun_swaps_the_folder_whole(tmp_path):
+    page, daten, sk, _ = viewer(str(tmp_path / "v"))
+    log, out = os.path.join(sk, "stand", "cacheF_log.json"), str(tmp_path / "c" / "cacheF")
+    cf.build(page, daten, log, out, say=lambda m: None)
+    open(os.path.join(out, "desktop.ini"), "w").write("x")       # Explorer's file does not block a rebuild
+    os.remove(os.path.join(daten, "flair_2001-02-01.js"))
+    r = cf.build(page, daten, log, out, say=lambda m: None)
+    assert r["fehlen"] == ["flair_2001-02-01"] and "flair_2001-02-01.npy" not in os.listdir(out)
+    assert sorted(os.listdir(tmp_path / "c")) == ["cacheF"]

@@ -6,6 +6,7 @@ folder names and DICOM headers (Modality, dates, from the RT plan the fractions 
 data, and it returns paths and those few facts to the page, nothing else.
 """
 import gzip
+import hashlib
 import json
 import os
 import re
@@ -71,18 +72,21 @@ def _dicom_head(d, files):
 
 
 def viewer_root(start):
-    """The folder of the follow-up viewer that holds `start`: the nearest folder at or above it with Analyse/Verlauf.html,
-    Analyse/Verlauf-Daten or Verlauf.html. The user may pick an exam folder deep inside; the search then still sees the
-    whole viewer. None when no folder above has one."""
-    d = start
-    for _ in range(12):
-        if any(os.path.exists(os.path.join(d, *p)) for p in (("Analyse", "Verlauf.html"), ("Analyse", "Verlauf-Daten"),
-                                                                ("Verlauf.html",))):
-            return d
-        up = os.path.dirname(d)
-        if up == d: break
-        d = up
-    return None
+    """The folder of the follow-up viewer that holds `start`: the nearest folder at or above it with Analyse/Verlauf.html
+    or Analyse/Verlauf-Daten, else the nearest with a bare Verlauf.html. The user may pick an exam folder deep inside,
+    or Analyse itself; the search then still sees the whole viewer. None when no folder above has one."""
+    def up(test):
+        d = start
+        for _ in range(12):
+            if test(d): return d
+            parent = os.path.dirname(d)
+            if parent == d: return None
+            d = parent
+        return None
+    # Analyse holds a bare Verlauf.html too: the Analyse/... forms must win over all levels, else picking Analyse or a
+    # folder in it stops one level short of the viewer
+    return (up(lambda d: any(os.path.exists(os.path.join(d, "Analyse", n)) for n in ("Verlauf.html", "Verlauf-Daten")))
+            or up(lambda d: os.path.exists(os.path.join(d, "Verlauf.html"))))
 
 
 def find_viewer(mrt):
@@ -353,13 +357,20 @@ def _scan(mrt, root, cache_roots=(), pet_dir=None, extra_runs=(), default_roots=
     rows["bilder"] = {"wert": v.get("bilder"), "quelle": "eingegeben"}
     if not rows["cache"]["wert"]:
         want = stand_exams(v["skripte"]) if v.get("skripte") else set()
-        mine = cachef_target(root)      # one made from the viewer earlier lies here
-        cache_roots = ([os.path.dirname(mine)] if mine else []) + list(cache_roots)
-        c = find_cache(cache_roots, want, seconds=10) if cache_roots else None
-        if c: rows["cache"] = {"wert": c, "quelle": "gemerkt"}
+        # without the viewer's copy of its log any cacheF of the computer could be taken: only a proposal to confirm
+        quelle = "gefunden" if want else "vorschlag"
+        mine = cachef_target(root, v.get("seite"))      # one made from this viewer's page earlier lies here
+        held = _cache_log(mine, set(os.listdir(mine))) if mine and os.path.isdir(mine) else None
+        # the viewer may have gained an exam since: an own cacheF that lacks one is made again, not kept
+        if held is not None and want <= held:
+            rows["cache"] = {"wert": mine, "quelle": "gemerkt"}
         else:
-            c = find_cache(cache_roots_default() if default_roots is None else default_roots, want)
-            if c: rows["cache"] = {"wert": c, "quelle": "gefunden"}
+            c = find_cache(cache_roots, want, seconds=10) if cache_roots else None
+            # a root named in the settings may hold several patients' cacheF: without `want` only a proposal
+            if c: rows["cache"] = {"wert": c, "quelle": "gemerkt" if want else "vorschlag"}
+            else:
+                c = find_cache(cache_roots_default() if default_roots is None else default_roots, want)
+                if c: rows["cache"] = {"wert": c, "quelle": quelle}
         src = cachef_sources({k: v.get(k) for k in ("seite", "daten", "skripte")})
         if not rows["cache"]["wert"] and src and mine:
             rows["cache"].update(erzeugbar=True, ziel=mine)
@@ -406,10 +417,15 @@ CACHEF_STEPS = ("read", "volumes", "mask", "write")
 CACHEF_JOB = {"proc": None, "thread": None, "stop": False, "state": None}
 
 
-def cachef_target(root):
-    """Where a cacheF made from the viewer goes: the zone lokal, beside the cases. None without that zone."""
+def cachef_target(root, page):
+    """Where a cacheF made from the viewer's page goes: the zone lokal, one folder per page, so that a second
+    patient's viewer never overwrites the first one's. None without that zone or without a page."""
+    page = letd.to_local(page or "")
+    if not page: return None
     base = root if os.path.isdir(os.path.join(root, "lokal")) else os.path.join(root, "workspace")
-    return os.path.join(base, "lokal", "viewer", "cacheF") if os.path.isdir(os.path.join(base, "lokal")) else None
+    if not os.path.isdir(os.path.join(base, "lokal")): return None
+    key = hashlib.sha1(os.path.realpath(page).encode("utf-8")).hexdigest()[:10]
+    return os.path.join(base, "lokal", "viewer", key, "cacheF")
 
 
 def cachef_sources(values):
@@ -444,7 +460,8 @@ def cachef_status():
     if st.get("status") == "done": steps = {s: "done" for s in steps}
     tail = letd._tail(st["log_local"], 4000)
     st.update(running=running, steps=steps, vol=vol, log=tail)
-    if st.get("status") == "failed":
+    if st.get("error"): st["meldung"] = st["error"]
+    elif st.get("status") == "failed":
         st["meldung"] = next((l for l in reversed(tail.splitlines()) if l.strip() and not l.startswith("#")), "")
     return st
 
@@ -452,20 +469,25 @@ def cachef_status():
 def cachef_start(values, root, on_end=None):
     """Starts run_cachef.sh for the viewer of the case rows. Raises ValueError when page, data folder or the copy of
     the log is missing or there is no zone lokal, RuntimeError when a run is going."""
-    src, out = cachef_sources(values), cachef_target(root)
+    src = cachef_sources(values)
+    out = cachef_target(root, src["seite"]) if src else None
     if not src: raise ValueError("quellen")
     if not out: raise ValueError("kein_lokal")
     with letd.LOCK:
         if _cachef_running(): raise RuntimeError("running")
-        os.makedirs(out, exist_ok=True)
+        os.makedirs(os.path.dirname(out), exist_ok=True)
         CACHEF_JOB["stop"] = False
         CACHEF_JOB["state"] = {"status": "running", "start": time.strftime("%Y-%m-%d %H:%M:%S"), "t0": time.time(),
                                "cache": out, "log_local": os.path.join(os.path.dirname(out), CACHEF_LOG)}
         cmd = ["bash", CACHEF_SCRIPT, src["seite"], src["daten"], src["log"], out]
         t = threading.Thread(target=_cachef_run, args=(cmd, on_end), daemon=True)
         CACHEF_JOB["thread"] = t
-    t.start()
+        t.start()       # inside the lock: a second request must see the thread alive, not one not yet started
     return cachef_status()
+
+
+def cachef_stop():
+    return letd.stop(CACHEF_JOB)
 
 
 def _cachef_run(cmd, on_end):
@@ -474,7 +496,7 @@ def _cachef_run(cmd, on_end):
         with open(st["log_local"], "w") as log:
             log.write(f"# {st['start']}  {' '.join(shlex.quote(c) for c in cmd)}\n"); log.flush()
             rc = letd._spawn(cmd, log, dict(os.environ, PYTHONUNBUFFERED="1"), job=CACHEF_JOB)
-        ok = rc == 0 and _cache_log(st["cache"], set(os.listdir(st["cache"]))) is not None
+        ok = rc == 0 and os.path.isdir(st["cache"]) and _cache_log(st["cache"], set(os.listdir(st["cache"]))) is not None
         st["rc"] = rc
         st["status"] = "stopped" if CACHEF_JOB["stop"] else ("done" if ok else "failed")
     except Exception as e:  # the record says what went wrong; the page shows it

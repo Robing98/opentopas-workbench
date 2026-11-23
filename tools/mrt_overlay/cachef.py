@@ -19,6 +19,7 @@ import io
 import json
 import os
 import re
+import shutil
 
 import numpy as np
 
@@ -82,9 +83,38 @@ def _save_npy(path, arr):
     os.replace(tmp, path)
 
 
+# what a cacheF of ours may hold; desktop.ini and Thumbs.db are what Explorer leaves in a folder on C:
+OWN = re.compile(r"^(log\.json|ref_t1\.nii\.gz|.+\.npy|desktop\.ini|thumbs\.db)(\.part)?$", re.I)
+
+
 def build(page, daten, stand_log, out, say=print):
-    """Writes cacheF into `out` and returns a summary. log.json comes last: a folder without it is no cacheF, so a run
-    that breaks off leaves nothing the search would take."""
+    """Writes cacheF into `out` and returns a summary. It is built whole in out.part and takes the place of `out` only
+    at the end: a run that breaks off leaves an earlier cacheF as it was, never a mix of old and new volumes."""
+    if os.path.isdir(out) and any(not OWN.match(n) for n in os.listdir(out)):
+        raise CacheError(f"{out}: der Ordner enthält fremde Dateien, er wird nicht ersetzt")
+    part = out.rstrip("/\\") + ".part"
+    if os.path.isdir(part): shutil.rmtree(part)
+    try:
+        r = _build(page, daten, stand_log, part, say)
+    except BaseException:
+        shutil.rmtree(part, ignore_errors=True)
+        raise
+    # rename, never delete first: on a folder under /mnt/c a held file can stop a delete halfway, and the old
+    # cacheF must then stay whole where it was
+    old = out.rstrip("/\\") + ".alt"
+    if os.path.isdir(old): shutil.rmtree(old)
+    had = os.path.isdir(out)
+    if had: os.replace(out, old)
+    try:
+        os.replace(part, out)
+    except OSError:
+        if had: os.replace(old, out)
+        raise
+    if had: shutil.rmtree(old, ignore_errors=True)
+    return r
+
+
+def _build(page, daten, stand_log, out, say):
     import SimpleITK as sitk
     say("## STEP read")
     d = page_data(page)

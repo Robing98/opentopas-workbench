@@ -1826,7 +1826,7 @@ Object.assign(I18N.de,{fc_title:"Fall",fc_intro:"Fall wählen, Ebenen ankreuzen,
  fc_q_fehlt:"fehlt, bitte wählen",fc_q_optional:"nicht gefunden (optional)",fc_q_export:"aus dem Export-Ordner",fc_b_fehlt:"existiert nicht",fc_b_falsch:"passt nicht",fc_b_ok:"geprüft",fc_paste:"Pfad einfügen oder Ordner wählen",fc_drives:"Laufwerke",fc_unread:"{n} Dateien ließen sich nicht lesen, vermutlich OneDrive-Platzhalter (nur in der Cloud): {p}. Im Explorer \"Immer auf diesem Gerät behalten\" wählen und neu suchen.",fc_q_zone:"fest nach Zone",fc_q_standard:"Standard",fc_q_keins:"keins gefunden (optional)",fc_q_gewaehlt:"gewählt",fc_q_eingegeben:"gewählt",
  fc_searching:"Suche läuft …",fc_found:"Übersicht prüfen, dann speichern.",fc_saved:"Fall gespeichert.",fc_started:"Gestartet.",fc_nothing:"Mindestens eine Ebene ankreuzen.",
  fc_nolokal:"Kein Ordner workspace/lokal: ein Fall mit Behandlungsplan gehört dorthin.",fc_badid:"Name: Buchstaben, Ziffern, . _ -",fc_need:"Es fehlt noch: {v}",fc_nopet:"Im Fall ist keine PET-Serie.",fc_np:"Keine Ebene",
- fc_make:"Aus dem Viewer erzeugen",fc_q_erzeugbar:"fehlt: mit dem Knopf aus dem Viewer erzeugen",fc_making:"wird erzeugt",fc_q_erzeugt:"aus dem Viewer erzeugt",fc_make_fail:"Erzeugen fehlgeschlagen"});
+ fc_make:"Aus dem Viewer erzeugen",fc_q_erzeugbar:"fehlt: mit dem Knopf aus dem Viewer erzeugen",fc_making:"wird erzeugt",fc_q_erzeugt:"aus dem Viewer erzeugt",fc_make_fail:"Erzeugen fehlgeschlagen",fc_stop:"Abbrechen",fc_make_stopped:"abgebrochen",fc_q_vorschlag:"Vorschlag: gehört er zu diesem Viewer? Übernehmen oder ändern",fc_accept:"Übernehmen"});
 Object.assign(I18N.en,{fc_title:"Case",fc_intro:"Choose a case, tick the layers, start. A new case is set up once: the workbench finds the folders on this computer itself.",
  fc_case:"Case",fc_letd:"LETd",fc_pet:"PET",fc_new:"Set up a case",fc_demo:"Demo case",fc_none:"no case yet",fc_expert:"Expert view: every path on its own",
  fc_wiz:"Set up a case",fc_mrt:"MRI image folder",fc_pick:"Choose folder",fc_scan:"Search",fc_row:"What",fc_value:"Found",fc_src:"Source",fc_change:"Change",
@@ -1837,7 +1837,7 @@ Object.assign(I18N.en,{fc_title:"Case",fc_intro:"Choose a case, tick the layers,
  fc_q_fehlt:"missing, please choose",fc_q_optional:"not found (optional)",fc_q_export:"from the export folder",fc_b_fehlt:"does not exist",fc_b_falsch:"does not fit",fc_b_ok:"checked",fc_paste:"paste a path or choose a folder",fc_drives:"Drives",fc_unread:"{n} files could not be read, probably OneDrive placeholders (cloud only): {p}. Choose \"Always keep on this device\" in Explorer and search again.",fc_q_zone:"fixed by zone",fc_q_standard:"default",fc_q_keins:"none found (optional)",fc_q_gewaehlt:"chosen",fc_q_eingegeben:"chosen",
  fc_searching:"Searching …",fc_found:"Check the overview, then save.",fc_saved:"Case saved.",fc_started:"Started.",fc_nothing:"Tick at least one layer.",
  fc_nolokal:"No folder workspace/lokal: a case with a treatment plan belongs there.",fc_badid:"Name: letters, digits, . _ -",fc_need:"Still missing: {v}",fc_nopet:"The case has no PET series.",fc_np:"No layer",
- fc_make:"Make from the viewer",fc_q_erzeugbar:"missing: make it from the viewer with the button",fc_making:"being made",fc_q_erzeugt:"made from the viewer",fc_make_fail:"Making failed"});
+ fc_make:"Make from the viewer",fc_q_erzeugbar:"missing: make it from the viewer with the button",fc_making:"being made",fc_q_erzeugt:"made from the viewer",fc_make_fail:"Making failed",fc_stop:"Cancel",fc_make_stopped:"cancelled",fc_q_vorschlag:"proposal: does it belong to this viewer? Accept or change",fc_accept:"Accept"});
 const FC={rows:null,mrt:"",br:null,brKey:null,brFile:false,cases:[],cj:null};
 const FC_MAIN=["seite","daten","skripte","cache","lauf","ct","rtstruct","rtplan","fraktionen","verschreibung","pet"],FC_MORE=["ausgabe","pet_ausgabe","kennzahlen","synthseg","seite_neu"];
 const FC_FILE={seite:1,rtstruct:1,rtplan:1,kennzahlen:1},FC_NUM={fraktionen:1,verschreibung:1},FC_BOOL={synthseg:1,seite_neu:1};
@@ -1862,7 +1862,7 @@ $("fcCancel").onclick=()=>{$("fcWiz").hidden=true;$("fcBrowse").hidden=true};
 $("fcMrtPick").onclick=()=>fcBrowse("mrt",FC.mrt,false);
 /* a pasted path in any form: quotes, \ or /, C:\ or /mnt/c; the server turns it into its own form */
 $("fcMrt").onchange=()=>{const v=$("fcMrt").value.trim();FC.mrt=v;if(v)$("fcScan").click()};
-$("fcScan").onclick=async()=>{if(!FC.mrt){fcBrowse("mrt","",false);return}$("fcWizMsg").textContent=t("fc_searching");
+$("fcScan").onclick=async()=>{if(!FC.mrt){fcBrowse("mrt","",false);return}$("fcWizMsg").textContent=t("fc_searching");FC.cj=null;FC.cjRow=null;
  try{const r=await api("/api/fall/scan",{mrt:FC.mrt},{timeout:180000});if(r.fehler){$("fcWizMsg").textContent=r.fehler;return}
   FC.rows=r.zeilen;if(r.zeilen.bilder&&r.zeilen.bilder.wert){FC.mrt=r.zeilen.bilder.wert;$("fcMrt").value=fcWin(FC.mrt)}
   fcRows();$("fcWizMsg").textContent=r.unlesbar?t("fc_unread").replace("{n}",r.unlesbar.anzahl).replace("{p}",r.unlesbar.ordner.map(fcWin).join("; ")):t("fc_found")}catch(e){$("fcWizMsg").textContent=t("error")+": "+e.message}};
@@ -1875,12 +1875,14 @@ function fcRow(k){const r=FC.rows[k]||{wert:null,quelle:"fehlt"};let val;
  else if(k==="pet"&&(r.kandidaten||[]).length)val=r.kandidaten.map(c=>`<label style="display:block"><input type="checkbox" data-fcp="${esc(c.wert)}"${(r.wert||[]).includes(c.wert)?" checked":""}> ${esc(c.info)} · ${esc(fcWin(c.wert))}</label>`).join("");
  else val=`<input type="text" data-fct="${k}" value="${esc(fcWin(Array.isArray(r.wert)?r.wert[0]||"":r.wert||""))}" placeholder="${esc(t("fc_paste"))}" spellcheck="false" autocomplete="off" style="width:100%">`;
  let btn=FC_BOOL[k]||FC_NUM[k]?"":`<button data-fcc="${k}">${esc(t("fc_change"))}</button>`;
- const red=(r.quelle==="fehlt"&&r.pflicht!==false)||r.befund==="fehlt"||r.befund==="falsch";
+ const red=(r.quelle==="fehlt"&&r.pflicht!==false)||r.quelle==="vorschlag"||r.befund==="fehlt"||r.befund==="falsch";
+ /* a cacheF found without the viewer's copy of its log may be another patient's: the user confirms it */
+ if(r.quelle==="vorschlag")btn=`<button data-fcok="${k}">${esc(t("fc_accept"))}</button> `+btn;
  let src=r.befund&&r.befund!=="ok"?t("fc_b_"+r.befund):t("fc_q_"+r.quelle)+(r.befund==="ok"?" · "+t("fc_b_ok"):"");
  /* cacheF gone: the viewer's page holds the volumes, the server decodes them (fall_setup.cachef_start) */
  if(k==="cache"&&r.erzeugbar&&!r.wert){const j=FC.cj||{};
-  btn=`<button data-fcmake="1"${j.running?" disabled":""}>${esc(t("fc_make"))}</button> `+btn;
-  src=j.running?t("fc_making")+(j.vol?` ${j.vol[0]}/${j.vol[1]}`:" …"):j.status==="failed"?t("fc_make_fail")+(j.meldung?": "+j.meldung:""):t("fc_q_erzeugbar")}
+  btn=(j.running?`<button data-fcstop="1">${esc(t("fc_stop"))}</button> `:`<button data-fcmake="1">${esc(t("fc_make"))}</button> `)+btn;
+  src=j.running?t("fc_making")+(j.vol?` ${j.vol[0]}/${j.vol[1]}`:" …"):j.status==="failed"?t("fc_make_fail")+(j.meldung?": "+j.meldung:""):j.status==="stopped"?t("fc_make_stopped"):t("fc_q_erzeugbar")}
  return `<tr><td>${esc(t("fc_r_"+k))}</td><td style="white-space:normal;word-break:break-all;width:100%">${val}</td><td class="${red?"log-err":"mute"}">${esc(src)}</td><td>${btn}</td></tr>`}
 function fcRows(){$("fcRows").innerHTML=FC_MAIN.map(fcRow).join("");$("fcRowsMore").innerHTML=FC_MORE.map(fcRow).join("");
  document.querySelectorAll("[data-fcc]").forEach(b=>b.onclick=()=>{const k=b.dataset.fcc,v=FC.rows[k]&&FC.rows[k].wert;fcBrowse(k,Array.isArray(v)?v[0]||FC.mrt:v||FC.mrt,!!FC_FILE[k])});
@@ -1889,7 +1891,9 @@ function fcRows(){$("fcRows").innerHTML=FC_MAIN.map(fcRow).join("");$("fcRowsMor
  document.querySelectorAll("[data-fct]").forEach(i=>i.onchange=()=>fcPasted(i.dataset.fct,i.value));
  document.querySelectorAll("[data-fcp]").forEach(i=>i.onchange=()=>{const r=FC.rows.pet;r.wert=[...document.querySelectorAll("[data-fcp]")].filter(x=>x.checked).map(x=>x.dataset.fcp)});
  const s=document.querySelector("[data-fcs=lauf]");if(s)s.onchange=()=>fcSetRun(s.value);
- const mk=document.querySelector("[data-fcmake]");if(mk)mk.onclick=fcMake}
+ const mk=document.querySelector("[data-fcmake]");if(mk)mk.onclick=fcMake;
+ const ms=document.querySelector("[data-fcstop]");if(ms)ms.onclick=async()=>{try{FC.cj=await api("/api/fall/cachef_stop",{});fcRows()}catch(e){toast(t("error")+": "+e.message,"err")}};
+ document.querySelectorAll("[data-fcok]").forEach(b=>b.onclick=()=>{const r=FC.rows[b.dataset.fcok];r.quelle="gewaehlt";fcRows()})}
 async function fcMake(){const v=k=>(FC.rows[k]||{}).wert||"";
  try{const r=await api("/api/fall/cachef",{seite:v("seite"),daten:v("daten"),skripte:v("skripte")});
   if(r.fehler){FC.cj={status:"failed",meldung:r.fehler==="kein_lokal"?t("fc_nolokal"):r.fehler};fcRows();return}FC.cj=r;fcRows();fcMakePoll()}
@@ -1927,7 +1931,9 @@ async function fcChosen(p){$("fcBrowse").hidden=true;const k=FC.brKey;
  if(k==="mrt"){FC.mrt=p;$("fcMrt").value=fcWin(p);$("fcScan").click();return}
  if(!FC.rows)return;
  try{const r=await api("/api/fall/pfad",{zeile:k,pfad:p});await fcSet(k,r.wert,r.befund)}catch(e){toast(t("error")+": "+e.message,"err")}}
-$("fcSave").onclick=async()=>{if(!FC.rows)return;const w={};for(const k of FC_MAIN.concat(FC_MORE))w[k]=(FC.rows[k]||{}).wert;w.bilder=FC.mrt;
+$("fcSave").onclick=async()=>{if(!FC.rows)return;const w={};
+ const open=Object.keys(FC.rows).filter(k=>FC.rows[k].quelle==="vorschlag");
+ if(open.length){$("fcWizMsg").textContent=t("fc_need").replace("{v}",open.map(x=>t("fc_r_"+x)).join(", "));return}for(const k of FC_MAIN.concat(FC_MORE))w[k]=(FC.rows[k]||{}).wert;w.bilder=FC.mrt;
  const id=$("fcId").value.trim();if(!/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(id)){$("fcWizMsg").textContent=t("fc_badid");return}
  try{const r=await api("/api/fall/save",{fall_id:id,werte:w});
   if(r.fehler){$("fcWizMsg").textContent=r.fehler==="kein_lokal"?t("fc_nolokal"):r.fehler==="fall_id"?t("fc_badid"):r.fehler.startsWith("fehlt: ")?t("fc_need").replace("{v}",r.fehler.slice(7).split(", ").map(x=>t("fc_r_"+x)).join(", ")):r.fehler;return}
