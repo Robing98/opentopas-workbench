@@ -1,4 +1,5 @@
-"""The PET part of the tab "LETd/PET on MRI": start tools/mrt_overlay/run_pet.sh from one form, then build_page.py.
+"""The PET part of the tab "LETd/PET on MRI": start tools/mrt_overlay/run_pet.sh from one form, then build_page.py
+from the clone of the Timeline Viewer (setting viewer_dir), as the LETd part does.
 
 Same pattern as letd.py, whose path helpers and process handling it uses: absolute paths outside the workspace, one
 script, the log and results in the output folder the user names. The one file it serves is the control sheet the
@@ -18,7 +19,7 @@ from .letd import to_local, in_public_zone
 SCRIPT = os.path.join(os.path.dirname(letd.TOOL_DIR), "tools", "mrt_overlay", "run_pet.sh")
 LOG_NAME = "pet_lauf.log"
 STEPS = ("check", "read", "register", "headfoot", "side", "write", "page")
-FIELDS = ("mrt", "pet", "cache", "view", "page", "ref", "side", "labels", "out", "build")
+FIELDS = ("mrt", "pet", "cache", "view", "ref", "side", "labels", "out", "build")
 REFS = ("brain", "striatum", "contralateral")
 SIDES = ("links", "rechts")
 
@@ -41,10 +42,10 @@ def _has_files(d):
     except OSError: return False
 
 
-def check(form, root=None):
+def check(form, root=None, viewer=None):
     """(problems, notes), as letd.check: a problem names the field and stops the start."""
     f = {k: str(form.get(k, "") or "") for k in FIELDS}
-    p = {k: to_local(f[k]) for k in ("pet", "cache", "view", "page", "labels", "out")}
+    p = {k: to_local(f[k]) for k in ("pet", "cache", "view", "labels", "out")}
     bad, notes = [], []
     need = lambda k, msg, *a: bad.append({"field": k, "msg": msg, "args": list(a)})
     if not p["pet"]: need("pet", "empty")
@@ -68,8 +69,12 @@ def check(form, root=None):
     if not p["out"]: need("out", "empty")
     elif in_public_zone(p["out"], root): need("out", "public_zone")
     if f["build"] in ("1", "true", "True"):
-        if not p["page"]: need("page", "empty")
-        elif not os.path.isfile(p["page"]): need("page", "not_found")
+        # named before the run, as in letd.check: the page needs the case files beside the form's folders
+        script = letd.page_script(viewer)
+        if not os.path.isfile(script): need("build", "no_viewer", script)
+        elif p["cache"] and p["view"]:
+            miss = [n for n in letd.page_inputs(p["cache"], p["view"]) if not os.path.isfile(n)]
+            if miss: need("build", "no_case", ", ".join(miss))
     if not os.path.isfile(SCRIPT): need("", "no_script", SCRIPT)
     if p["view"] and os.path.isfile(os.path.join(p["view"], "pet.json")):
         notes.append({"field": "view", "msg": "pet_adds"})
@@ -142,10 +147,10 @@ def sheet_path():
     return p
 
 
-def start(form, on_end=None):
+def start(form, on_end=None, viewer=None):
     """Checks the form and starts run_pet.sh, then build_page.py. ValueError with the problems when the form does
     not pass, RuntimeError while a PET run is going."""
-    bad, _ = check(form)
+    bad, _ = check(form, viewer=viewer)
     if bad: raise ValueError(json.dumps(bad))
     with letd.LOCK:
         if JOB["proc"] is not None or (JOB["thread"] is not None and JOB["thread"].is_alive()):
@@ -157,7 +162,8 @@ def start(form, on_end=None):
         JOB["stop"] = False
         JOB["state"] = {"status": "running", "start": time.strftime("%Y-%m-%d %H:%M:%S"), "t0": time.time(),
                         "out": f["out"], "out_local": out, "build": build,
-                        "page_local": to_local(f["page"]) if build else ""}
+                        "page_local": letd.page_script(viewer) if build else "",
+                        "cache_local": to_local(f["cache"]), "view_local": to_local(f["view"])}
         ref = f["ref"] or "brain"
         args = [to_local(f["pet"]), to_local(f["cache"]), to_local(f["view"]), out, ref]
         if ref == "contralateral": args.append(f["side"])
@@ -179,10 +185,10 @@ def _run(cmd, env, on_end):
             if rc == 0 and st["build"] and not JOB["stop"]:
                 page = st["page_local"]
                 log.write("## STEP page\n"); log.flush()
-                pc = letd.page_command(page)
+                pc = letd.page_command(page, ("--cache", st["cache_local"], "--view", st["view_local"]))
                 log.write(f"# {' '.join(letd.shlex.quote(c) for c in pc)}\n"); log.flush()
                 rc = letd._spawn(pc, log, env, cwd=os.path.dirname(page), job=JOB)
-                if rc == 0: st["html"] = letd.find_page_html(page)
+                if rc == 0: st["html"] = letd.find_page_html(st["view_local"])
         st["rc"] = rc
         st["status"] = "stopped" if JOB["stop"] else ("done" if rc == 0 else "failed")
     except Exception as e:  # the record says what went wrong; the page shows it

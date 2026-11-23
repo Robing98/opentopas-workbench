@@ -1702,30 +1702,30 @@ function ltResult(j){const r=j.result;$("ltRes").hidden=!r;if(!r)return;const nf
 /* ---------- PET on MRI, in the LETd tab: one form for tools/mrt_overlay/run_pet.sh (pet_run.py) */
 Object.assign(I18N.de,{tab_letd:"LETd/PET auf MRT",pt_title:"PET-Ebene auf den Verlaufs-MRTs",
  pt_intro:"Liest eine PET-Serie (DICOM, Modality PT), registriert sie starr auf die zeitlich nächste 3D-T1 des Viewers, prüft Kopf-Fuß und links-rechts und legt das Verhältnis zur Referenzregion als schaltbare Ebene in Verlauf.html. Kein SUV, nur Anzeige, keine Befundung.",
- pt_f_mrt:"MRT-Bilder-Ordner",pt_h_mrt:"Darin werden cacheF, Verlauf-Daten und build_page.py gesucht.",pt_f_pet:"PET-Ordner",pt_h_pet:"Ordner mit der PET-Serie, auch in Unterordnern",
+ pt_f_mrt:"MRT-Bilder-Ordner",pt_h_mrt:"Darin werden cacheF und Verlauf-Daten gesucht.",pt_f_pet:"PET-Ordner",pt_h_pet:"Ordner mit der PET-Serie, auch in Unterordnern",
  pt_f_cache:"cacheF des Viewers",pt_h_cache:"mit ref_t1.nii.gz, log.json, mask.npy und t1_*.npy",pt_f_view:"Verlauf-Daten",pt_h_view:"hier landen pet.json und pet_<Datum>.js",
- pt_f_page:"build_page.py",pt_h_page:"erzeugt danach Verlauf.html neu",pt_f_ref:"Referenzregion",pt_h_ref:"Vorgabe: Median im Hirn",
+ pt_f_ref:"Referenzregion",pt_h_ref:"Vorgabe: Median im Hirn",
  pt_ref_brain:"Median im Hirn",pt_ref_striatum:"Striatum (SynthSeg)",pt_ref_contralateral:"Gegenseite",pt_f_side:"Seite des Befunds",pt_h_side:"nur für Gegenseite: diese Seite zählt nicht",
  pt_side_links:"links",pt_side_rechts:"rechts",pt_f_labels:"SynthSeg-Datei",pt_h_labels:"nur für Striatum: Labels der Referenz-T1 des Viewers",
- pt_f_out:"Ausgabeordner",pt_h_out:"Kontrollblatt, Transformation und Protokoll; gehört in die Zone eigen",pt_f_build:"Verlauf.html danach neu erzeugen",pt_h_build:"mit build_page.py",
+ pt_f_out:"Ausgabeordner",pt_h_out:"Kontrollblatt, Transformation und Protokoll; gehört in die Zone eigen",pt_f_build:"Verlauf.html danach neu erzeugen",pt_h_build:"mit build_page.py des Timeline-Viewers (Ordner in den Einstellungen)",
  pt_result:"PET-Ergebnis",pt_s_read:"Einlesen",pt_s_register:"Registrierung",pt_s_headfoot:"Kopf-Fuß",pt_s_side:"Links-rechts",pt_s_write:"Schreiben",pt_s_page:"Verlauf.html",pt_s_check:"Prüfen",
  pt_start_n:"Start {i} von {n}",pt_head:"PET {d}, {tr}, auf T1 {t}",pt_mi:"MI wie gelesen",pt_mi_m:"gespiegelt",pt_mi_z:"kopfstehend",pt_gap:"Abstand {v} %",
  pt_sheet_alt:"Kontrollblatt: T1 oben, PET auf T1 unten, axial, koronar, sagittal",pt_noscript:"run_pet.sh fehlt in dieser Installation.",
  lt_m_no_t1:"Keine 3D-T1 (t1_*.npy) im Cache.",lt_m_choice:"Bitte auswählen.",lt_m_pet_adds:"pet.json gibt es schon: die PET kommt als weiterer Termin dazu, ein gleiches Datum wird ersetzt."});
 Object.assign(I18N.en,{tab_letd:"LETd/PET on MRI",pt_title:"PET layer on the follow-up MRIs",
  pt_intro:"Reads a PET series (DICOM, modality PT), registers it rigidly onto the viewer's 3D T1 nearest in time, checks head to foot and left to right, and puts the ratio to a reference region into Verlauf.html as a layer to switch on. No SUV, display only, no reading.",
- pt_f_mrt:"MRI images folder",pt_h_mrt:"cacheF, Verlauf-Daten and build_page.py are looked up in it.",pt_f_pet:"PET folder",pt_h_pet:"folder with the PET series, subfolders too",
+ pt_f_mrt:"MRI images folder",pt_h_mrt:"cacheF and Verlauf-Daten are looked up in it.",pt_f_pet:"PET folder",pt_h_pet:"folder with the PET series, subfolders too",
  pt_f_cache:"Viewer cacheF",pt_h_cache:"with ref_t1.nii.gz, log.json, mask.npy and t1_*.npy",pt_f_view:"Verlauf-Daten",pt_h_view:"pet.json and pet_<date>.js are written here",
- pt_f_page:"build_page.py",pt_h_page:"rebuilds Verlauf.html afterwards",pt_f_ref:"Reference region",pt_h_ref:"default: median in the brain",
+ pt_f_ref:"Reference region",pt_h_ref:"default: median in the brain",
  pt_ref_brain:"Median in the brain",pt_ref_striatum:"Striatum (SynthSeg)",pt_ref_contralateral:"Opposite side",pt_f_side:"Side of the finding",pt_h_side:"opposite side only: this side is left out",
  pt_side_links:"left",pt_side_rechts:"right",pt_f_labels:"SynthSeg file",pt_h_labels:"striatum only: labels of the viewer's reference T1",
- pt_f_out:"Output folder",pt_h_out:"control sheet, transform and log; belongs in the zone eigen",pt_f_build:"Rebuild Verlauf.html afterwards",pt_h_build:"with build_page.py",
+ pt_f_out:"Output folder",pt_h_out:"control sheet, transform and log; belongs in the zone eigen",pt_f_build:"Rebuild Verlauf.html afterwards",pt_h_build:"with build_page.py of the Timeline Viewer (folder in Settings)",
  pt_result:"PET result",pt_s_read:"Read",pt_s_register:"Registration",pt_s_headfoot:"Head to foot",pt_s_side:"Left to right",pt_s_write:"Write",pt_s_page:"Verlauf.html",pt_s_check:"Check",
  pt_start_n:"Start {i} of {n}",pt_head:"PET {d}, {tr}, on T1 {t}",pt_mi:"MI as read",pt_mi_m:"mirrored",pt_mi_z:"upside down",pt_gap:"gap {v} %",
  pt_sheet_alt:"Control sheet: T1 above, PET on T1 below, axial, coronal, sagittal",pt_noscript:"run_pet.sh is missing in this installation.",
  lt_m_no_t1:"No 3D T1 (t1_*.npy) in the cache.",lt_m_choice:"Please choose.",lt_m_pet_adds:"pet.json exists: the PET is added as one more date, the same date is replaced."});
 const PT={built:false,filled:false,timer:null,job:null};
-const PT_FIELDS=[["mrt",1],["pet"],["cache"],["view"],["page"],["ref",0,["brain","striatum","contralateral"]],["side",1,["","links","rechts"]],["labels",1],["out"]];
+const PT_FIELDS=[["mrt",1],["pet"],["cache"],["view"],["ref",0,["brain","striatum","contralateral"]],["side",1,["","links","rechts"]],["labels",1],["out"]];
 function ptBuild(){if(PT.built)return;PT.built=true;let h="";
  for(const [k,opt,choices] of PT_FIELDS){const btn=k==="mrt"?`<button type="button" id="ptDerive" data-i18n="lt_derive">${esc(t("lt_derive"))}</button>`:"";
   const inp=choices?`<select id="pt_${k}">${choices.map(c=>`<option value="${c}"${c?` data-i18n="pt_${k}_${c}"`:""}>${c?esc(t("pt_"+k+"_"+c)):""}</option>`).join("")}</select>`
@@ -1737,7 +1737,7 @@ function ptBuild(){if(PT.built)return;PT.built=true;let h="";
  $("ptDerive").onclick=()=>ptDerive(true);$("pt_mrt").addEventListener("change",()=>ptDerive(false));
  $("pt_build").addEventListener("change",ptFieldState);$("pt_ref").addEventListener("change",ptFieldState);
  $("ptCheck").onclick=ptCheck;$("ptStart").onclick=ptStart;armed($("ptStop"),async()=>{await api("/api/pet/stop",{});ptPoll()})}
-function ptFieldState(){$("pt_page").disabled=!$("pt_build").checked;const r=$("pt_ref").value;$("pt_side").disabled=r!=="contralateral";$("pt_labels").disabled=r!=="striatum"}
+function ptFieldState(){const r=$("pt_ref").value;$("pt_side").disabled=r!=="contralateral";$("pt_labels").disabled=r!=="striatum"}
 function ptForm(){const o={};for(const [k] of PT_FIELDS)o[k]=$("pt_"+k).value.trim();o.build=$("pt_build").checked?"1":"0";return o}
 function ptFill(form){for(const [k] of PT_FIELDS)if(form[k]!=null)$("pt_"+k).value=form[k];if(!$("pt_ref").value)$("pt_ref").value="brain";$("pt_build").checked=form.build==="1";ptFieldState()}
 function ptMarks(bad,notes){const by={};for(const m of notes)by[m.field]={c:"note",m};for(const m of bad)by[m.field]={c:"bad",m};
@@ -1746,7 +1746,7 @@ function ptMarks(bad,notes){const by={};for(const m of notes)by[m.field]={c:"not
  return bad.filter(m=>!m.field).map(ltText).join(" ")}
 async function ptDerive(byUser){const mrt=$("pt_mrt").value.trim();if(!mrt)return;
  try{const r=await api("/api/pet/derive",{mrt});if(r.error){ptMarks([{field:"mrt",msg:r.error}],[]);return}
-  let n=0;for(const k of ["cache","view","page"])if(r[k]){n++;if(byUser||!$("pt_"+k).value.trim())$("pt_"+k).value=r[k]}
+  let n=0;for(const k of ["cache","view"])if(r[k]){n++;if(byUser||!$("pt_"+k).value.trim())$("pt_"+k).value=r[k]}
   $("ptMsg").textContent=n?t("lt_found").replace("{n}",n):t("lt_none_found")}catch(e){$("ptMsg").textContent=t("error")+": "+e.message}}
 async function ptCheck(){try{const r=await api("/api/pet/check",{form:ptForm()});const g=ptMarks(r.problems,r.notes);$("ptMsg").textContent=g||(r.problems.length?t("lt_bad"):t("lt_ok"))}
  catch(e){$("ptMsg").textContent=t("error")+": "+e.message}}

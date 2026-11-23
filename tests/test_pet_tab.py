@@ -26,8 +26,9 @@ PNG = (b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08
 
 
 @pytest.fixture(autouse=True)
-def script_of_the_checkout(monkeypatch):
+def script_of_the_checkout(monkeypatch, tmp_path):
     monkeypatch.setattr(pet_run, "SCRIPT", REPO_SCRIPT)
+    monkeypatch.setattr(letd, "VIEWER_DIR_DEFAULT", str(tmp_path / "timeline-viewer"))
 
 
 @pytest.fixture
@@ -69,12 +70,14 @@ def touch(path, text=""):
 
 def full_form(tmp):
     top = tmp / "MRT"
-    touch(top / "Analyse" / "Skripte" / "build_page.py")
+    touch(letd.page_script())                                       # the clone of the viewer at its default place
+    for n in ("viewer.json", "befunde.json"): touch(top / "Analyse" / "Skripte" / n)
+    for n in ("log.json", "vent.json"): touch(top / "Analyse" / "cacheG" / n)
     os.makedirs(top / "Analyse" / "Verlauf-Daten")
     for n in ("log.json", "ref_t1.nii.gz", "mask.npy", "t1_2020-01-01.npy"): touch(top / "Analyse" / "cacheF" / n)
     touch(tmp / "pet" / "sub" / "1.dcm")
     return {"mrt": str(top), "pet": str(tmp / "pet"), "cache": str(top / "Analyse" / "cacheF"),
-            "view": str(top / "Analyse" / "Verlauf-Daten"), "page": str(top / "Analyse" / "Skripte" / "build_page.py"),
+            "view": str(top / "Analyse" / "Verlauf-Daten"),
             "ref": "brain", "side": "", "labels": "", "out": str(tmp / "out"), "build": "1"}
 
 
@@ -87,10 +90,15 @@ def test_full_form_passes_and_defaults_to_the_brain_median(tmp_path):
 def test_check_names_each_wrong_field(tmp_path):
     f = full_form(tmp_path)
     os.remove(os.path.join(f["cache"], "mask.npy"))
-    f.update(pet=str(tmp_path / "nothing"), ref="contralateral", side="", page="")
-    bad, _ = pet_run.check(f)
+    f.update(pet=str(tmp_path / "nothing"), ref="contralateral", side="")
+    bad, _ = pet_run.check(f, viewer=str(tmp_path / "no clone"))
     by = {m["field"]: m["msg"] for m in bad}
-    assert by == {"pet": "not_found", "cache": "missing", "side": "choice", "page": "empty"}
+    assert by == {"pet": "not_found", "cache": "missing", "side": "choice", "build": "no_viewer"}
+    os.remove(os.path.join(os.path.dirname(f["view"]), "Skripte", "befunde.json"))
+    bad, _ = pet_run.check(f)
+    assert [(m["msg"], m["args"][0].endswith("befunde.json")) for m in bad if m["field"] == "build"] == [("no_case", True)]
+    f["build"] = "0"
+    assert "build" not in {m["field"] for m in pet_run.check(f)[0]}  # without the page, neither the clone nor the case files
     f = full_form(tmp_path / "b"); f["ref"] = "striatum"
     assert {m["field"] for m in pet_run.check(f)[0]} == {"labels"}
     f["ref"] = "anything"
@@ -108,7 +116,7 @@ def test_check_needs_a_3d_t1_and_files_in_the_pet_folder(tmp_path):
 def test_check_refuses_the_public_zone(tmp_path):
     f = full_form(tmp_path)
     pub = tmp_path / "workspace" / "offen"; (pub / "v").mkdir(parents=True)
-    f.update(out=str(pub / "pet"), view=str(pub / "v"))
+    f.update(out=str(pub / "pet"), view=str(pub / "v"), build="0")   # the case files beside a moved view are a page matter
     assert {(m["field"], m["msg"]) for m in pet_run.check(f)[0]} == {("out", "public_zone"), ("view", "public_zone")}
 
 
@@ -165,7 +173,11 @@ def fake_script(ws, monkeypatch):
 def test_start_runs_the_script_then_build_page_and_shows_the_result(srv, ws, monkeypatch):
     fake_script(ws, monkeypatch)
     f = full_form(ws)
-    touch(f["page"], "import os\nopen(os.path.join('..', 'Verlauf.html'), 'w').write('<html>')\nprint('built')\n")
+    # a clone named in the settings wins over the default one, which would fail
+    touch(letd.page_script(), "raise SystemExit('the default clone ran')\n")
+    wb.STATE["cfg"]["viewer_dir"] = str(ws / "my viewer")
+    touch(ws / "my viewer" / "build_page.py", "import os, sys\na = sys.argv\nassert os.path.isdir(a[a.index('--cache') + 1])\n"
+          "v = a[a.index('--view') + 1]\nopen(os.path.join(os.path.dirname(v), 'Verlauf.html'), 'w').write('<html>')\nprint('built')\n")
     code, r = call(srv + "/api/pet/start", {"form": f})
     assert code == 200 and not r.get("problems"), r
     job = wait_done(srv)
@@ -214,7 +226,7 @@ def test_a_failed_run_shows_its_message_and_no_old_result(srv, ws, monkeypatch):
 
 
 def test_start_refuses_a_bad_form_and_runs_nothing(srv, ws):
-    f = full_form(ws); f["cache"] = str(ws / "missing")
+    f = full_form(ws); f.update(cache=str(ws / "missing"), build="0")
     code, r = call(srv + "/api/pet/start", {"form": f})
     assert code == 200 and [m["field"] for m in r["problems"]] == ["cache"]
     assert pet_run.JOB["thread"] is None and not (ws / "out").exists()
@@ -246,8 +258,8 @@ def test_sheet_is_only_the_run_s_own_png(srv, ws):
 def test_pet_form_takes_the_viewer_folders_of_the_letd_form(srv, ws):
     wb.STATE["cfg"]["letd"] = {"form": {"mrt": "/m", "cache": "/m/c", "view": "/m/v", "page": "/m/p.py", "run": "/r"}}
     form = call(srv + "/api/pet")[1]["form"]
-    assert (form["mrt"], form["cache"], form["view"], form["page"], form["ref"]) == ("/m", "/m/c", "/m/v", "/m/p.py", "brain")
-    assert "run" not in form
+    assert (form["mrt"], form["cache"], form["view"], form["ref"]) == ("/m", "/m/c", "/m/v", "brain")
+    assert "run" not in form and "page" not in form                  # build_page.py comes from the viewer's clone
 
 
 def test_ui_has_every_pet_text_in_both_languages():

@@ -1811,7 +1811,8 @@ def letd_post(what, b):
 
 
 # ------------------------------------------------------------------ PET on MRI (pet_run.py), in the same tab
-PET_KEEP = ("status", "start", "end", "seconds", "rc", "error", "out", "out_local", "build", "page_local", "html", "t0")
+PET_KEEP = ("status", "start", "end", "seconds", "rc", "error", "out", "out_local", "build", "page_local", "cache_local",
+            "view_local", "html", "t0")
 
 
 def pet_save(form=None, last=None):
@@ -1828,7 +1829,7 @@ def pet_info():
     form = dict(c.get("form") or {"ref": "brain", "build": "1"})
     # the viewer's folders are the same as for LETd: taken from that form until the PET form has its own
     lf = STATE["cfg"].get("letd", {}).get("form") or {}
-    for k in ("mrt", "cache", "view", "page"):
+    for k in ("mrt", "cache", "view"):
         if not form.get(k) and lf.get(k): form[k] = lf[k]
     for k, v in pet_run.default_out(STATE["root"]).items():
         if not form.get(k): form[k] = v
@@ -1837,15 +1838,16 @@ def pet_info():
 
 def pet_post(what, b):
     form = b.get("form") or {}
+    viewer = STATE["cfg"].get("viewer_dir")
     if what == "derive": return 200, letd.derive(b.get("mrt", ""))
     if what == "check":
-        bad, notes = pet_run.check(form, STATE["root"])
+        bad, notes = pet_run.check(form, STATE["root"], viewer)
         return 200, {"problems": bad, "notes": notes}
     if what == "start":
-        bad, notes = pet_run.check(form, STATE["root"])
+        bad, notes = pet_run.check(form, STATE["root"], viewer)
         pet_save(form=form)
         if bad: return 200, {"problems": bad, "notes": notes}
-        try: job = pet_run.start(form, on_end=lambda st: pet_save(last=st))
+        try: job = pet_run.start(form, on_end=lambda st: pet_save(last=st), viewer=viewer)
         except RuntimeError: return 409, {"error": "running"}
         pet_save(last=pet_run.JOB["state"])
         return 200, {"job": job, "notes": notes}
