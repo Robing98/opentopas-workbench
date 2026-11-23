@@ -280,11 +280,14 @@ def pet_form(folder, serie=None):
     if serie: pets = [b for b in pets if b["serie"] == serie]
     if not pets: raise fall.FallError("bilder: keine PET-Serie im Fall")
     b = sorted(pets, key=lambda x: x.get("datum") or "")[-1]
-    ref = ((b.get("pet") or {}).get("referenz") or {}).get("art") or "brain"
+    rz = (b.get("pet") or {}).get("referenz") or {}
+    ref = rz.get("art") or "brain"
     ein = d.get("einstellungen") or {}
     return {"mrt": _get(folder, d, orte, "viewer", "bilder"), "pet": fall.resolve(folder, b["ordner"], orte),
             "cache": _get(folder, d, orte, "viewer", "cache"), "view": _get(folder, d, orte, "viewer", "daten"),
-            "ref": ref if ref in pet_run.REFS else "brain", "side": "", "labels": "",
+            "ref": ref if ref in pet_run.REFS else "brain",
+            "side": (rz.get("seite") or "") if ref in pet_run.REFS else "",
+            "labels": fall.resolve(folder, rz["maske"], orte) if rz.get("maske") and ref in pet_run.REFS else "",
             "out": _get(folder, d, orte, "einstellungen", "pet_ausgabe"),
             "build": "1" if ein.get("seite_neu", True) else "", "oeffentlich": bool((d.get("plan") or {}).get("oeffentlich")),
             "fall": folder, "serie": b["serie"]}

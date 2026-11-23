@@ -217,3 +217,26 @@ def test_pet_command_from_case_file(cache, pet_dir, tmp_path):
     assert b["pet"]["referenz"]["art"] == "brain" and b["datum"] == DAY
     assert os.path.isfile(case / "data" / f"pet_{DAY}.js")
     assert not fall.check(str(case))["fehler"]
+
+
+def test_case_keeps_side_of_a_contralateral_reference(cache, pet_dir, tmp_path):
+    """A run with --ref contralateral --side stores the side in the case, so the next start from the case (form of
+    fall_setup, check of the tab) passes without the flags."""
+    from mrt_overlay import cli
+    sys.path.insert(0, ROOT)
+    from opentopas_workbench import fall, fall_setup, pet_run
+    case = tmp_path / "fall"; os.makedirs(case)
+    orte = {}
+    cp = lambda p: fall.to_case_path(str(case), p, orte)
+
+    def setup(d):
+        d["bilder"] = [{"serie": "pet_x", "modalitaet": "PT", "datum": None, "ordner": cp(pet_dir[0]), "nach_bezug": None,
+                        "guete": None, "pet": None}]
+        d["viewer"] = {"cache": cp(cache[0]), "daten": "data", "bilder": cp(cache[0])}
+        d["einstellungen"] = {"pet_ausgabe": "pet_out"}
+    fall.update(str(case), setup, create="pet-fall")
+    fall.save_orte(str(case), orte)
+    cli.main(["pet", "--fall", str(case), "--starts", "0", "--ref", "contralateral", "--side", "links"])
+    f = fall_setup.pet_form(str(case))
+    assert f["ref"] == "contralateral" and f["side"] == "links"
+    assert not [p for p in pet_run.check(f)[0] if p["field"] == "side"]

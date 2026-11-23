@@ -200,6 +200,9 @@ def load(folder):
         raise FallError(f"{p}: {e}")
     bad = validate(d)
     if bad: raise FallError("; ".join(bad))
+    # optional in the schema; every reader and writer then finds the lists it indexes
+    d.setdefault("ergebnisse", {})
+    d.setdefault("bilder", [])
     return d
 
 

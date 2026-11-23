@@ -277,3 +277,11 @@ def test_save_without_lokal_and_with_a_bad_name(ws, tmp_path):
     assert wb.fall_post("save", {"fall_id": "a b", "werte": {}})[1] == {"fehler": "fall_id"}
     shutil.rmtree(os.path.join(wb.STATE["root"], "workspace", "lokal"))
     assert wb.fall_post("save", {"fall_id": "x", "werte": {}})[1] == {"fehler": "kein_lokal"}
+
+
+def test_case_without_results_section_loads_with_empty_lists(tmp_path):
+    """ergebnisse is optional in fall/v1: a hand-written case without it must not crash the readers."""
+    d = fall.new("ohne-ergebnisse"); del d["ergebnisse"]; del d["bilder"]
+    (tmp_path / "fall.json").write_text(json.dumps(d))
+    got = fall.load(str(tmp_path))
+    assert got["ergebnisse"] == {} and got["bilder"] == []

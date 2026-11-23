@@ -104,8 +104,10 @@ def _viewer_from_case(a):
                            ("einstellungen.ausgabe", a.out)) if not v]
     if gaps: _case_error(a, "fehlt: " + ", ".join(gaps))
     if not os.path.isfile(os.path.join(a.ctframe, "dose_rbe_1_1.nii.gz")):
+        # one fraction by default would give the dose of one fraction against a total prescription, without a word
+        if not f["fx"]: _case_error(a, "fehlt: plan.fraktionen (für den Export des plan_mc-Laufs)")
         _step("export")
-        ex.export(f["run"], a.ctframe, int(f["fx"] or 1))
+        ex.export(f["run"], a.ctframe, int(f["fx"]))
 
 
 def _viewer_to_case(a, q, exams):
@@ -154,6 +156,8 @@ def _pet_from_case(a):
     a.pet = a.pet or f["pet"]; a.cache = a.cache or f["cache"]; a.viewer_data = a.viewer_data or f["view"]
     a.out = a.out or f["out"] or None
     if a.ref is None: a.ref = f["ref"]
+    if a.ref == f["ref"]:    # the case's side and label map belong to the case's reference only
+        a.side = a.side or f["side"] or None; a.labels = a.labels or f["labels"] or None
     gaps = [n for n, v in (("PET-Serie", a.pet), ("viewer.cache", a.cache), ("viewer.daten", a.viewer_data)) if not v]
     if gaps: _case_error(a, "fehlt: " + ", ".join(gaps))
 
@@ -165,6 +169,7 @@ def _pet_to_case(a, e):
     here = os.path.normpath(os.path.abspath(a.pet))
     tfm = os.path.join(a.out, f"grid_to_pet_{e['day']}.tfm") if a.out else None
     tfm = fall.to_case_path(a.fall, tfm, orte) if tfm and os.path.isfile(tfm) else None
+    labels = fall.to_case_path(a.fall, a.labels, orte) if a.labels else None
     fall.save_orte(a.fall, orte)
     q = e["registration"]
 
@@ -180,7 +185,9 @@ def _pet_to_case(a, e):
                           "seitenpruefung": {"mi": q["mi"], "mi_gespiegelt": q["mi_gespiegelt"], "ok": True},
                           "kopf_fuss": {"mi_kopfstehend": q["mi_kopfstehend"], "ok": True}}
             pet = b.get("pet") or {}
-            pet["referenz"] = {"art": a.ref, "maske": (pet.get("referenz") or {}).get("maske"), "region": e["reference"]}
+            # side and label map too: pet_form gives them back, else the next start from the case fails its check
+            pet["referenz"] = {"art": a.ref, "seite": a.side, "maske": labels or (pet.get("referenz") or {}).get("maske"),
+                               "region": e["reference"]}
             b["pet"] = pet
             if not b.get("datum") and fall._DATE.match(e["day"] or ""): b["datum"] = e["day"]
             break
