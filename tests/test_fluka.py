@@ -340,7 +340,9 @@ def test_fluka_job_runs_merges_and_writes_the_csv(queue):
     assert (out / "fk_p063_rifi0_21.bnn").is_file() and (out / "fk_p063_rifi0_21.txt").is_file()
     csv = (out / "IDD_fk_p063_rifi0_fluka.csv").read_text().splitlines()
     assert "cases/out/IDD_fk_p063_rifi0_fluka.csv" in job["outputs"]
-    k2 = [float(v) for v in csv[8].split(",")]
+    k2 = [float(v) for v in [l for l in csv if not l.startswith("#")][2].split(",")]
+    assert csv[1:3] == ["# Histories: 1005", "# Seed: 54217137"] and not any("Version" in l for l in csv)   # no version in "fluka_bin"
+    assert job["code"] == {"code": "FLUKA", "version": None, "histories": 1005, "seed": 54217137, "parts": None}
     assert k2[3] == pytest.approx(4e-3 * 1.602176634e-7 * 1005)     # summed over the 5 x 201 primaries that ran
     # and the workbench reads it like a TOPAS result
     r = wb.read_topas_csv(str(out / "IDD_fk_p063_rifi0_fluka.csv"))
@@ -515,7 +517,9 @@ def test_merge_gets_every_sub_run(queue, monkeypatch, n, cycles):
     assert (out / "fk_p063_rifi0_21.bnn").read_text().splitlines() == [f"bin {d} {c}" for d in dirs for c in range(1, cycles + 1)]
     for d in dirs: assert (runs / d / "calls.txt").read_text() == f"rfluka -N0 -M{cycles} run\n"
     assert job["threads"] == n and job["total"] == 1005 and not job["hints"]
-    k2 = [float(v) for v in (out / "IDD_fk_p063_rifi0_fluka.csv").read_text().splitlines()[8].split(",")]
+    csv = (out / "IDD_fk_p063_rifi0_fluka.csv").read_text().splitlines()
+    assert ("# Sub-runs: %d" % n in csv) == (n > 1) and job["code"]["parts"] == (n if n > 1 else None)
+    k2 = [float(v) for v in [l for l in csv if not l.startswith("#")][2].split(",")]
     assert k2[3] == pytest.approx(4e-3 * 1.602176634e-7 * 1005) and len(k2) == 5     # sum and its error
 
 
@@ -740,3 +744,31 @@ def test_shut_down_ignores_a_second_signal(queue, monkeypatch):
     finally:
         for s, h in old.items(): signal.signal(s, h)
         p.kill(); p.wait()
+
+
+def test_fluka_version_comes_from_the_name_of_its_folder_only(queue):
+    wb, ws = queue
+    for d, v in [("/home/x/fluka/fluka4-5.2/bin", "4-5.2"), ("C:\\FLUKA\\fluka_4.4.1", "4.4.1"), ("/opt/fluka/bin", None),
+                 ("/tmp/test_fluka_2/fluka_bin", None)]:
+        wb.STATE["cfg"]["fluka_dir"] = d
+        assert wb.fluka_version() == v, d
+
+
+def test_code_of_a_result_comes_from_its_head_and_its_case(queue):
+    wb, ws = queue
+    head = "# TOPAS Version: {}\n# Parameter File: /elsewhere/c.txt\n# Results for scorer: IDD_c\n# Scored in component: Phantom\n" \
+           "# X in 1 bin  of 20 cm\n# Y in 1 bin  of 20 cm\n# Z in 3 bins of 0.1 cm\n# DoseToMedium ( Gy ) : Sum\n0, 0, 0, 1\n0, 0, 1, 2\n0, 0, 2, 1\n"
+    d = ws / "codes"; d.mkdir()
+    (d / "c.txt").write_text("i:Ts/Seed = 7\ni:So/Demo/NumberOfHistoriesInRun = 30000\ns:Sc/IDD_c/Quantity = \"DoseToMedium\"\n"
+                             "s:Sc/IDD_c/Component = \"Phantom\"\ns:Sc/IDD_c/OutputFile = \"IDD_c\"\ns:So/Demo/BeamParticle = \"proton\"\n"
+                             "d:So/Demo/BeamEnergy = 100 MeV\n")
+    (d / "IDD_c.csv").write_text(head.format("4.3"))
+    (d / "old.csv").write_text(head.format("3.9").replace("IDD_c", "old"))
+    (d / "m.csv").write_text("0 1\n1 2\n")
+    assert wb.result_code(str(d / "IDD_c.csv"))["code"] == "OpenTOPAS"
+    assert wb.result_code(str(d / "old.csv"))["code"] == "TOPAS" and wb.result_code(str(d / "m.csv")) is None
+    items = {i["name"]: i for i in wb.build_index("")}
+    c = items["IDD_c.csv"]["code"]
+    assert (c["code"], c["version"], c["histories"], c["seed"]) == ("OpenTOPAS", "4.3", 30000, 7)
+    assert items["old.csv"]["code"]["histories"] is None and "code" not in items["m.csv"]
+    assert wb.with_case(wb.result_code(str(d / "IDD_c.csv")), wb.producer_of("codes/IDD_c.csv"))["seed"] == 7

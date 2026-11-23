@@ -385,7 +385,7 @@ def test_parsed_facts_survive_a_restart(ws, monkeypatch):
     (ws / "c").mkdir()
     for k in range(3): (ws / "c" / f"case{k}.txt").write_text(PARAM + f's:Sc/A/OutputFile = "o{k}"\n')
     assert len(wb.list_params()["files"]) == 3
-    with open(ws / ".workbench" / "index.json") as fh: assert json.load(fh)["v"] == 4
+    with open(ws / ".workbench" / "index.json") as fh: assert json.load(fh)["v"] == 5
     wb._PC["root"] = None; wb.invalidate_cache()   # what a new process sees
     opened = []
     monkeypatch.setattr(wb, "open", lambda f, *a, **k: (opened.append(str(f)), open(f, *a, **k))[1], raising=False)

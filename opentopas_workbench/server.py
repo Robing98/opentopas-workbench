@@ -225,6 +225,12 @@ def total_histories(text):
     return sum(vals) if vals else None
 
 
+def _seed(text):
+    """i:Ts/Seed of a parameter file, None if this file does not set it (TOPAS then uses 1)."""
+    m = re.search(r"^\s*i:Ts/Seed\s*=\s*(\d+)", text, re.M)
+    return int(m.group(1)) if m else None
+
+
 ENERGY_TOTAL_RE = re.compile(r"^\s*d:So/[^/]+/BeamEnergy\s*=\s*([\d.eE+\-]+)\s*(\w+)", re.M)
 UNIT_MEV = {"eV": 1e-6, "keV": 1e-3, "MeV": 1, "GeV": 1e3}
 
@@ -744,17 +750,50 @@ def end_run(pgid, mark):
         if not pids: return
 
 
-def fluka_convert(param, out):
+def fluka_version():
+    """The FLUKA version as the name of the installation folder gives it (fluka4-5.2/bin gives 4-5.2), or None. Only
+    the setting is read, never the installation itself (zone rule: FLUKA files are Robin's licence)."""
+    for part in reversed(fluka_dir().replace("\\", "/").split("/")):   # a folder of its own, not any path with "fluka" in it
+        m = re.fullmatch(r"fluka[-_]?(\d[\w.\-]*)", part, re.I)
+        if m: return m.group(1).rstrip(".-")
+    return None
+
+
+def fluka_convert(param, out, parts=None):
     """usbrea's text output to the workbench CSV, named like the TOPAS scorer file of the same case plus _fluka, so
-    both results of a case can sit in one folder (IDD_NAME.csv and IDD_NAME_fluka.csv)."""
+    both results of a case can sit in one folder (IDD_NAME.csv and IDD_NAME_fluka.csv). Its head names the code,
+    version, histories and seed, so the result shows its code without the job record or its folder name."""
     fk = fluka_module()
-    with open(param) as fh: m = fk.read_case(fh.read())
+    with open(param) as fh: text = fh.read()
+    m = fk.read_case(text)
+    seed = re.search(r"^(?=RANDOMIZ).{20}(.{10})", text, re.M)   # WHAT(2), columns 21 to 30
+    meta = [("FLUKA Version", fluka_version()), ("Histories", fk.primaries(m)),
+            ("Seed", _num_text(seed.group(1)) if seed else None), ("Sub-runs", parts if parts and parts > 1 else None)]
     name = os.path.splitext(os.path.basename(param))[0]
     with open(os.path.join(out, f"{name}_{FLUKA_UNIT}.txt")) as fh:
         vals, errs = fk.read_usbrea(fh.read(), m["phantom"]["zbins"])
     path = os.path.join(out, m["score"]["name"] + "_fluka.csv")
-    with open(path, "w") as fh: fh.write(fk.to_csv(vals, errs, m))
+    with open(path, "w") as fh: fh.write(fk.to_csv(vals, errs, m, meta))
     return path
+
+
+def job_code(job, param):
+    """The code of a finished job as the head of its first result names it, with the histories and seed of its case;
+    None when it wrote no result that names a code."""
+    for o in job.get("outputs") or []:
+        if o.lower().endswith(".csv"):
+            c = result_code(resolve(o))
+            if c:
+                c.pop("param", None)
+                return with_case(c, file_info(param))
+    return None
+
+
+def _num_text(x):
+    """A FLUKA card field as the number it means: "54217137." gives "54217137"."""
+    try: v = float(x)
+    except ValueError: return None
+    return str(int(v)) if v == int(v) else str(v)
 
 
 def release_jobs(ids=None):
@@ -825,13 +864,14 @@ def run_job(job):
             if mark and proc is not None and (rc != 0 or STATE["stop"]): end_run(proc.pid, mark)   # the other sub-runs still run
         if STATE.get("closing"): return   # the server is ending: the record stays "running", so the next start runs the job again
         if fluka and rc == 0 and not STATE["stop"]:
-            try: fluka_convert(param, out)
+            try: fluka_convert(param, out, len(starts))
             except (OSError, ValueError, KeyError) as e:
                 rc = 1
                 with open(resolve(job["log"]), "a") as log: log.write(f"\nFLUKA result not converted: {e}\n")
         job["seconds"] = round(time.time() - t0)
         job["outputs"] = sorted(relp(os.path.join(out, f)) for f, mt in snapshot().items()
                                 if before.get(f) != mt and not f.lower().endswith((".stl", ".ply")))
+        job["code"] = job_code(job, param)
         job["status"] = "stopped" if STATE["stop"] else ("done" if rc == 0 else "failed")
         job["rc"] = rc
         job["hints"] = log_hints(resolve(job["log"]))
@@ -962,6 +1002,44 @@ def read_topas_header(path, max_lines=300):
     """Header only, without reading the data rows (a 3D dose file can have millions of them)."""
     with open(path, errors="replace") as fh:
         return topas_header(fh.readline() for _ in range(max_lines))
+
+
+HEAD_KV_RE = re.compile(r"^#\s*([A-Za-z][\w -]*?)\s*:\s*(.+?)\s*$")
+
+
+def result_code(path):
+    """{"code", "version", "histories", "seed", "parts"} of a result file, from the lines of its head that name them
+    ("# TOPAS Version: 4.3", or what fluka_convert writes), or None for a file that names no code (a measurement).
+    TOPAS 4 is OpenTOPAS. Histories and seed of a TOPAS result are not in its head; with_case() adds them from the
+    parameter file. The folder name is never used: a folder often holds the results of several codes."""
+    try:
+        with open(path, errors="replace") as fh: head = [fh.readline() for _ in range(12)]
+    except OSError: return None
+    kv = {}
+    for l in head:
+        m = HEAD_KV_RE.match(l)
+        if m: kv.setdefault(m.group(1).lower(), m.group(2))
+    def num(k):
+        try: return int(float(kv[k]))
+        except (KeyError, ValueError): return None
+    if "topas version" in kv:
+        v = kv["topas version"]
+        major = re.match(r"\d+", v)
+        return {"code": "OpenTOPAS" if major and int(major.group()) >= 4 else "TOPAS", "version": v,
+                "histories": None, "seed": None, "parts": None, "param": kv.get("parameter file")}
+    if head and head[0].startswith("# FLUKA"):
+        return {"code": "FLUKA", "version": kv.get("fluka version"), "histories": num("histories"), "seed": num("seed"),
+                "parts": num("sub-runs")}
+    return None
+
+
+def with_case(code, info):
+    """The code of a result with histories and seed of the parameter file that wrote it, where its head has none."""
+    if code is None or not info: return code
+    code = dict(code)
+    if code.get("histories") is None: code["histories"] = info.get("hist")
+    if code.get("seed") is None: code["seed"] = info.get("seed")
+    return code
 
 
 def read_topas_csv(path, stat=0, collapse=None, slice_index=None):
@@ -1173,7 +1251,7 @@ def producer_of(rel):
             info = file_info(os.path.join(dp, n), max_age=5.0)
             if info and info["param"] and base in info["outs"]:
                 return {"param": f"{d}/{n}" if d else n, "particle": info["part"], "energy": info["energy"],
-                        "total": info["total"]}
+                        "total": info["total"], "hist": info.get("hist"), "seed": info.get("seed")}
     return None
 
 
@@ -1181,8 +1259,10 @@ INDEX_READ_MAX = 64_000_000   # larger data files are listed without metrics ins
 
 
 def index_entry(fp, size):
-    """Kind, mode, quantity and depth-curve metrics of one data file for the Overview tab."""
+    """Kind, mode, quantity, code and depth-curve metrics of one data file for the Overview tab."""
     extra = {}
+    code = result_code(fp)
+    if code: extra["code"] = code
     try:
         dims, quantity, _ = read_topas_header(fp)
         if len(dims) == 3 and sum(d["n"] > 1 for d in dims) >= 2:
@@ -1242,7 +1322,7 @@ def _index_items(scope):
         if info and info["param"]:
             rel = relp(fp)
             for o in info["outs"]:
-                producers[(os.path.dirname(rel), o)] = (rel, info["part"], info["energy"])
+                producers[(os.path.dirname(rel), o)] = (rel, info["part"], info["energy"], info)
     pc = _pcache(); dcache = pc["data"]
     items, seen = [], set()
     for fp in w["data"]:
@@ -1264,6 +1344,7 @@ def _index_items(scope):
                 extra = index_entry(fp, st.st_size)
                 dcache[rel] = [st.st_mtime_ns, st.st_size, extra]; pc["dirty"] = True
             item.update(extra)
+            if prod and item.get("code"): item["code"] = with_case(item["code"], prod[3])
         items.append(item)
     if not scope:   # a full walk knows every data file, so entries of deleted files can go
         for rel in [r for r in dcache if r not in seen]:
@@ -1507,7 +1588,7 @@ def _pcache():
         txt, data = {}, {}
         try:
             with open(os.path.join(wb_dir(), "index.json")) as fh: raw = json.load(fh)
-            if isinstance(raw, dict) and raw.get("v") == 4:   # older formats are rebuilt once
+            if isinstance(raw, dict) and raw.get("v") == 5:   # older formats are rebuilt once
                 data = dict(raw.get("data") or {})
                 txt = {os.path.join(root, *rel.split("/")): v for rel, v in (raw.get("txt") or {}).items()}
         except (OSError, ValueError, TypeError, AttributeError):
@@ -1523,7 +1604,7 @@ def _pcache_save():
         if not pc["dirty"]: return
         pc["dirty"] = False
         pre = pc["root"] + os.sep
-        out = {"v": 4, "txt": {k[len(pre):].replace(os.sep, "/"): v for k, v in list(pc["txt"].items()) if k.startswith(pre)},
+        out = {"v": 5, "txt": {k[len(pre):].replace(os.sep, "/"): v for k, v in list(pc["txt"].items()) if k.startswith(pre)},
                "data": dict(pc["data"])}
         try:
             os.makedirs(wb_dir(), exist_ok=True)
@@ -1567,7 +1648,7 @@ def file_info(fp, st=None, max_age=0.0):
     info = {"param": is_param, "outs": scorer_outputs(text) if is_param else [],
             "names": sorted(set(NAME_RE.findall(text))) if is_param else [],
             "part": part, "energy": energy, "total": f"{e.group(1)} {e.group(2)}" if (e and is_param) else None,
-            "hist": total_histories(text), "etot": etot * UNIT_MEV.get(e.group(2), 1) if etot is not None else None}
+            "hist": total_histories(text), "seed": _seed(text), "etot": etot * UNIT_MEV.get(e.group(2), 1) if etot is not None else None}
     cache[fp] = [st.st_mtime_ns, st.st_size, info]; _TXT_CHECKED[fp] = now; pc["dirty"] = True
     return info
 
@@ -1911,7 +1992,9 @@ class H(BaseHTTPRequestHandler):
                 res = read_any(resolve(q.get("p", "")), int(q.get("stat", 0) or 0),
                                int(col) if col not in (None, "") else None, int(sl) if sl not in (None, "") else None,
                                int(q.get("scan", 0) or 0))
-                if not res.get("measured"): res["beam"] = producer_of(relp(resolve(q.get("p", ""))))
+                if not res.get("measured"):
+                    res["beam"] = producer_of(relp(resolve(q.get("p", ""))))
+                    res["code"] = with_case(result_code(resolve(q.get("p", ""))), res["beam"])
                 return self.send(200, res)
             if u.path.startswith("/api/beam/"): return self.send(200, beam_api(u.path[len("/api/beam/"):], q))
             if u.path.startswith("/api/machines/"): return self.send(200, machines_api(u.path[len("/api/machines/"):], q))
