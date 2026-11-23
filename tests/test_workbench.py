@@ -698,6 +698,12 @@ def test_case_key_drops_only_the_own_code_and_seed():
     assert wb.case_key("IDD_c088_t3_fluka4.csv", fl) == "IDD_c088_t3"
     assert wb.case_key("IDD_c_fluka.csv", ot) == "IDD_c_fluka"              # a FLUKA token in a TOPAS result is no code of its own
     assert wb.case_key("fluka.csv", fl) == "fluka"                            # never an empty case
+    # a patch part in the version, and a bare number that is a case token, not a code (review of step 3)
+    assert wb.case_key("IDD_c_t39.csv", {"code": "TOPAS", "version": "3.9.1"}) == "IDD_c"
+    assert wb.case_key("IDD_c_t43.csv", {"code": "OpenTOPAS", "version": "4.3.0"}) == "IDD_c"
+    assert wb.case_key("IDD_c_fluka45.csv", fl) == wb.case_key("IDD_c_f45.csv", fl) == "IDD_c"
+    assert wb.case_key("IDD_E_39.csv", t39) == wb.case_key("IDD_E_39.csv", ot) == "IDD_E_39"
+    assert wb.case_key("IDD_c_t4.csv", {"code": "OpenTOPAS", "version": "4"}) == "IDD_c_t4"
 
 
 def test_code_compare_groups_cases_and_gives_deltas_against_the_reference(cmp_ws):
@@ -734,6 +740,28 @@ def test_code_compare_takes_the_chosen_reference_and_skips_what_it_cannot_compar
     assert wb.code_compare([])["cases"] == [] and wb.code_compare([])["ref"] is None
 
 
+def test_seed_mean_curve_leaves_out_depths_a_seed_does_not_cover(cmp_ws):
+    # every t4 curve gets a flat background of 1, so there is dose behind the peak; the second OpenTOPAS seed ends at
+    # 35 mm. Beyond it the OpenTOPAS mean is seed 1 alone; counting the missing depths as 0 would halve it there.
+    for p in cmp_ws.rglob("IDD_p63_t4*.csv"):
+        out = []
+        for l in p.read_text().splitlines():
+            if l.startswith("#"): out.append(l); continue
+            i, j, k, v = l.split(", ")
+            if p.name == "IDD_p63_t4_s2.csv" and int(k) >= 700: continue
+            out.append(f"{i}, {j}, {k}, {float(v) + 1:.8g}")
+        if p.name == "IDD_p63_t4_s2.csv": out = [l.replace("1000 bins", "700 bins") for l in out]
+        p.write_text("\n".join(out) + "\n")
+    r = wb.code_compare(cmp_paths(cmp_ws), base_tag="")
+    case = next(c for c in r["cases"] if c["case"] == "IDD_p63_t4")
+    assert {w["code"]: w for w in case["rows"]}["OpenTOPAS 4.3"]["runs"] == 2
+    d = {c["code"]: c for c in case["diff"]}["FLUKA 4-5.2"]
+    far = [v for x, v in zip(d["x"], d["y"]) if x > 36]
+    assert far and all(abs(v) < 1 for v in far)
+
+
 def test_http_compare(srv, cmp_ws):
     code, r = call(srv + "/api/compare", {"paths": cmp_paths(cmp_ws), "ref": "TOPAS 3.9", "base": "rifi0"})
     assert code == 200 and r["ref"] == "TOPAS 3.9" and len(r["cases"]) == 2
+    code, r = call(srv + "/api/compare", {"paths": cmp_paths(cmp_ws), "base": None})
+    assert code == 200 and r["base_tag"] == "" and all(c["base"] is None for c in r["cases"])

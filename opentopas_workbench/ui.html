@@ -1099,7 +1099,7 @@ $("exBody").addEventListener("click",e=>{const el=e.target.closest("a[data-edit]
 $("exReload").onclick=()=>exLoad(true);
 $("exNone").onclick=()=>{EX.sel.clear();exRender()};
 $("exCmp").onclick=()=>{if(!EX.sel.size){toast(t("nothing_selected"));return}RS.cv=true;plotPaths([...EX.sel].filter(p=>EX.items.find(i=>i.path===p&&i.kind!=="image")))};
-$("exPlot").onclick=()=>{if(!EX.sel.size){toast(t("nothing_selected"));return}plotPaths([...EX.sel].filter(p=>EX.items.find(i=>i.path===p&&i.kind!=="image")))};
+$("exPlot").onclick=()=>{if(!EX.sel.size){toast(t("nothing_selected"));return}RS.cv=false;plotPaths([...EX.sel].filter(p=>EX.items.find(i=>i.path===p&&i.kind!=="image")))};
 $("exCsv").onclick=()=>{const cols=EX.cols,q=v=>/[;"\n]/.test(v)?`"${String(v).replace(/"/g,'""')}"`:v;
  const lines=[["path"].concat(cols.slice(1).map(c=>c.label)).join(";")].concat(EX.rows.map(v=>[v.path].concat(cols.slice(1).map(c=>{const x=exVal(v,c);return x==null||Number.isNaN(x)?"":typeof x==="number"?String(+x.toPrecision(6)).replace(".",LANG==="de"?",":"."):x})).map(q).join(";")));
  const a=document.createElement("a");a.href=URL.createObjectURL(new Blob(["﻿"+lines.join("\r\n")],{type:"text/csv"}));a.download="results_overview.csv";a.click()};
@@ -1210,7 +1210,7 @@ $("resReload").onclick=()=>{RS.gen++;resLoad(RS.path)};
 $("resAll").onclick=()=>{document.querySelectorAll(".rsc").forEach(c=>{if(!c.checked){c.checked=true;c.closest("tr").classList.add("sel");if(!RS.pick.includes(c.value))RS.pick.push(c.value)}});savePick();loadPlot()};
 $("resNone").onclick=()=>{const here=new Set([...document.querySelectorAll(".rsc")].map(c=>{c.checked=false;c.closest("tr").classList.remove("sel");return c.value}));RS.pick=RS.pick.filter(p=>!here.has(p));savePick();loadPlot()};
 $("plClear").onclick=()=>{RS.pick=[];RS.zoom=null;document.querySelectorAll(".rsc").forEach(c=>{c.checked=false;c.closest("tr").classList.remove("sel")});savePick();loadPlot()};
-async function loadPlot(){renderPicked();$("plEmpty").hidden=RS.pick.length>0;if(!RS.pick.length){RS.last=null;RS.data={};clearPlot();return}
+async function loadPlot(){renderPicked();$("plEmpty").hidden=RS.pick.length>0;if(!RS.pick.length){RS.last=null;RS.data={};clearPlot();cvLoad();return}
  const stat=$("plStat").value||0,col=$("plCollapse").value,scan=$("plScan").value||0,seq=++RS.seq,data={};
  /* curves fetched with the same settings come from memory; a finished run or the reload button starts over (RS.gen) */
  const key=p=>`${RS.gen}|${stat}|${col}|${scan}|${p}`;
@@ -1286,7 +1286,7 @@ function drawPlot(opt){opt=opt||{};const main=!opt.g,c=$("plot"),g=opt.g||c.getC
   raw.map(r=>{const m=r.m,isRef=r.m===rm;const q=m.bpw>rm.bpw?Math.sqrt(m.bpw*m.bpw-rm.bpw*rm.bpw):NaN;return `<tr><td><span style="color:${r.col}">■</span> ${esc(r.p.split("/").pop())}${isRef&&raw.length>1?` <span class="mute">(${t("reference")})</span>`:""}</td><td>${esc(codeText(r.d.code))}</td><td title="${esc(r.d.beam&&r.d.beam.total?r.d.beam.total+" "+t("total"):"")}">${esc(beamLabel(r.d))}</td><td>${fx(m.peak)}</td><td>${fx(m.r80)}</td><td>${fx(m.bpw)}</td><td>${fx(m.dfo)}</td><td>${isFinite(m.pe)?m.pe.toFixed(2):"–"}</td><td>${fx(100*m.bpw/m.r80)}</td><td>${fx(100*m.dfo/m.r80)}</td><td>${fx(100*m.tail)}</td>${raw.length>1?`<td>${isRef?"":fx(m.r80-rm.r80)}</td><td>${isRef?"":fx(q)}</td>`:""}</tr>`}).join("")+"</tbody></table></div>")}}
 /* code comparison: the server groups the plotted results by case and code (code_compare); RS.cv keeps it open, also in the address */
 function cvShow(){$("cvBox").hidden=!RS.cv;$("cvClose").hidden=!RS.cv;$("cvRun").hidden=RS.cv}
-async function cvLoad(){cvShow();if(!RS.cv)return;if(!RS.pick.length){RS.cvRes=null;cvRender();return}const seq=RS.cvSeq=(RS.cvSeq||0)+1;$("cvMsg").innerHTML=`<span class="spin"></span>`;
+async function cvLoad(){cvShow();if(!RS.cv)return;if(!RS.pick.length){RS.cvSeq=(RS.cvSeq||0)+1;RS.cvRes=null;cvRender();return}const seq=RS.cvSeq=(RS.cvSeq||0)+1;$("cvMsg").innerHTML=`<span class="spin"></span>`;
  try{const r=await api("/api/compare",{paths:RS.pick,ref:RS.cvRef||"",base:$("cvBase").value.trim(),stat:+($("plStat").value||0)});if(seq!==RS.cvSeq)return;RS.cvRes=r;RS.cvRef=r.ref||"";$("cvMsg").textContent="";cvRender()}
  catch(e){if(seq===RS.cvSeq)$("cvMsg").textContent=t("error")+": "+e.message}}
 function cvCol(r,n){return PAL[Math.max(0,r.codes.indexOf(n))%PAL.length]}

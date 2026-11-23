@@ -1268,13 +1268,16 @@ def case_key(name, code):
     IDD_c_s1.csv of TOPAS 3.9, of OpenTOPAS 4.3 (often in folders t39 and t43) and IDD_c_s2_fluka.csv of FLUKA all
     give IDD_c. Only tokens of the result's own code are dropped: t4 is a filter, t43 the version of OpenTOPAS 4.3.
     The code name glued to its version (topas39, fluka4) counts too; the major alone only after a full name, never
-    after a bare t, because t3 and t4 name filters."""
-    ver = code.get("version") or ""
-    v, major = re.sub(r"\D", "", ver), (re.match(r"\d+", ver) or [""])[0]
+    after a bare t, because t3 and t4 name filters.
+    A bare number is never dropped: it may be an energy or a thickness that the other codes keep."""
+    groups = re.findall(r"\d+", code.get("version") or "")
     names = {code["code"].lower(), "topas", "opentopas"} if code["code"] != "FLUKA" else {"fluka"}
     own = set(names)
-    if v: own |= {v, "t" + v, "ot" + v, "v" + v, "f" + v} | {n + v for n in names}
-    if major: own |= {n + major for n in names}
+    # 4.3.0 is also written 43, FLUKA 4-5.2 also 45 or 452
+    for v in {"".join(groups), "".join(groups[:2])} - {""}:
+        own |= {n + v for n in names}
+        if len(v) > 1: own |= {"t" + v, "ot" + v, "v" + v, "f" + v}   # a version "4" alone must not take the filter t4
+    if groups: own |= {n + groups[0] for n in names}
     toks = [t for t in re.split(r"[_\-\s.]+", os.path.splitext(name)[0]) if t]
     kept = [t for t in toks if t.lower() not in own and not SEED_TOKEN.fullmatch(t)]
     return "_".join(kept or toks)
@@ -1347,8 +1350,11 @@ def code_compare(paths, ref=None, base_tag="rifi0", stat=0):
             for k in CMP_KEYS: row[k], row[k + "_sd"] = _stat([r[k] for r in rs])
             # the seed mean of the curves, on the grid of the first run
             x0 = rs[0]["x"]
-            ys = [[(_interp(r["x"], r["y"], xv) or 0.0) / r["plateau"] if r["plateau"] > 0 else 0.0 for xv in x0] for r in rs]
-            row["_curve"] = (x0, [sum(c) / len(c) for c in zip(*ys)])
+            # a point outside a seed's depth range is left out of the mean, not counted as dose 0
+            ys = [[(lambda v: v / r["plateau"] if v is not None and r["plateau"] > 0 else None)(_interp(r["x"], r["y"], xv))
+                   for xv in x0] for r in rs]
+            mean = [[v for v in c if v is not None] for c in zip(*ys)]
+            row["_curve"] = ([xv for xv, c in zip(x0, mean) if c], [sum(c) / len(c) for c in mean if c])
             rows[(case, n)] = row
     def base_of(case):
         toks = case.split("_")
@@ -2228,7 +2234,7 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, {"ok": True, "removed": n})
             if u.path == "/api/compare":
                 return self.send(200, code_compare([str(p) for p in b.get("paths", [])], b.get("ref") or None,
-                                                   str(b.get("base", "rifi0")).strip(), int(b.get("stat", 0) or 0)))
+                                                   str(b.get("base", "rifi0") or "").strip(), int(b.get("stat", 0) or 0)))
             if u.path == "/api/outputs":
                 out = {}
                 for f in b.get("files", [])[:2000]:
