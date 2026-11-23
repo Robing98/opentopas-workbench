@@ -954,7 +954,9 @@ async function refreshJobs(){const hist=Q.show==="failed"?5000:Q.more+5;const j=
  const aw=j.awake||{};$("awakeBadge").hidden=!aw.active;$("awakeBadge").textContent="☕ "+t("awake_badge");$("awakeBadge").title=aw.method||"";
  $("awakeMsg").textContent=aw.active?`${t("awake_on")} (${aw.method})`:aw.error?`${t("error")}: ${aw.error}`:"";
  const run=j.jobs.find(x=>x.status==="running"),wait=j.jobs.filter(x=>x.status==="queued").length;
- const held=j.jobs.filter(x=>x.status==="held").length;$("qRelease").hidden=!held;$("qRelease").textContent=t("q_release_all").replace("{n}",held);
+ const held=j.jobs.filter(x=>x.status==="held").length;$("qRelease").textContent=t("q_release_all").replace("{n}",held);
+ /* when every held job is of one group, its Start comparison button is the same click: show only that one */
+ const gheld=Object.values(j.groups||{}).filter(g=>g.held);$("qRelease").hidden=!held||(gheld.length===1&&gheld[0].held===held);
  renderGroups(j.groups||{});followGroup(j.groups||{});
  const qe=j.queue_eta;const etaTxt=qe&&(run||wait)?`${t("q_rest")} ≈ ${fmtDur(qe.seconds)}, ${t("q_finish")} ${qe.finish}${qe.unknown?` (${qe.unknown} ${t("q_unknown")})`:""}`:(run||wait)?t("q_eta_wait"):"";
  $("qEta").textContent=etaTxt?"· "+etaTxt:"";
