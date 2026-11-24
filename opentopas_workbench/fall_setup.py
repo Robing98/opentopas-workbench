@@ -386,6 +386,7 @@ def _scan(mrt, root, cache_roots=(), pet_dir=None, extra_runs=(), default_roots=
     outs = dict(letd.default_out(root)); outs.update({"pet_" + k: x for k, x in pet_run.default_out(root).items()})
     rows["ausgabe"] = {"wert": outs.get("out"), "quelle": "zone"}
     rows["kennzahlen"] = {"wert": outs.get("kz"), "quelle": "zone"}
+    rows["pet_ausgabe"] = {"wert": outs.get("pet_out"), "quelle": "zone"}
     rows["synthseg"] = {"wert": True, "quelle": "standard"}
     rows["seite_neu"] = {"wert": True, "quelle": "standard"}
     return {"zeilen": _mark(rows)}
@@ -506,6 +507,81 @@ def _cachef_run(cmd, on_end):
         if on_end:
             try: on_end(st)
             except Exception: pass
+
+
+# ------------------------------------------------------------------ the start check of the assistant
+# The rows can all be filled while the start would still stop: build_page.py needs Skripte/viewer.json beside the page
+# and cacheG beside cacheF. The assistant runs the same checks as the start, so that "save" is offered only for a case
+# that starts, and it fills what it can fill itself from the user's own copies.
+def _base(root):
+    return root if os.path.isdir(os.path.join(root, "lokal")) else os.path.join(root, "workspace")
+
+
+def viewer_json_source(root):
+    """The user's own copy of the viewer's settings (zone eigen), from which a viewer without one is completed."""
+    p = os.path.join(_base(root), "eigen", "mrt-viewer", "viewer.json")
+    return p if os.path.isfile(p) else None
+
+
+def _forms(values):
+    v = lambda k: values.get(k) if values.get(k) not in (None, "") else ""
+    flag = lambda k: "1" if values.get(k, True) not in (False, "", "0", "false") else ""
+    letd_f = {"mrt": v("bilder"), "run": v("lauf"), "ct": v("ct"), "rs": v("rtstruct"), "cache": v("cache"),
+              "view": v("daten"), "rx": str(v("verschreibung")), "fx": str(v("fraktionen")), "out": v("ausgabe"),
+              "kz": v("kennzahlen"), "build": flag("seite_neu"), "synthseg": flag("synthseg")}
+    pets = values.get("pet") or []
+    pet_f = {"mrt": v("bilder"), "pet": pets[0] if pets else "", "cache": v("cache"), "view": v("daten"),
+             "ref": "brain", "side": "", "labels": "", "out": v("pet_ausgabe"), "build": flag("seite_neu")} if pets else None
+    return letd_f, pet_f
+
+
+def fixes(values, root):
+    """What the assistant can fill itself before the start: viewer.json from the zone eigen into the viewer's Skripte,
+    cacheG from the viewer's stand into the cacheF it made. Never into a folder it did not make, never over a file."""
+    out = []
+    cache, daten = (letd.to_local(values.get(k) or "") for k in ("cache", "daten"))
+    if not daten: return out
+    sk = os.path.join(os.path.dirname(daten), "Skripte")
+    vj, src = os.path.join(sk, "viewer.json"), viewer_json_source(root)
+    if os.path.isdir(sk) and not os.path.isfile(vj) and src:
+        out.append({"art": "viewer_json", "ziel": vj, "quelle": src})
+    mine = cachef_target(root, values.get("seite"))
+    if cache and mine and os.path.isdir(cache) and os.path.realpath(cache) == os.path.realpath(mine):
+        g = os.path.join(os.path.dirname(mine), "cacheG")
+        names = [n for s, n in CACHEG if not os.path.isfile(os.path.join(g, n)) and os.path.isfile(os.path.join(sk, "stand", s))]
+        if names: out.append({"art": "cacheg", "ziel": g, "dateien": names})
+    return out
+
+
+CACHEG = (("cacheG_log.json", "log.json"), ("cacheG_vent.json", "vent.json"))   # as tools/mrt_overlay/cachef.py
+
+
+def start_check(values, root, viewer=None):
+    """The checks of the start on the rows: {"probleme": {"letd": [...], "pet": [...]}, "behebbar": [...], "ok"}.
+    PET is checked when a PET series is chosen."""
+    letd_f, pet_f = _forms(values)
+    probs = {"letd": letd.check(letd_f, root, viewer)[0]}
+    if pet_f: probs["pet"] = pet_run.check(pet_f, root, viewer)[0]
+    probs = {k: x for k, x in probs.items() if x}
+    return {"probleme": probs, "behebbar": fixes(values, root), "ok": not probs}
+
+
+def prepare(values, root, viewer=None):
+    """Fills what fixes() names, then checks again."""
+    for f in fixes(values, root):
+        if f["art"] == "viewer_json":
+            tmp = f["ziel"] + ".part"
+            with open(f["quelle"], "rb") as a, open(tmp, "wb") as b: b.write(a.read())
+            os.replace(tmp, f["ziel"])
+        elif f["art"] == "cacheg":
+            sk = os.path.join(os.path.dirname(letd.to_local(values["daten"])), "Skripte", "stand")
+            os.makedirs(f["ziel"], exist_ok=True)
+            for s, n in CACHEG:
+                if n in f["dateien"]:
+                    with open(os.path.join(sk, s), "rb") as a, open(os.path.join(f["ziel"], n + ".part"), "wb") as b:
+                        b.write(a.read())
+                    os.replace(os.path.join(f["ziel"], n + ".part"), os.path.join(f["ziel"], n))
+    return start_check(values, root, viewer)
 
 
 # what a pasted or chosen path must be, per row: a folder, a file, and what it holds

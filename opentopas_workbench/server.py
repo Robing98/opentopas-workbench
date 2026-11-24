@@ -1898,6 +1898,8 @@ def fall_start(folder, want_letd, want_pet, pet_serie=None):
     forms = {}
     if want_letd: forms["letd"] = fall_setup.letd_form(folder)
     if want_pet: forms["pet"] = fall_setup.pet_form(folder, pet_serie)
+    if "pet" in forms and not forms["pet"].get("out"):    # a case saved before the assistant set the PET output
+        forms["pet"]["out"] = pet_run.default_out(STATE["root"]).get("out", "")
     probs = {}
     if "letd" in forms: probs["letd"] = letd.check(forms["letd"], STATE["root"], viewer)
     if "pet" in forms: probs["pet"] = pet_run.check(forms["pet"], STATE["root"], viewer)
@@ -1942,6 +1944,9 @@ def fall_post(what, b):
             try: return 200, fall_setup.cachef_start(b, root)
             except ValueError as e: return 200, {"fehler": str(e)}
             except RuntimeError: return 409, {"error": "running"}
+        if what in ("pruefen", "vorbereiten"):    # the start's own checks on the rows, before the case is saved
+            go = fall_setup.prepare if what == "vorbereiten" else fall_setup.start_check
+            return 200, go(b.get("werte") or {}, root, STATE["cfg"].get("viewer_dir"))
         if what == "cachef_status": return 200, fall_setup.cachef_status()
         if what == "cachef_stop": return 200, {"stopped": fall_setup.cachef_stop(), **fall_setup.cachef_status()}
         if what == "save":

@@ -58,6 +58,8 @@ def viewer(top, days=("2001-02-01", "2001-05-01"), refday="2001-05-01", kind="PN
     open(page, "w", encoding="utf-8").write("<!doctype html><script>\nconst D = "
                                              + json.dumps(data).replace("</", "<\\/") + ";\nMRT.go(D);\n</script>")
     json.dump(log, open(os.path.join(stand, "cacheF_log.json"), "w"))
+    json.dump({"g": 1}, open(os.path.join(stand, "cacheG_log.json"), "w"))
+    json.dump({"vent": 1}, open(os.path.join(stand, "cacheG_vent.json"), "w"))
     return page, daten, os.path.join(an, "Skripte"), vols
 
 
@@ -65,7 +67,10 @@ def test_lossless_page_gives_the_volumes_back_exactly(tmp_path):
     page, daten, sk, vols = viewer(str(tmp_path / "v"))
     out = str(tmp_path / "cacheF")
     r = cf.build(page, daten, os.path.join(sk, "stand", "cacheF_log.json"), out, say=lambda m: None)
-    assert r == {"volumen": 4, "fehlen": [], "ref_t1": "2001-05-01", "maske": True}
+    assert r == {"volumen": 4, "fehlen": [], "ref_t1": "2001-05-01", "maske": True, "cacheG": ["log.json", "vent.json"]}
+    # build_page.py reads cacheG beside cacheF: the viewer's copies of its state, as einsortieren.py lays them out
+    assert json.load(open(tmp_path / "cacheG" / "log.json")) == {"g": 1}
+    assert json.load(open(tmp_path / "cacheG" / "vent.json")) == {"vent": 1}
     for name in ("t1_2001-02-01", "flair_2001-05-01"):
         a = np.load(os.path.join(out, name + ".npy"))
         assert a.dtype == np.uint8 and a.shape == (NZ, NY, NX) and (a == vols[name]).all()
@@ -198,4 +203,73 @@ def test_a_rerun_swaps_the_folder_whole(tmp_path):
     os.remove(os.path.join(daten, "flair_2001-02-01.js"))
     r = cf.build(page, daten, log, out, say=lambda m: None)
     assert r["fehlen"] == ["flair_2001-02-01"] and "flair_2001-02-01.npy" not in os.listdir(out)
-    assert sorted(os.listdir(tmp_path / "c")) == ["cacheF"]
+    assert sorted(os.listdir(tmp_path / "c")) == ["cacheF", "cacheG"]      # no .part or .alt left
+
+
+def held_case(tmp_path):
+    """Robin's state after the hand test of 0b0cbbd: a cacheF made from the viewer earlier, without cacheG beside it,
+    a viewer whose Skripte has no viewer.json, and the user's own copy of it in the zone eigen."""
+    view = tmp_path / "MRT Bilder"
+    page, daten, sk, _ = viewer(str(view))
+    open(os.path.join(sk, "befunde.json"), "w").write("{}")
+    ws = tmp_path / "ws"; os.makedirs(ws / "workspace" / "lokal"); os.makedirs(ws / "workspace" / "eigen" / "mrt-viewer")
+    open(ws / "workspace" / "eigen" / "mrt-viewer" / "viewer.json", "w").write('{"own": true}')
+    root = str(ws)
+    target = fall_setup.cachef_target(root, page)
+    cf.build(page, daten, os.path.join(sk, "stand", "cacheF_log.json"), target, say=lambda m: None)
+    import shutil; shutil.rmtree(os.path.join(os.path.dirname(target), "cacheG"))
+    vdir = tmp_path / "viewer-repo"; os.makedirs(vdir); open(vdir / "build_page.py", "w").write("")
+    values = {"seite": page, "daten": daten, "skripte": sk, "cache": target, "bilder": str(view), "seite_neu": True}
+    return root, str(vdir), values, target, sk
+
+
+def build_probs(r):
+    return [m for m in r["probleme"].get("letd", []) if m["field"] == "build"]
+
+
+def test_the_start_check_names_what_the_page_lacks_and_fills_it_from_own_copies(tmp_path):
+    root, vdir, values, target, sk = held_case(tmp_path)
+    r = fall_setup.start_check(values, root, vdir)
+    assert not r["ok"]
+    [b] = build_probs(r)
+    assert b["msg"] == "no_case" and "viewer.json" in b["args"][0] and "cacheG" in b["args"][0]
+    assert sorted(f["art"] for f in r["behebbar"]) == ["cacheg", "viewer_json"]
+    r = fall_setup.prepare(values, root, vdir)
+    assert build_probs(r) == [] and r["behebbar"] == []
+    assert json.load(open(os.path.join(sk, "viewer.json"))) == {"own": True}
+    g = os.path.join(os.path.dirname(target), "cacheG")
+    assert json.load(open(os.path.join(g, "log.json"))) == {"g": 1} and os.path.isfile(os.path.join(g, "vent.json"))
+
+
+def test_the_start_check_never_writes_over_a_file_or_into_a_foreign_cachef(tmp_path):
+    root, vdir, values, target, sk = held_case(tmp_path)
+    open(os.path.join(sk, "viewer.json"), "w").write('{"viewer": "own"}')
+    foreign = tmp_path / "elsewhere" / "cacheF"
+    import shutil; shutil.copytree(target, foreign)
+    values["cache"] = str(foreign)
+    r = fall_setup.prepare(values, root, vdir)
+    assert r["behebbar"] == [] and not os.path.exists(tmp_path / "elsewhere" / "cacheG")
+    assert json.load(open(os.path.join(sk, "viewer.json"))) == {"viewer": "own"}
+    [b] = build_probs(r)
+    assert "cacheG" in b["args"][0] and "viewer.json" not in b["args"][0]
+
+
+def test_the_start_check_passes_the_case_whose_start_runs_through(tmp_path):
+    """All rows of a startable case: no problem at all, so save is offered. With a PET series the PET start is checked
+    too, and its output comes from the scan's zone default."""
+    root, vdir, values, target, sk = held_case(tmp_path)
+    fall_setup.prepare(values, root, vdir)
+    run = tmp_path / "run"; os.makedirs(run)
+    for n in ("letd.npy", "rbe_dose_1_1.npy", "rbe_dose_1_1.dcm"): open(run / n, "w").write("")
+    ct = tmp_path / "ct"; os.makedirs(ct); open(ct / "a.dcm", "w").write("")
+    pet = tmp_path / "pet"; os.makedirs(pet); open(pet / "b.dcm", "w").write("")
+    rows = fall_setup.scan(values["bilder"], root, default_roots=[])["zeilen"]
+    assert rows["pet_ausgabe"]["wert"] and rows["pet_ausgabe"]["quelle"] == "zone"
+    values.update(lauf=str(run), ct=str(ct), fraktionen=30, verschreibung=54, ausgabe=rows["ausgabe"]["wert"],
+                  kennzahlen=str(tmp_path / "ws" / "workspace" / "lokal" / "kz.json"), pet=[str(pet)],
+                  pet_ausgabe=rows["pet_ausgabe"]["wert"])
+    r = fall_setup.start_check(values, root, vdir)
+    assert r["ok"], r["probleme"]
+    values["pet_ausgabe"] = None
+    r = fall_setup.start_check(values, root, vdir)
+    assert [m["field"] for m in r["probleme"]["pet"]] == ["out"]

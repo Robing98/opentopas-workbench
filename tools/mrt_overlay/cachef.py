@@ -9,6 +9,9 @@ of the Timeline Viewer writes them so). Decoded, they give the cacheF that the c
     ref_t1.nii.gz   the 3D T1 of the reference day (refday), spacing sp, origin 0, unit direction
     mask.npy        the brain mask from mask_all.js (lossless): 0 outside, 1 inside
 
+Beside it, cacheG/log.json and cacheG/vent.json from the viewer's copies (Skripte/stand/cacheG_log.json and
+cacheG_vent.json): build_page.py reads them next to cacheF, as in the working folder einsortieren.py fills from stand.
+
 The volumes are lossy (WEBP, quality 80) and 8 bit. That is enough for the mutual-information registration onto the
 CT and the PET, and they lie exactly on the grid the page shows, which is what the layers must match. A full rebuild
 from the DICOM exams stays a later option.
@@ -111,7 +114,25 @@ def build(page, daten, stand_log, out, say=print):
         if had: os.replace(old, out)
         raise
     if had: shutil.rmtree(old, ignore_errors=True)
+    r["cacheG"] = copy_cacheg(os.path.dirname(stand_log), os.path.join(os.path.dirname(out.rstrip("/\\")), "cacheG"))
     return r
+
+
+CACHEG = (("cacheG_log.json", "log.json"), ("cacheG_vent.json", "vent.json"))
+
+
+def copy_cacheg(stand, cacheg):
+    """The viewer's copies of the cacheG state into `cacheg`, fresh each time as einsortieren.py does. Returns the
+    names written; one the viewer lacks is left out and the start check names it."""
+    done = []
+    for src, name in CACHEG:
+        s = os.path.join(stand, src)
+        if not os.path.isfile(s): continue
+        os.makedirs(cacheg, exist_ok=True)
+        shutil.copyfile(s, os.path.join(cacheg, name + ".part"))
+        os.replace(os.path.join(cacheg, name + ".part"), os.path.join(cacheg, name))
+        done.append(name)
+    return done
 
 
 def _build(page, daten, stand_log, out, say):
