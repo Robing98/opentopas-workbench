@@ -2086,6 +2086,11 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/api/letd": return self.send(200, letd_info())
             if u.path == "/api/fall": return self.send(200, fall_info())
             if u.path == "/api/pet": return self.send(200, pet_info())
+            if u.path == "/api/letd/sheet":
+                st = letd.JOB["state"] or {}
+                p = "" if st.get("status") == "running" else letd.sheet_path(st.get("out_local"))
+                if not p: return self.send(404, {"error": "not found"})
+                with open(p, "rb") as fh: return self.send(200, fh.read(), "image/png")
             if u.path == "/api/pet/sheet":
                 p = pet_run.sheet_path()
                 if not p: return self.send(404, {"error": "not found"})

@@ -451,6 +451,8 @@ kbd{font:12.5px ui-monospace,Consolas,monospace;padding:1px 6px;border:1px solid
     <div class="scroll" style="max-height:360px"><table><thead><tr><th data-i18n="lt_exam"></th><th data-i18n="lt_native"></th><th data-i18n="lt_suitable"></th><th data-i18n="lt_check_rms"></th><th data-i18n="lt_check_ok"></th></tr></thead><tbody id="ltExams"></tbody></table></div>
     <h2 style="margin-top:14px" data-i18n="lt_look"></h2>
     <div id="ltLook"></div>
+    <p class="log-err" id="ltWarn" hidden></p>
+    <img id="ltSheet" alt="" style="max-width:100%;margin-top:8px;display:block" hidden>
     <p class="mute" style="font-size:13px" id="ltHint"></p>
   </div>
   <!-- PET on the same MRIs: tools/mrt_overlay/run_pet.sh from one form (pet_run.py) -->
@@ -1647,7 +1649,7 @@ Object.assign(I18N.de,{tab_letd:"LETd auf MRT",lt_title:"LETd-Ebene auf den Verl
  lt_exam:"Untersuchung",lt_native:"Raster mm",lt_suitable:"geeignet",lt_check_rms:"Abweichung RMS mm",lt_check_ok:"unter 1,5 mm",lt_look:"Hinschau-Liste",lt_look_none:"Keine Region über den Schwellen.",
  lt_open:"Verlauf.html öffnen",lt_ok:"Alle Pfade passen.",lt_bad:"Bitte die markierten Felder prüfen.",lt_found:"Gefunden: {n} von 2.",lt_none_found:"Nichts gefunden, bitte selbst eintragen.",
  lt_running:"läuft",lt_done:"fertig",lt_failed:"fehlgeschlagen",lt_stopped:"gestoppt",lt_elapsed:"Laufzeit",lt_exam_n:"Untersuchung {i} von {n}",lt_out_at:"Ausgabe",
- lt_reg:"Registrierung CT auf MRT: Streuung {s} mm",lt_rx:"Verschreibung {v} Gy(RBE) ({f})",lt_regions:"{n} Regionen, zusammen {v} ml",lt_region1:"1 Region, {v} ml",lt_noscript:"run.sh fehlt in dieser Installation.",
+ lt_reg:"Registrierung CT auf MRT: Streuung {s} mm",lt_rx:"Verschreibung {v} Gy(RBE) ({f})",lt_sheet_alt:"Kontrollblatt: PTV (cyan) gegen 95-%-Isodose (orange), axial, koronar, sagittal",lt_regions:"{n} Regionen, zusammen {v} ml",lt_region1:"1 Region, {v} ml",lt_noscript:"run.sh fehlt in dieser Installation.",
  lt_s_check:"Prüfen",lt_s_export:"Export",lt_s_synthseg:"SynthSeg",lt_s_register:"Registrierung",lt_s_exams:"Untersuchungen",lt_s_write:"Schreiben",lt_s_page:"Verlauf.html",
  lt_m_empty:"Pflichtfeld.",lt_m_not_found:"Nicht gefunden.",lt_m_missing:"Es fehlt: {0}",lt_m_no_dicom:"Keine DICOM-Dateien im Ordner.",lt_m_number:"Eine Zahl über 0.",
  lt_m_rx_or_rs:"Ohne RT Structure Set bitte die Verschreibung angeben.",lt_m_public_zone:"Liegt in workspace/offen. Ergebnisse aus deinem Plan dürfen nicht in den öffentlichen Teil.",
@@ -1666,7 +1668,7 @@ Object.assign(I18N.en,{tab_letd:"LETd on MRI",lt_title:"LETd layer on the follow
  lt_exam:"Exam",lt_native:"Grid mm",lt_suitable:"suitable",lt_check_rms:"Offset RMS mm",lt_check_ok:"below 1.5 mm",lt_look:"Look list",lt_look_none:"No region above the thresholds.",
  lt_open:"Open Verlauf.html",lt_ok:"All paths fit.",lt_bad:"Please check the marked fields.",lt_found:"Found: {n} of 2.",lt_none_found:"Nothing found, please enter them.",
  lt_running:"running",lt_done:"done",lt_failed:"failed",lt_stopped:"stopped",lt_elapsed:"Elapsed",lt_exam_n:"Exam {i} of {n}",lt_out_at:"Output",
- lt_reg:"Registration CT onto MRI: spread {s} mm",lt_rx:"Prescription {v} Gy(RBE) ({f})",lt_regions:"{n} regions, {v} ml in total",lt_region1:"1 region, {v} ml",lt_noscript:"run.sh is missing in this installation.",
+ lt_reg:"Registration CT onto MRI: spread {s} mm",lt_rx:"Prescription {v} Gy(RBE) ({f})",lt_sheet_alt:"Check sheet: PTV (cyan) against the 95 % isodose (orange), axial, coronal, sagittal",lt_regions:"{n} regions, {v} ml in total",lt_region1:"1 region, {v} ml",lt_noscript:"run.sh is missing in this installation.",
  lt_s_check:"Check",lt_s_export:"Export",lt_s_synthseg:"SynthSeg",lt_s_register:"Registration",lt_s_exams:"Exams",lt_s_write:"Write",lt_s_page:"Verlauf.html",
  lt_m_empty:"Required.",lt_m_not_found:"Not found.",lt_m_missing:"Missing: {0}",lt_m_no_dicom:"No DICOM files in the folder.",lt_m_number:"A number above 0.",
  lt_m_rx_or_rs:"Without an RT Structure Set, please give the prescription.",lt_m_public_zone:"Lies in workspace/offen. Results from your plan must not go to the public part.",
@@ -1730,6 +1732,11 @@ function ltResult(j){const r=j.result;$("ltRes").hidden=!r;if(!r)return;const nf
  $("ltExams").innerHTML=(r.exams||[]).map(e=>`<tr><td>${esc(e.track)} ${esc(e.day)}</td><td>${esc((e.native_mm||[]).map(nf).join(" × "))}</td><td>${yes(e.suitable)}</td><td>${e.check_rms_mm!=null?nf(e.check_rms_mm):"–"}</td><td>${yes(e.check_ok)}</td></tr>`).join("");
  const look=r.look_list||[];
  $("ltLook").innerHTML=look.length?`<p>${esc(t(look.length===1?"lt_region1":"lt_regions").replace("{n}",look.length).replace("{v}",nf(look.reduce((a,x)=>a+(x.volume_ml||0),0))))}</p>`:`<p class="mute">${esc(t("lt_look_none"))}</p>`;
+ /* the PTV check of the run (layer.ptv_check): a PTV mostly outside the 50 % isodose is most likely the wrong ROI */
+ const w=$("ltWarn");w.textContent=r.warnung||"";w.hidden=!r.warnung;
+ const img=$("ltSheet");img.alt=t("lt_sheet_alt");
+ const src="/api/letd/sheet?token="+encodeURIComponent(TOKEN)+"&t="+encodeURIComponent(j.end||"");
+ if(r.sheet){if(img.getAttribute("src")!==src)img.src=src;img.hidden=false}else img.hidden=true;
  $("ltHint").textContent=r.hinweis||""}
 
 /* ---------- PET on MRI, in the LETd tab: one form for tools/mrt_overlay/run_pet.sh (pet_run.py) */
@@ -1821,7 +1828,7 @@ Object.assign(I18N.de,{fc_title:"Fall",fc_intro:"Fall wählen, Ebenen ankreuzen,
  fc_case:"Fall",fc_letd:"LETd",fc_pet:"PET",fc_new:"Fall einrichten",fc_demo:"Demo-Fall",fc_none:"noch kein Fall",fc_expert:"Fachansicht: alle Pfade einzeln",
  fc_wiz:"Fall einrichten",fc_mrt:"MRT-Bilder-Ordner",fc_pick:"Ordner wählen",fc_scan:"Suchen",fc_row:"Was",fc_value:"Gefunden",fc_src:"Quelle",fc_change:"Ändern",
  fc_more:"Mehr: Ausgabe, Kennzahlen, SynthSeg, Seite neu bauen",fc_id:"Name des Falls",fc_save:"Fall speichern",fc_cancel:"Abbrechen",fc_up:"Ordner höher",fc_take:"Diesen wählen",
- fc_r_seite:"Verlauf.html",fc_r_daten:"Verlauf-Daten",fc_r_skripte:"Skripte",fc_r_cache:"Ausgerichtete MRT-Volumen (cacheF)",fc_r_lauf:"plan_mc-Lauf",fc_r_ct:"Planungs-CT",fc_r_rtstruct:"RTSTRUCT",
+ fc_r_seite:"Verlauf.html",fc_r_daten:"Verlauf-Daten",fc_r_skripte:"Skripte",fc_r_cache:"Ausgerichtete MRT-Volumen (cacheF)",fc_r_lauf:"plan_mc-Lauf",fc_r_ct:"Planungs-CT",fc_r_rtstruct:"RTSTRUCT",fc_r_ptv:"PTV-Struktur",fc_ptv_auto:"automatisch (größtes PTV)",fc_ptv_none:"keine Strukturnamen lesbar: das Werkzeug wählt selbst",fc_q_ptv_vorschlag:"mehrere PTV: bitte die richtige Struktur wählen",
  fc_r_rtplan:"RTPLAN",fc_r_fraktionen:"Fraktionen",fc_r_verschreibung:"Verordnung Gy(RBE)",fc_r_pet:"PET-Serien",fc_r_ausgabe:"Ausgabe LETd",fc_r_pet_ausgabe:"Ausgabe PET",fc_r_kennzahlen:"Kennzahlen",
  fc_r_synthseg:"SynthSeg (Ventrikelsaum)",fc_r_seite_neu:"Verlauf.html neu bauen",fc_q_gefunden:"gefunden",fc_q_gemerkt:"gemerkt",fc_q_lauf:"aus dem Lauf",fc_q_plan:"aus dem RTPLAN",
  fc_q_fehlt:"fehlt, bitte wählen",fc_q_optional:"nicht gefunden (optional)",fc_q_export:"aus dem Export-Ordner",fc_b_fehlt:"existiert nicht",fc_b_falsch:"passt nicht",fc_b_ok:"geprüft",fc_paste:"Pfad einfügen oder Ordner wählen",fc_drives:"Laufwerke",fc_unread:"{n} Dateien ließen sich nicht lesen, vermutlich OneDrive-Platzhalter (nur in der Cloud): {p}. Im Explorer \"Immer auf diesem Gerät behalten\" wählen und neu suchen.",fc_q_zone:"fest nach Zone",fc_q_standard:"Standard",fc_q_keins:"keins gefunden (optional)",fc_q_gewaehlt:"gewählt",fc_q_eingegeben:"gewählt",
@@ -1832,7 +1839,7 @@ Object.assign(I18N.en,{fc_title:"Case",fc_intro:"Choose a case, tick the layers,
  fc_case:"Case",fc_letd:"LETd",fc_pet:"PET",fc_new:"Set up a case",fc_demo:"Demo case",fc_none:"no case yet",fc_expert:"Expert view: every path on its own",
  fc_wiz:"Set up a case",fc_mrt:"MRI image folder",fc_pick:"Choose folder",fc_scan:"Search",fc_row:"What",fc_value:"Found",fc_src:"Source",fc_change:"Change",
  fc_more:"More: output, key figures, SynthSeg, rebuild page",fc_id:"Case name",fc_save:"Save case",fc_cancel:"Cancel",fc_up:"Up",fc_take:"Choose this",
- fc_r_seite:"Verlauf.html",fc_r_daten:"Verlauf-Daten",fc_r_skripte:"Skripte",fc_r_cache:"Aligned MRI volumes (cacheF)",fc_r_lauf:"plan_mc run",fc_r_ct:"Planning CT",fc_r_rtstruct:"RTSTRUCT",
+ fc_r_seite:"Verlauf.html",fc_r_daten:"Verlauf-Daten",fc_r_skripte:"Skripte",fc_r_cache:"Aligned MRI volumes (cacheF)",fc_r_lauf:"plan_mc run",fc_r_ct:"Planning CT",fc_r_rtstruct:"RTSTRUCT",fc_r_ptv:"PTV structure",fc_ptv_auto:"automatic (largest PTV)",fc_ptv_none:"no structure names readable: the tool picks itself",fc_q_ptv_vorschlag:"several PTVs: please choose the right structure",
  fc_r_rtplan:"RTPLAN",fc_r_fraktionen:"Fractions",fc_r_verschreibung:"Prescription Gy(RBE)",fc_r_pet:"PET series",fc_r_ausgabe:"LETd output",fc_r_pet_ausgabe:"PET output",fc_r_kennzahlen:"Key figures",
  fc_r_synthseg:"SynthSeg (ventricle margin)",fc_r_seite_neu:"Rebuild Verlauf.html",fc_q_gefunden:"found",fc_q_gemerkt:"remembered",fc_q_lauf:"from the run",fc_q_plan:"from the RTPLAN",
  fc_q_fehlt:"missing, please choose",fc_q_optional:"not found (optional)",fc_q_export:"from the export folder",fc_b_fehlt:"does not exist",fc_b_falsch:"does not fit",fc_b_ok:"checked",fc_paste:"paste a path or choose a folder",fc_drives:"Drives",fc_unread:"{n} files could not be read, probably OneDrive placeholders (cloud only): {p}. Choose \"Always keep on this device\" in Explorer and search again.",fc_q_zone:"fixed by zone",fc_q_standard:"default",fc_q_keins:"none found (optional)",fc_q_gewaehlt:"chosen",fc_q_eingegeben:"chosen",
@@ -1840,7 +1847,7 @@ Object.assign(I18N.en,{fc_title:"Case",fc_intro:"Choose a case, tick the layers,
  fc_nolokal:"No folder workspace/lokal: a case with a treatment plan belongs there.",fc_badid:"Name: letters, digits, . _ -",fc_need:"Still missing: {v}",fc_nopet:"The case has no PET series.",fc_np:"No layer",
  fc_make:"Make from the viewer",fc_pre_ok:"Start check: everything is there, the start will run through.",fc_pre_bad:"Start check, still missing before the start: {v}",fc_pre_wait:"Start check running …",fc_fix:"Take over",fc_fix_viewer_json:"viewer.json is missing in the Skripte folder: take it over from workspace/eigen/mrt-viewer?",fc_fix_cacheg:"cacheG is missing beside cacheF ({v}): take it over from Skripte/stand?",fc_pre_need:"Pass the start check first.",fc_q_erzeugbar:"missing: make it from the viewer with the button",fc_making:"being made",fc_q_erzeugt:"made from the viewer",fc_make_fail:"Making failed",fc_stop:"Cancel",fc_make_stopped:"cancelled",fc_q_vorschlag:"proposal: does it belong to this viewer? Accept or change",fc_accept:"Accept"});
 const FC={rows:null,mrt:"",br:null,brKey:null,brFile:false,cases:[],cj:null,ck:null,ckKey:null};
-const FC_MAIN=["seite","daten","skripte","cache","lauf","ct","rtstruct","rtplan","fraktionen","verschreibung","pet"],FC_MORE=["ausgabe","pet_ausgabe","kennzahlen","synthseg","seite_neu"];
+const FC_MAIN=["seite","daten","skripte","cache","lauf","ct","rtstruct","ptv","rtplan","fraktionen","verschreibung","pet"],FC_MORE=["ausgabe","pet_ausgabe","kennzahlen","synthseg","seite_neu"];
 const FC_FILE={seite:1,rtstruct:1,rtplan:1,kennzahlen:1},FC_NUM={fraktionen:1,verschreibung:1},FC_BOOL={synthseg:1,seite_neu:1};
 async function fcLoad(){try{const r=await api("/api/fall");FC.cases=r.faelle||[];const sel=$("fcSel");
   sel.innerHTML=FC.cases.length?FC.cases.map(c=>`<option value="${esc(c.ordner)}">${esc(c.fall_id||c.anzeige)}${c.fehler?" ⚠":""}</option>`).join(""):`<option value="">${esc(t("fc_none"))}</option>`;
@@ -1873,13 +1880,14 @@ function fcRow(k){const r=FC.rows[k]||{wert:null,quelle:"fehlt"};let val;
  if(FC_BOOL[k])val=`<label><input type="checkbox" data-fcb="${k}"${r.wert?" checked":""}></label>`;
  else if(FC_NUM[k])val=`<input type="text" data-fcn="${k}" value="${esc(r.wert==null?"":String(r.wert))}" style="width:7em">`;
  else if(k==="lauf"&&(r.kandidaten||[]).length>1)val=`<select data-fcs="lauf">${r.kandidaten.map(c=>`<option value="${esc(c.wert)}"${c.wert===r.wert?" selected":""}>${esc(c.info)} · ${esc(fcWin(c.wert))}</option>`).join("")}</select>`;
+ else if(k==="ptv")val=(r.kandidaten||[]).length?`<select data-fcs="ptv"><option value="">${esc(t("fc_ptv_auto"))}</option>${r.kandidaten.map(c=>`<option value="${esc(c.wert)}"${c.wert===r.wert?" selected":""}>${esc(c.wert)}</option>`).join("")}</select>`:`<span class="mute">${esc(t("fc_ptv_none"))}</span>`;
  else if(k==="pet"&&(r.kandidaten||[]).length)val=r.kandidaten.map(c=>`<label style="display:block"><input type="checkbox" data-fcp="${esc(c.wert)}"${(r.wert||[]).includes(c.wert)?" checked":""}> ${esc(c.info)} · ${esc(fcWin(c.wert))}</label>`).join("");
  else val=`<input type="text" data-fct="${k}" value="${esc(fcWin(Array.isArray(r.wert)?r.wert[0]||"":r.wert||""))}" placeholder="${esc(t("fc_paste"))}" spellcheck="false" autocomplete="off" style="width:100%">`;
- let btn=FC_BOOL[k]||FC_NUM[k]?"":`<button data-fcc="${k}">${esc(t("fc_change"))}</button>`;
+ let btn=FC_BOOL[k]||FC_NUM[k]||k==="ptv"?"":`<button data-fcc="${k}">${esc(t("fc_change"))}</button>`;
  const red=(r.quelle==="fehlt"&&r.pflicht!==false)||r.quelle==="vorschlag"||r.befund==="fehlt"||r.befund==="falsch";
  /* a cacheF found without the viewer's copy of its log may be another patient's: the user confirms it */
  if(r.quelle==="vorschlag")btn=`<button data-fcok="${k}">${esc(t("fc_accept"))}</button> `+btn;
- let src=r.befund&&r.befund!=="ok"?t("fc_b_"+r.befund):t("fc_q_"+r.quelle)+(r.befund==="ok"?" · "+t("fc_b_ok"):"");
+ let src=r.befund&&r.befund!=="ok"?t("fc_b_"+r.befund):k==="ptv"&&r.quelle==="vorschlag"?t("fc_q_ptv_vorschlag"):t("fc_q_"+r.quelle)+(r.befund==="ok"?" · "+t("fc_b_ok"):"");
  /* cacheF gone: the viewer's page holds the volumes, the server decodes them (fall_setup.cachef_start) */
  if(k==="cache"&&r.erzeugbar&&!r.wert){const j=FC.cj||{};
   btn=(j.running?`<button data-fcstop="1">${esc(t("fc_stop"))}</button> `:`<button data-fcmake="1">${esc(t("fc_make"))}</button> `)+btn;
@@ -1892,6 +1900,7 @@ function fcRows(){$("fcRows").innerHTML=FC_MAIN.map(fcRow).join("");$("fcRowsMor
  document.querySelectorAll("[data-fct]").forEach(i=>i.onchange=()=>fcPasted(i.dataset.fct,i.value));
  document.querySelectorAll("[data-fcp]").forEach(i=>i.onchange=()=>{const r=FC.rows.pet;r.wert=[...document.querySelectorAll("[data-fcp]")].filter(x=>x.checked).map(x=>x.dataset.fcp)});
  const s=document.querySelector("[data-fcs=lauf]");if(s)s.onchange=()=>fcSetRun(s.value);
+ const sp=document.querySelector("[data-fcs=ptv]");if(sp)sp.onchange=()=>{const r=FC.rows.ptv;r.wert=sp.value||null;r.quelle="gewaehlt";fcRows()};
  const mk=document.querySelector("[data-fcmake]");if(mk)mk.onclick=fcMake;
  const ms=document.querySelector("[data-fcstop]");if(ms)ms.onclick=async()=>{try{FC.cj=await api("/api/fall/cachef_stop",{});fcRows()}catch(e){toast(t("error")+": "+e.message,"err")}};
  document.querySelectorAll("[data-fcok]").forEach(b=>b.onclick=()=>{const r=FC.rows[b.dataset.fcok];r.quelle="gewaehlt";fcRows()});
@@ -1925,11 +1934,15 @@ async function fcSet(k,p,befund){const was=FC.rows[k]||{};
   if(["ct","rtstruct","rtplan"].includes(k)&&befund!=="falsch")try{   // the others are looked up beside it, unless set by hand
    const inp={};for(const x of ["ct","rtstruct","rtplan"])inp[x]=(FC.rows[x]||{}).wert;
    const n=await api("/api/fall/inputs",inp);
+   if(n.ptv&&(k==="rtstruct"||!FC.rows.ptv||FC.rows.ptv.quelle!=="gewaehlt"))FC.rows.ptv=n.ptv;
    for(const x of ["ct","rtstruct","rtplan","fraktionen","verschreibung"])if(n[x]&&n[x].wert!=null&&(!FC.rows[x]||FC.rows[x].wert==null||(x==="fraktionen"||x==="verschreibung")&&FC.rows[x].quelle!=="gewaehlt"))FC.rows[x]=Object.assign({pflicht:(FC.rows[x]||{}).pflicht},n[x])}catch(e){}}
  if(FC.rows.verschreibung)FC.rows.verschreibung.pflicht=!(FC.rows.rtstruct&&FC.rows.rtstruct.wert);
  fcRows()}
 async function fcSetRun(run){FC.rows.lauf.wert=run;FC.rows.lauf.quelle="gewaehlt";
- try{const n=await api("/api/fall/runinputs",{lauf:run});for(const k of Object.keys(n))FC.rows[k]=Object.assign({pflicht:(FC.rows[k]||{}).pflicht},n[k])}catch(e){}fcRows()}
+ try{const n=await api("/api/fall/runinputs",{lauf:run});const pv=FC.rows.ptv;
+  /* a PTV the user chose stays while the new run names the same structure set */
+  if(pv&&pv.quelle==="gewaehlt"&&FC.rows.rtstruct&&n.rtstruct&&n.rtstruct.wert===FC.rows.rtstruct.wert)delete n.ptv;
+  for(const k of Object.keys(n))FC.rows[k]=Object.assign({pflicht:(FC.rows[k]||{}).pflicht},n[k])}catch(e){}fcRows()}
 /* the server's folder chooser: click through folders, drives as C:, D:; a file row lists files too */
 async function fcBrowse(key,start,file){FC.brKey=key;FC.brFile=file;$("fcBrowse").hidden=false;await fcGo(start||"")}
 async function fcGo(p){try{const r=await api("/api/fall/browse",{pfad:p});FC.br=r;$("fcPath").textContent=r.anzeige||t("fc_drives");$("fcUp").disabled=!r.oben;

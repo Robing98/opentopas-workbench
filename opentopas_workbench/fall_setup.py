@@ -399,7 +399,39 @@ def input_rows(inp):
     rows = {k: {"wert": found[k][0], "quelle": found[k][1]} if k in found else {"wert": None, "quelle": "fehlt"}
             for k in RUN_INPUTS}
     rows.update(plan_rows(rows["rtplan"]["wert"]) if rows["rtplan"]["wert"] else plan_rows(None))
+    rows["ptv"] = ptv_row(rows["rtstruct"]["wert"])
     return rows
+
+
+# as tools/mrt_overlay/geometry.PTV_AID (the server has no numpy to import it; a test keeps the two equal).
+# helper structures that carry "PTV" in their name but are not the target: rings, optimisation and help volumes,
+# "Brain-PTV" (something minus the PTV), and names starting with z, the common mark of a planning aid
+PTV_AID = re.compile(r"ring|opt|hilf|help|avoid|dummy|eval|^z|[-\u2013]\s*ptv", re.I)
+
+
+def roi_names(rtstruct):
+    """The ROI names of an RT structure set, in file order; [] when it is not readable here."""
+    h = dicomkopf.read(letd.to_local(rtstruct or "")) if rtstruct else None
+    if not h or h.get("Modality") != "RTSTRUCT": return []
+    return [str(r["ROIName"]) for r in h.get("StructureSetROISequence") or [] if r.get("ROIName")]
+
+
+def ptv_proposal(names):
+    """The ROIs that may be the PTV, best first: names starting with PTV before others that contain it, helper
+    structures left out. The tool picks the largest by volume when the case names none (geometry.pick_ptv)."""
+    cand = [n for n in names if "ptv" in n.lower() and not PTV_AID.search(n.strip())]
+    return sorted(cand, key=lambda n: not n.strip().lower().startswith("ptv"))
+
+
+def ptv_row(rtstruct):
+    """The row PTV: the ROI names of the structure set to choose from (shown on this computer only, never stored
+    outside the case). One clear PTV is taken; several are a proposal the user confirms; none leaves it to the tool."""
+    names = roi_names(rtstruct)
+    cand = ptv_proposal(names)
+    row = {"wert": cand[0] if cand else None, "kandidaten": [{"wert": n, "info": ""} for n in names]}
+    # never required: without a choice the tool picks the largest PTV itself
+    row["quelle"] = "gefunden" if len(cand) == 1 else "vorschlag" if cand else "optional"
+    return row
 
 
 def plan_rows(rtplan):
@@ -650,6 +682,7 @@ def save_case(folder, fall_id, values):
                                     "verschreibung_gy_rbe": d["plan"].get("verschreibung_gy_rbe")}
             d["plan"] = None
         if lp.get("rtstruct"):
+            # the ROI name stays in the case (zone lokal) and reaches the tool as --ptv
             d["strukturen"] = {"datei": cp(lp["rtstruct"]), "sha256": fall.sha256(lp["rtstruct"]), "ptv": values.get("ptv") or None}
         ct = {"serie": "ct_plan", "modalitaet": "CT", "datum": None, "ordner": cp(values["ct"]), "nach_bezug": None, "guete": None}
         keep = [b for b in d.get("bilder", []) if b.get("modalitaet") not in ("CT", "PT")]
@@ -706,6 +739,7 @@ def letd_form(folder):
     return {"mrt": _get(folder, d, orte, "viewer", "bilder"), "run": fall.resolve(folder, run["ordner"], orte),
             "ct": fall.resolve(folder, ct["ordner"], orte) if ct else "",
             "rs": _get(folder, d, orte, "strukturen", "datei"),
+            "ptv": (d.get("strukturen") or {}).get("ptv") or "",
             "cache": _get(folder, d, orte, "viewer", "cache"), "view": _get(folder, d, orte, "viewer", "daten"),
             "rx": "" if rx is None else f"{rx:g}", "fx": str(plan.get("fraktionen") or ""),
             "out": _get(folder, d, orte, "einstellungen", "ausgabe"),

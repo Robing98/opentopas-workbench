@@ -323,3 +323,85 @@ def test_viewer_command_needs_paths_or_case():
     from mrt_overlay import cli
     with pytest.raises(SystemExit, match="--fall"):
         cli.main(["viewer", "only-a-cache"])
+
+
+def _square(z, lo=4, hi=13):
+    return np.array([[lo, lo, z], [hi, lo, z], [hi, hi, z], [lo, hi, z]], float)
+
+
+def test_contour_mask_fills_a_fine_grid_between_contour_planes():
+    # contours every 3 mm on a 1 mm grid: every slice between the first and last plane is filled, so the 3D shell is
+    # an outline on the inner slices and not the whole section (the stripes of Robin's first LETd page)
+    ref = grid(size=(20, 20, 20), spacing=(1.0, 1.0, 1.0))
+    m = geo.contour_mask([_square(z) for z in (3, 6, 9, 12)], ref)
+    filled = [k for k in range(20) if m[k].any()]
+    assert filled == list(range(2, 14))          # 3 - 1.5 .. 12 + 1.5, the ends reach half a gap
+    assert all(m[k].sum() == 81 for k in filled)
+    inner = ly.shell(m)[7]
+    assert inner.sum() == 4 * 8 and not inner[6:10, 6:10].any()
+
+
+def test_contour_mask_on_a_coarse_grid_never_cancels_planes():
+    # contours every 1.5 mm on a 3 mm grid: two planes fall near one slice; before, they cancelled by even-odd
+    ref = grid(size=(20, 20, 6), spacing=(1.0, 1.0, 3.0))
+    m = geo.contour_mask([_square(z) for z in np.arange(3.0, 12.1, 1.5)], ref)
+    assert [m[k].sum() for k in range(6)] == [0, 81, 81, 81, 81, 0]
+
+
+def test_contour_mask_keeps_a_hole_with_two_contours_on_each_plane():
+    ref = grid(size=(20, 20, 10), spacing=(1.0, 1.0, 1.0))
+    cs = []
+    for z in (2, 4, 6):
+        cs += [_square(z), _square(z, 7, 10)]
+    m = geo.contour_mask(cs, ref)
+    assert all(m[k].sum() == 81 - 9 for k in range(1, 8)) and not m[5, 8, 8]
+
+
+def _st(**rois):
+    return {n: (k, [_square(z, 0, s) for z in range(0, 10, 2)]) for n, (k, s) in rois.items()}
+
+
+def test_pick_ptv_leaves_out_planning_aids_and_takes_the_largest():
+    st = _st(**{"Brain-PTV": ("ORGAN", 90), "PTV_Ring": ("CONTROL", 80), "zPTV_opt": ("PTV", 70),
+                "PTV_54": ("PTV", 40), "PTV_60": ("PTV", 30), "Brain": ("ORGAN", 95)})
+    assert geo.pick_ptv(st) == "PTV_54"
+    assert geo.pick_ptv(st, "PTV_60") == "PTV_60"
+    assert geo.pick_ptv(_st(Brain=("ORGAN", 50))) is None
+
+
+def test_ptv_aids_are_the_same_in_the_server_and_the_tool():
+    from opentopas_workbench import fall_setup
+    assert fall_setup.PTV_AID.pattern == geo.PTV_AID.pattern and fall_setup.PTV_AID.flags == geo.PTV_AID.flags
+
+
+def test_ptv_check_warns_for_a_ptv_outside_the_dose():
+    dose = np.zeros((10, 10, 10)); dose[3:7, 3:7, 3:7] = 60.0
+    good = np.zeros(dose.shape, bool); good[4:6, 4:6, 4:6] = True
+    wrong = np.zeros(dose.shape, bool); wrong[:, :, :5] = True
+    assert ly.ptv_check(good, dose, 60.0) == {"anteil_iso50": 1.0, "ok": True, "voxel": 8}
+    c = ly.ptv_check(wrong, dose, 60.0)
+    assert not c["ok"] and c["anteil_iso50"] < 0.1
+    assert ly.ptv_check(np.zeros(dose.shape, bool), dose, 60.0)["ok"] is False
+
+
+def test_ptv_sheet_draws_three_views(tmp_path):
+    from PIL import Image
+    g = grid(size=(30, 30, 20), spacing=(1.0, 1.0, 2.0))
+    t1 = np.random.default_rng(3).random((20, 30, 30)) * 100
+    ptv = np.zeros(t1.shape, bool); ptv[8:12, 10:20, 10:20] = True
+    dose = np.where(ptv, 60.0, 0.0)
+    p = ly.ptv_sheet(t1, ptv, dose, 60.0, g, str(tmp_path / "k.png"), "t")
+    im = np.asarray(Image.open(p).convert("RGB"))
+    assert im.shape[0] == 24 + 300 + 12 and (im == (0, 230, 255)).all(-1).any()
+
+
+def test_contour_mask_keeps_two_parts_of_one_roi_apart():
+    ref = grid(size=(20, 20, 60), spacing=(1.0, 1.0, 1.0))
+    m = geo.contour_mask([_square(z) for z in list(range(0, 11, 2)) + list(range(50, 59, 2))], ref)
+    filled = [k for k in range(60) if m[k].any()]
+    assert filled == list(range(0, 12)) + list(range(49, 60))
+
+
+def test_ptv_check_without_dose_is_not_ok():
+    ptv = np.ones((4, 4, 4), bool)
+    assert ly.ptv_check(ptv, np.zeros(ptv.shape), 0.0)["ok"] is False

@@ -424,3 +424,31 @@ def test_a_cachef_found_without_the_viewers_log_is_only_a_proposal(computer):
     os.remove(str(c["view"] / "Analyse" / "Skripte" / "stand" / "cacheF_log.json"))
     r = fall_setup.scan(str(c["exam"]), str(c["ws"]), default_roots=[str(c["disk"])])["zeilen"]["cache"]
     assert (r["wert"], r["quelle"], r["pflicht"]) == (str(c["other"]), "vorschlag", True)
+
+
+def _rs(path, names):
+    dicomkopf.write(str(path), {"Modality": "RTSTRUCT", "SOPInstanceUID": "2.25.7", "FrameOfReferenceUID": "2.25.8",
+                                "StructureSetROISequence": [{"ROIName": n} for n in names]})
+    return str(path)
+
+
+@pytest.mark.parametrize("names,wert,quelle", [
+    (["Body", "Brain-PTV", "PTV", "PTV_Ring"], "PTV", "gefunden"),
+    (["Body", "CTV", "PTV_60", "Boost PTV", "zPTV"], "PTV_60", "vorschlag"),
+    (["Body", "Brain"], None, "optional"),
+])
+def test_ptv_row_offers_the_roi_names_and_proposes_the_ptv(tmp_path, names, wert, quelle):
+    r = fall_setup.ptv_row(_rs(tmp_path / "rs.dcm", names))
+    assert r["wert"] == wert and r["quelle"] == quelle and [c["wert"] for c in r["kandidaten"]] == names
+
+
+def test_ptv_row_without_a_structure_set_is_optional():
+    assert fall_setup.ptv_row(None) == {"wert": None, "kandidaten": [], "quelle": "optional"}
+
+
+def test_chosen_ptv_reaches_the_letd_form(demo):
+    assert fall_setup.letd_form(demo)["ptv"] == ""
+
+    def pick(d): d["strukturen"]["ptv"] = "PTV"
+    fall.update(demo, pick)
+    assert fall_setup.letd_form(demo)["ptv"] == "PTV"

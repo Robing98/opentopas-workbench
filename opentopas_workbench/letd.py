@@ -258,8 +258,17 @@ def result(out):
         with open(path, encoding="utf-8") as fh: info = json.load(fh)
     except (OSError, ValueError):
         return None
-    return {k: info.get(k) for k in ("registration", "exams", "look_list", "prescription_gy_rbe", "prescription_from",
-                                     "ptv", "margin", "hinweis")}
+    r = {k: info.get(k) for k in ("registration", "exams", "look_list", "prescription_gy_rbe", "prescription_from",
+                                  "ptv", "ptv_name", "ptv_check", "warnung", "margin", "hinweis")}
+    r["sheet"] = bool(sheet_path(out))
+    return r
+
+
+def sheet_path(out):
+    """The PTV check sheet of the run in OUT, or "" when there is none. Only that one PNG inside OUT."""
+    if not out: return ""
+    p = os.path.join(out, "viewer_grid", "kontrollblatt_ptv.png")
+    return p if os.path.isfile(p) else ""
 
 
 def find_page_html(start):

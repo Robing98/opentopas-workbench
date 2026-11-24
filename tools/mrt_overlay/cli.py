@@ -52,6 +52,9 @@ def _common(a, mri, ct, transform, quality, out):
     look, hit = ly.look_list(layers["letd"], layers["dose_rbe_1_1"], margin, rx, mri.GetSpacing())
     mk = ly.marks(layers, margin, rx, hit)
     os.makedirs(out, exist_ok=True)
+    # a sheet of an earlier run in this folder may show another ROI: it goes before this run decides on its own
+    old = os.path.join(out, "kontrollblatt_ptv.png")
+    if os.path.exists(old): os.remove(old)
     for k in ("letd", "dose_phys", "dose_rbe_1_1", "dose_rbe_bahn_linear"):
         if k in layers: sitk.WriteImage(geo.like(layers[k].astype(np.float32), mri), os.path.join(out, f"{k}.nii.gz"))
     sitk.WriteImage(geo.like(mk, mri), os.path.join(out, "marks.nii.gz"))
@@ -60,6 +63,21 @@ def _common(a, mri, ct, transform, quality, out):
             "registration": quality, "look_list": look,
             "hinweis": "Nur Anzeige, keine Diagnose. Deutung bei Neuroradiologie und Strahlentherapie. "
                        "Variable RBE nur Forschung, klinisch gilt 1,1."}
+    if ptv_name:
+        dose = layers["dose_rbe_1_1"]
+        # a prescription taken from the PTV's own median would pass any PTV: then the dose maximum is the reference
+        ref_gy = rx if rx_how == "angegeben" else float(dose.max())
+        chk = ly.ptv_check(layers["ptv"], dose, ref_gy)
+        chk["bezug"] = "Verschreibung" if rx_how == "angegeben" else "Dosismaximum"
+        info["ptv_check"] = chk
+        info["ptv_name"] = ptv_name     # the output lies in the zone lokal, as the RT structure set it names
+        if not chk["ok"]:
+            share = "-" if chk["anteil_iso50"] is None else f"{100 * chk['anteil_iso50']:.0f} %"
+            info["warnung"] = (f"PTV {ptv_name!r}: nur {share} innerhalb der 50-%-Isodose ({chk['bezug']}). "
+                               "Vermutlich die falsche Struktur: im Fall-Assistenten die Zeile PTV prüfen.")
+        info["sheet"] = ly.ptv_sheet(sitk.GetArrayFromImage(mri), layers["ptv"], dose, ref_gy, mri,
+                                     os.path.join(out, "kontrollblatt_ptv.png"),
+                                     "PTV (cyan) gegen 95-%-Isodose (orange); nur Anzeige")
     return layers, mk, info
 
 
@@ -97,6 +115,7 @@ def _viewer_from_case(a):
     a.ctframe = a.ctframe or (os.path.join(out, "ct_frame") if out else "")
     a.out = a.out or (os.path.join(out, "viewer_grid") if out else "")
     a.rtstruct = a.rtstruct or f["rs"] or None
+    a.ptv = a.ptv or f.get("ptv") or None
     if a.prescription is None and f["rx"]: a.prescription = float(f["rx"])
     a.viewer_data = a.viewer_data or f["view"] or None
     a.kennzahlen = a.kennzahlen or f["kz"] or None
