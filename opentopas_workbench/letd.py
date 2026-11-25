@@ -22,7 +22,17 @@ import time
 
 TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(os.path.dirname(TOOL_DIR), "tools", "mrt_overlay", "run.sh")
-VIEWER_DIR_DEFAULT = os.path.join(os.path.dirname(os.path.dirname(TOOL_DIR)), "timeline-viewer")   # a clone next to this one
+
+
+def viewer_default(repo):
+    """The Timeline Viewer's clone next to this repository. A worktree under CHECKOUT/.claude/worktrees/NAME has no
+    clone beside it: there the one next to the checkout counts, the same the checkout itself would use."""
+    parts = os.path.normpath(repo).split(os.sep)
+    if len(parts) >= 3 and parts[-3:-1] == [".claude", "worktrees"]: repo = os.sep.join(parts[:-3])
+    return os.path.join(os.path.dirname(repo), "timeline-viewer")
+
+
+VIEWER_DIR_DEFAULT = viewer_default(os.path.dirname(TOOL_DIR))
 LOG_NAME = "letd_lauf.log"
 STEPS = ("check", "export", "synthseg", "register", "exams", "write", "page")
 FIELDS = ("mrt", "run", "ct", "rs", "cache", "view", "rx", "fx", "out", "kz", "build", "synthseg")
@@ -49,8 +59,8 @@ def to_local(p):
 
 def to_windows(p):
     """/mnt/c/x -> C:\\x for a Windows program; other paths stay."""
-    m = re.match(r"^/mnt/([a-z])/(.*)$", p)
-    return f"{m.group(1).upper()}:\\" + m.group(2).replace("/", "\\") if m else p
+    m = re.match(r"^/mnt/([a-z])(?:/(.*))?$", p or "")
+    return f"{m.group(1).upper()}:\\" + (m.group(2) or "").replace("/", "\\") if m else p
 
 
 def in_public_zone(p, root=None):
@@ -65,6 +75,12 @@ def in_public_zone(p, root=None):
             if os.path.normcase(real) == os.path.normcase(pub) or os.path.normcase(real).startswith(os.path.normcase(pub) + os.sep):
                 return True
     return False
+
+
+def public_ok(form):
+    """A case marked public (the demo case, plan.oeffentlich in fall.json) may write into offen: its plan and images
+    are synthetic. Set only by the case start of fall_setup, never by the form."""
+    return form.get("oeffentlich") is True
 
 
 def _walk(top, depth=SEARCH_DEPTH, limit=SEARCH_LIMIT):
@@ -153,14 +169,14 @@ def check(form, root=None, viewer=None):
         if miss: need("cache", "missing", ", ".join(miss))
     if not p["view"]: need("view", "empty")
     elif not os.path.isdir(p["view"]): need("view", "not_found")
-    elif in_public_zone(p["view"], root): need("view", "public_zone")
+    elif in_public_zone(p["view"], root) and not public_ok(form): need("view", "public_zone")
     rx, fx = _num(f["rx"], float), _num(f["fx"], int)
     if f["rx"].strip() and rx is None: need("rx", "number")
     if not f["rx"].strip() and not p["rs"]: need("rx", "rx_or_rs")
     if fx is None: need("fx", "number")
     for k in ("out", "kz"):
         if not p[k]: need(k, "empty")
-        elif in_public_zone(p[k], root): need(k, "public_zone")
+        elif in_public_zone(p[k], root) and not public_ok(form): need(k, "public_zone")
     if p["kz"] and not p["kz"].lower().endswith(".json"): need("kz", "json")
     if f["build"] in ("1", "true", "True"):
         # named here: otherwise the page fails only after the whole run, which takes up to an hour
@@ -252,8 +268,17 @@ def result(out):
         with open(path, encoding="utf-8") as fh: info = json.load(fh)
     except (OSError, ValueError):
         return None
-    return {k: info.get(k) for k in ("registration", "exams", "look_list", "prescription_gy_rbe", "prescription_from",
-                                     "ptv", "margin", "hinweis")}
+    r = {k: info.get(k) for k in ("registration", "exams", "look_list", "prescription_gy_rbe", "prescription_from",
+                                  "ptv", "ptv_name", "ptv_check", "warnung", "margin", "hinweis")}
+    r["sheet"] = bool(sheet_path(out))
+    return r
+
+
+def sheet_path(out):
+    """The PTV check sheet of the run in OUT, or "" when there is none. Only that one PNG inside OUT."""
+    if not out: return ""
+    p = os.path.join(out, "viewer_grid", "kontrollblatt_ptv.png")
+    return p if os.path.isfile(p) else ""
 
 
 def find_page_html(start):
@@ -306,21 +331,25 @@ def start(form, on_end=None, viewer=None):
         args += [str(_num(f["rx"], float) or ""), str(_num(f["fx"], int)), out, to_local(f["kz"])]
         env = dict(os.environ, PYTHONUNBUFFERED="1")
         if not synthseg: env["SYNTHSEG"] = "none"
+        # a start from a case (fall_setup.letd_form) names its folder: the cli writes its results back into fall.json
+        if form.get("fall"): env["FALL"] = to_local(str(form["fall"]))
         t = threading.Thread(target=_run, args=(["bash", SCRIPT] + args, env, on_end), daemon=True)
         JOB["thread"] = t
     t.start()
     return status()
 
 
-def _spawn(cmd, log, env, cwd=None):
+def _spawn(cmd, log, env, cwd=None, job=None):
+    """Runs one process of a job and waits. `job` is JOB here; the PET run (pet_run.py) passes its own."""
+    job = JOB if job is None else job
     proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, env=env, cwd=cwd, start_new_session=True,
                             stdin=subprocess.DEVNULL)
     with LOCK:
-        JOB["proc"] = proc; stopped = JOB["stop"]
+        job["proc"] = proc; stopped = job["stop"]
     # a Stop between the start and this point found no process to end: end it here
     if stopped: _kill(proc)
     rc = proc.wait()
-    with LOCK: JOB["proc"] = None
+    with LOCK: job["proc"] = None
     return rc
 
 
@@ -354,12 +383,13 @@ def _kill(proc):
     except OSError: pass
 
 
-def stop():
+def stop(job=None):
     """Ends the run. True while a run is going, even between two of its processes: _spawn sees the flag."""
+    job = JOB if job is None else job
     with LOCK:
-        proc, t = JOB["proc"], JOB["thread"]
+        proc, t = job["proc"], job["thread"]
         running = t is not None and t.is_alive()
-        if running: JOB["stop"] = True
+        if running: job["stop"] = True
     if proc is not None: _kill(proc)
     return running
 
@@ -374,11 +404,11 @@ def restore(last):
     with LOCK: JOB["state"] = st
 
 
-def open_html():
+def open_html(job=None):
     """Opens the Verlauf.html of the last run in the default browser; under WSL the Windows one, which cannot read a
     WSL path. Only that file: the page does not choose what is opened. explorer.exe, not cmd /c start, because cmd
     reads & ^ % in a folder name as commands."""
-    st = JOB["state"] or {}
+    st = (JOB if job is None else job)["state"] or {}
     p = st.get("html") or ""
     if not p or not os.path.isfile(p) or not p.lower().endswith(".html"): raise ValueError("not_found")
     if shutil.which("explorer.exe") and p.startswith("/mnt/"):

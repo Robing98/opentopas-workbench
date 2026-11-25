@@ -263,3 +263,145 @@ def test_synthseg_call_is_robust_on_cpu_and_cropped(tmp_path):
     argv = json.load(open(seen))
     assert argv[:4] == ["--i", "in.nii.gz", "--o", "out.nii.gz"]
     assert "--robust" in argv and "--cpu" in argv and argv[argv.index("--crop") + 1] == "192"
+
+
+def _case(folder, d_change):
+    sys.path.insert(0, ROOT)
+    from opentopas_workbench import fall
+    fall.update(str(folder), d_change, create="test-fall")
+    return fall
+
+
+def test_viewer_command_from_case_file(head, tmp_path):
+    """--fall: every path from fall.json, the export done when ct_frame is missing, and the registration of each
+    exam and the viewer result written back, so that fall_check sees the result as current."""
+    from mrt_overlay import cli
+    ct, mri, labels, truth = head
+    case = tmp_path / "fall"
+    cache = case / "cacheF"; os.makedirs(cache)
+    sitk.WriteImage(mri, str(cache / "ref_t1.nii.gz"))
+    a = sitk.GetArrayFromImage(mri)
+    a8 = np.clip(a / a.max() * 255, 0, 255).astype(np.uint8)
+    np.save(cache / "t1_2020-01-01.npy", a8)
+    np.save(cache / "t1_2020-06-01.npy", np.roll(a8, 3, axis=2))
+    json.dump({"t1 2020-01-01": {"series": "x", "kind": "3D", "native": [1.0, 1.0, 1.0]},
+               "t1 2020-06-01": {"series": "z", "kind": "3D", "native": [1.0, 1.0, 1.0]}}, open(cache / "log.json", "w"))
+    os.makedirs(case / "ct")
+    sitk.WriteImage(ct, str(case / "ct" / "ct.nii.gz"))
+    sitk.WriteImage(labels, str(tmp_path / "seg.nii.gz"))
+    ph.write_run(str(case / "run"), centre_mm=(-11.0, 4.0, 24.0), sigma_mm=8.0)
+
+    def setup(d):
+        d["bilder"] = [{"serie": "ct_plan", "modalitaet": "CT", "datum": None, "ordner": "ct/ct.nii.gz",
+                        "nach_bezug": None, "guete": None}]
+        d["bezug"] = {"serie": "ct_plan"}
+        d["plan_ohne_datei"] = {"fraktionen": 1, "verschreibung_gy_rbe": 2.2}
+        d["viewer"] = {"cache": "cacheF", "daten": "data"}
+        d["einstellungen"] = {"ausgabe": "out", "synthseg": False, "lauf": "mc-1"}
+        d["ergebnisse"]["workbench"] = [{"id": "mc-1", "ordner": "run", "eingaben": {}, "dateien": {}}]
+    fall = _case(case, setup)
+    cli.main(["viewer", "--fall", str(case), "--labels", str(tmp_path / "seg.nii.gz")])
+    assert os.path.isfile(case / "out" / "ct_frame" / "dose_rbe_1_1.nii.gz")
+    info = json.load(open(case / "out" / "viewer_grid" / "overlay.json"))
+    assert info["prescription_gy_rbe"] == 2.2 and info["margin"] is True
+    d = fall.load(str(case))
+    mr = {b["serie"]: b for b in d["bilder"] if b["modalitaet"] == "MR"}
+    assert set(mr) == {"t1_2020-01-01", "t1_2020-06-01"}
+    assert mr["t1_2020-01-01"]["guete"]["ok"] is True and mr["t1_2020-06-01"]["guete"]["ok"] is False
+    assert mr["t1_2020-01-01"]["nach_bezug"] == "out/viewer_grid/mri_to_ct.tfm" and mr["t1_2020-01-01"]["datum"] == "2020-01-01"
+    (v,) = d["ergebnisse"]["viewer"]
+    assert v["aus"] == ["mc-1"] and v["ordner"] == "data" and set(v["dateien"]) == {"letd_all.js", "marks_all.js", "letd.json"}
+    rep = fall.check(str(case))
+    assert {(r["art"], r["zustand"]) for r in rep["ergebnisse"]} >= {("viewer", "aktuell")}
+    assert "bilder t1_2020-06-01: Registrierung nicht ok" in rep["warnungen"]
+    # a viewer file changed after the run: the result is broken, and fall_check says so
+    open(case / "data" / "letd.json", "a").write(" ")
+    assert ("viewer", "kaputt") in {(r["art"], r["zustand"]) for r in fall.check(str(case))["ergebnisse"]}
+
+
+def test_viewer_command_needs_paths_or_case():
+    from mrt_overlay import cli
+    with pytest.raises(SystemExit, match="--fall"):
+        cli.main(["viewer", "only-a-cache"])
+
+
+def _square(z, lo=4, hi=13):
+    return np.array([[lo, lo, z], [hi, lo, z], [hi, hi, z], [lo, hi, z]], float)
+
+
+def test_contour_mask_fills_a_fine_grid_between_contour_planes():
+    # contours every 3 mm on a 1 mm grid: every slice between the first and last plane is filled, so the 3D shell is
+    # an outline on the inner slices and not the whole section (the stripes of Robin's first LETd page)
+    ref = grid(size=(20, 20, 20), spacing=(1.0, 1.0, 1.0))
+    m = geo.contour_mask([_square(z) for z in (3, 6, 9, 12)], ref)
+    filled = [k for k in range(20) if m[k].any()]
+    assert filled == list(range(2, 14))          # 3 - 1.5 .. 12 + 1.5, the ends reach half a gap
+    assert all(m[k].sum() == 81 for k in filled)
+    inner = ly.shell(m)[7]
+    assert inner.sum() == 4 * 8 and not inner[6:10, 6:10].any()
+
+
+def test_contour_mask_on_a_coarse_grid_never_cancels_planes():
+    # contours every 1.5 mm on a 3 mm grid: two planes fall near one slice; before, they cancelled by even-odd
+    ref = grid(size=(20, 20, 6), spacing=(1.0, 1.0, 3.0))
+    m = geo.contour_mask([_square(z) for z in np.arange(3.0, 12.1, 1.5)], ref)
+    assert [m[k].sum() for k in range(6)] == [0, 81, 81, 81, 81, 0]
+
+
+def test_contour_mask_keeps_a_hole_with_two_contours_on_each_plane():
+    ref = grid(size=(20, 20, 10), spacing=(1.0, 1.0, 1.0))
+    cs = []
+    for z in (2, 4, 6):
+        cs += [_square(z), _square(z, 7, 10)]
+    m = geo.contour_mask(cs, ref)
+    assert all(m[k].sum() == 81 - 9 for k in range(1, 8)) and not m[5, 8, 8]
+
+
+def _st(**rois):
+    return {n: (k, [_square(z, 0, s) for z in range(0, 10, 2)]) for n, (k, s) in rois.items()}
+
+
+def test_pick_ptv_leaves_out_planning_aids_and_takes_the_largest():
+    st = _st(**{"Brain-PTV": ("ORGAN", 90), "PTV_Ring": ("CONTROL", 80), "zPTV_opt": ("PTV", 70),
+                "PTV_54": ("PTV", 40), "PTV_60": ("PTV", 30), "Brain": ("ORGAN", 95)})
+    assert geo.pick_ptv(st) == "PTV_54"
+    assert geo.pick_ptv(st, "PTV_60") == "PTV_60"
+    assert geo.pick_ptv(_st(Brain=("ORGAN", 50))) is None
+
+
+def test_ptv_aids_are_the_same_in_the_server_and_the_tool():
+    from opentopas_workbench import fall_setup
+    assert fall_setup.PTV_AID.pattern == geo.PTV_AID.pattern and fall_setup.PTV_AID.flags == geo.PTV_AID.flags
+
+
+def test_ptv_check_warns_for_a_ptv_outside_the_dose():
+    dose = np.zeros((10, 10, 10)); dose[3:7, 3:7, 3:7] = 60.0
+    good = np.zeros(dose.shape, bool); good[4:6, 4:6, 4:6] = True
+    wrong = np.zeros(dose.shape, bool); wrong[:, :, :5] = True
+    assert ly.ptv_check(good, dose, 60.0) == {"anteil_iso50": 1.0, "ok": True, "voxel": 8}
+    c = ly.ptv_check(wrong, dose, 60.0)
+    assert not c["ok"] and c["anteil_iso50"] < 0.1
+    assert ly.ptv_check(np.zeros(dose.shape, bool), dose, 60.0)["ok"] is False
+
+
+def test_ptv_sheet_draws_three_views(tmp_path):
+    from PIL import Image
+    g = grid(size=(30, 30, 20), spacing=(1.0, 1.0, 2.0))
+    t1 = np.random.default_rng(3).random((20, 30, 30)) * 100
+    ptv = np.zeros(t1.shape, bool); ptv[8:12, 10:20, 10:20] = True
+    dose = np.where(ptv, 60.0, 0.0)
+    p = ly.ptv_sheet(t1, ptv, dose, 60.0, g, str(tmp_path / "k.png"), "t")
+    im = np.asarray(Image.open(p).convert("RGB"))
+    assert im.shape[0] == 24 + 300 + 12 and (im == (0, 230, 255)).all(-1).any()
+
+
+def test_contour_mask_keeps_two_parts_of_one_roi_apart():
+    ref = grid(size=(20, 20, 60), spacing=(1.0, 1.0, 1.0))
+    m = geo.contour_mask([_square(z) for z in list(range(0, 11, 2)) + list(range(50, 59, 2))], ref)
+    filled = [k for k in range(60) if m[k].any()]
+    assert filled == list(range(0, 12)) + list(range(49, 60))
+
+
+def test_ptv_check_without_dose_is_not_ok():
+    ptv = np.ones((4, 4, 4), bool)
+    assert ly.ptv_check(ptv, np.zeros(ptv.shape), 0.0)["ok"] is False

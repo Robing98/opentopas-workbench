@@ -1,5 +1,6 @@
 """Images in patient space (DICOM LPS, mm) as SimpleITK images: RT Dose, CT series, RT Structure Set masks."""
 import os
+import re
 
 import numpy as np
 import SimpleITK as sitk
@@ -109,15 +110,33 @@ def _fill_polygon(mask2d, poly_ij):
 def contour_mask(contours_mm, ref):
     """Mask on the grid of `ref` from closed planar contours, each an (n, 3) array in patient mm.
 
-    A contour fills the slice nearest to its plane. Holes and islands follow the even-odd rule within a slice."""
+    Contours on one plane form that plane's section (holes and islands by the even-odd rule). Every grid slice takes
+    the section of the nearest plane within half the gap to the next plane, so a grid finer than the contour spacing
+    is filled between the planes, and on a coarser grid planes never cancel each other. The reach is never more than
+    half the usual plane gap: a wide gap between two parts of one ROI (two metastases) stays empty. A plane reaches
+    at least half a slice, so a single plane fills its nearest slice (both, when it lies exactly between two)."""
     nx, ny, nz = ref.GetSize()
     out = np.zeros((nz, ny, nx), bool)
+    planes = {}
     for pts in contours_mm:
+        if len(pts) < 3: continue
         idx = np.array([ref.TransformPhysicalPointToContinuousIndex([float(v) for v in p]) for p in pts])
-        k = int(round(float(np.median(idx[:, 2]))))
-        if 0 <= k < nz and len(idx) >= 3:
-            layer = np.zeros((ny, nx), bool)
-            out[k] ^= _fill_polygon(layer, idx[:, :2])
+        kz = round(float(np.median(idx[:, 2])), 3)
+        sec = planes.get(kz)
+        if sec is None: sec = planes[kz] = np.zeros((ny, nx), bool)
+        sec ^= _fill_polygon(np.zeros((ny, nx), bool), idx[:, :2])
+    if not planes: return out
+    ks = np.array(sorted(planes))
+    gaps = np.diff(ks)
+    end = float(np.median(gaps)) if len(gaps) else 1.0
+    # reach of each plane towards lower and higher slices: half the gap to its neighbour, at the ends half the usual gap
+    lo = np.minimum(np.concatenate([[end], gaps]), end) / 2
+    hi = np.minimum(np.concatenate([gaps, [end]]), end) / 2
+    for k in range(nz):
+        i = int(np.argmin(np.abs(ks - k)))
+        d = k - ks[i]
+        if (d < 0 and -d <= max(lo[i], 0.5)) or (d >= 0 and d <= max(hi[i], 0.5)):
+            out[k] = planes[float(ks[i])]
     return out
 
 
@@ -137,14 +156,33 @@ def read_rtstruct(path):
     return out
 
 
+# planning aids that carry "PTV" in their name: rings, optimisation and help volumes, "Brain-PTV" (minus the PTV), z...
+PTV_AID = re.compile(r"ring|opt|hilf|help|avoid|dummy|eval|^z|[-\u2013]\s*ptv", re.I)
+
+
+def roi_volume_ml(polys):
+    """Rough volume of a ROI from its planar contours, only for ranking: the area of every contour per plane (a hole
+    adds instead of cutting) times the median gap between planes."""
+    if not polys: return 0.0
+    area = {}
+    for p in polys:
+        x, y = p[:, 0], p[:, 1]
+        z = round(float(np.median(p[:, 2])), 2)
+        area[z] = area.get(z, 0.0) + 0.5 * abs(float(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))))
+    zs = sorted(area)
+    gap = float(np.median(np.diff(zs))) if len(zs) > 1 else 1.0
+    return sum(area.values()) * gap / 1000.0
+
+
 def pick_ptv(structures, name=None):
-    """The PTV to draw: the named ROI, else the one ROI of type PTV or with PTV in its name (largest if several)."""
+    """The PTV to draw: the named ROI, else among the ROIs of type PTV or with PTV in their name, helper structures
+    left out, the largest by volume (the outer PTV when there are several dose levels)."""
     if name:
         if name not in structures: raise SystemExit(f"ROI {name!r} is not in the RT Structure Set")
         return name
-    cand = [n for n, (k, _) in structures.items() if k == "PTV" or "ptv" in n.lower()]
+    cand = [n for n, (k, _) in structures.items() if (k == "PTV" or "ptv" in n.lower()) and not PTV_AID.search(n.strip())]
     if not cand: return None
-    return max(cand, key=lambda n: sum(len(p) for p in structures[n][1]))
+    return max(cand, key=lambda n: roi_volume_ml(structures[n][1]))
 
 
 def brain_points(mask_img, step=4):
