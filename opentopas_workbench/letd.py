@@ -22,7 +22,17 @@ import time
 
 TOOL_DIR = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(os.path.dirname(TOOL_DIR), "tools", "mrt_overlay", "run.sh")
-VIEWER_DIR_DEFAULT = os.path.join(os.path.dirname(os.path.dirname(TOOL_DIR)), "timeline-viewer")   # a clone next to this one
+
+
+def viewer_default(repo):
+    """The Timeline Viewer's clone next to this repository. A worktree under CHECKOUT/.claude/worktrees/NAME has no
+    clone beside it: there the one next to the checkout counts, the same the checkout itself would use."""
+    parts = os.path.normpath(repo).split(os.sep)
+    if len(parts) >= 3 and parts[-3:-1] == [".claude", "worktrees"]: repo = os.sep.join(parts[:-3])
+    return os.path.join(os.path.dirname(repo), "timeline-viewer")
+
+
+VIEWER_DIR_DEFAULT = viewer_default(os.path.dirname(TOOL_DIR))
 LOG_NAME = "letd_lauf.log"
 STEPS = ("check", "export", "synthseg", "register", "exams", "write", "page")
 FIELDS = ("mrt", "run", "ct", "rs", "cache", "view", "rx", "fx", "out", "kz", "build", "synthseg")

@@ -326,7 +326,13 @@ def test_derive_and_check_over_http(srv, ws):
 def test_default_viewer_is_a_clone_next_to_the_workbench(monkeypatch):
     monkeypatch.undo()
     repo = os.path.dirname(os.path.dirname(os.path.abspath(letd.__file__)))
-    assert letd.VIEWER_DIR_DEFAULT == os.path.join(os.path.dirname(repo), "timeline-viewer")
+    assert letd.VIEWER_DIR_DEFAULT == letd.viewer_default(repo)
+    assert letd.viewer_default(os.path.join("/x", "dev", "wb")) == os.path.join("/x", "dev", "timeline-viewer")
+
+
+def test_default_viewer_of_a_worktree_is_the_one_next_to_the_checkout():
+    wt = os.path.join("/x", "dev", "wb", ".claude", "worktrees", "task-1")
+    assert letd.viewer_default(wt) == os.path.join("/x", "dev", "timeline-viewer")
 
 
 def test_page_command_takes_windows_python_only_when_it_reaches_every_path(monkeypatch):
